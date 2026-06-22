@@ -41,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 个股分析历史成功保存后会从最终报告 best-effort 提取 `DecisionSignal` 决策信号，复用现有信号去重、计划质量计算和脱敏契约。
 - [文档] 新增个股分析报告优化设计文档（docs/report-optimization-design.md），规划长线产业链/供应链投研、贝叶斯概率框架（先验/Edge/后验/仓位）、中美平行竞争链与自反思记录系统，作为后续分阶段实现的真源。
 
+- [新功能] 新增「郑希投研分析」对话框（侧栏 /zhengxi）：基于郑希公开观点语料、投资方法与真实基金数据的可溯源投研问答，数据迁移自 zhengxi-views 知识库（MIT，公开内容）。
+- [新功能] 郑希专属 Agent executor（独立 ToolRegistry + 郑希 system prompt 注入 method/scorecard/诚实红线），3 个工具（语料检索/基金数据/六维评分），复用问股的 run_agent_loop/LLMToolAdapter/SSE/会话持久化基建，不污染问股工具集。
+- [新功能] 郑希会话用 `zhengxi:` 前缀隔离（复用 storage 的 session_prefix 过滤，后端零 schema 改动）；前端 chat store 工厂化（createAgentChatStore）支持问股与郑希各自独立实例，问股行为零回归。
+- [测试] 新增郑希数据完整性校验（scripts/check_zhengxi_data.py）与检索召回验证（scripts/check_zhengxi_retrieval.py，15 条溯源黄金集 + 主题同义词扩展表）。
+- [文档] 新增郑希投研专题文档（docs/zhengxi-research.md），说明能力边界、诚实红线、数据时效与后续版本规划。
+
 ## [3.22.0] - 2026-06-13
 
 ### 发布亮点

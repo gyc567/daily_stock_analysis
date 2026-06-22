@@ -53,7 +53,9 @@ env/
 .cursorrules
 
 # 数据和日志
-/data/
+/data/*
+# 例外:郑希投研静态知识库(语料/方法/评分卡/基金快照,功能必需,来自 zhengxi-views MIT)
+!/data/fund_manager_views/
 /.llm_usage_hmac_secret
 **/.llm_usage_hmac_secret
 logs/

@@ -394,3 +394,43 @@ def _build_orchestrator(config, registry, llm_adapter, skill_manager, *, technic
 
 # Keep legacy alias so any external callers using the old name still work.
 build_executor = build_agent_executor
+
+
+def build_zhengxi_executor(config=None):
+    """构建郑希投研分析专属 Executor。
+
+    与问股 :func:`build_agent_executor` 完全隔离：构造**独立** ToolRegistry
+    实例（只注册郑希 3 个工具，不污染问股全局缓存的工具集），复用
+    :class:`LLMToolAdapter` 多渠道基建，返回
+    :class:`src.agent.zhengxi_executor.ZhengxiExecutor`。
+    """
+    if config is None:
+        from src.config import get_config
+        config = get_config()
+
+    from src.agent.llm_adapter import LLMToolAdapter
+    from src.agent.tools.registry import ToolRegistry
+    from src.agent.tools.zhengxi_tools import ALL_ZHENGXI_TOOLS
+    from src.agent.zhengxi_executor import ZhengxiExecutor
+
+    registry = ToolRegistry()
+    for tool in ALL_ZHENGXI_TOOLS:
+        registry.register(tool)
+    logger.info("[AgentFactory] Zhengxi ToolRegistry built (%d tools)", len(registry))
+
+    llm_adapter = LLMToolAdapter(config)
+
+    return ZhengxiExecutor(
+        tool_registry=registry,
+        llm_adapter=llm_adapter,
+        max_steps=_coerce_config_int(
+            getattr(config, "agent_max_steps", AGENT_MAX_STEPS_DEFAULT),
+            AGENT_MAX_STEPS_DEFAULT,
+            field_name="agent_max_steps",
+        ),
+        timeout_seconds=_coerce_config_int(
+            getattr(config, "agent_orchestrator_timeout_s", 0),
+            0,
+            field_name="agent_orchestrator_timeout_s",
+        ),
+    )

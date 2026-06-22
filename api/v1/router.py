@@ -25,6 +25,7 @@ from api.v1.endpoints import (
     stocks,
     system_config,
     usage,
+    zhengxi,
 )
 
 # 创建 v1 版本主路由。
@@ -41,6 +42,12 @@ router.include_router(
     agent.router,
     prefix="/agent",
     tags=["Agent"]
+)
+
+router.include_router(
+    zhengxi.router,
+    prefix="/zhengxi",
+    tags=["Zhengxi"]
 )
 
 router.include_router(

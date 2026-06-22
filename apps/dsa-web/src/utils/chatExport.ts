@@ -2,8 +2,10 @@ import type { Message } from '../stores/agentChatStore';
 
 /**
  * Format chat messages as Markdown for export.
+ *
+ * `title` 控制文档一级标题（默认"问股会话"），供不同对话页复用。
  */
-export function formatSessionAsMarkdown(messages: Message[]): string {
+export function formatSessionAsMarkdown(messages: Message[], title = '问股会话'): string {
   const now = new Date();
   const timeStr = now.toLocaleString('zh-CN', {
     year: 'numeric',
@@ -14,7 +16,7 @@ export function formatSessionAsMarkdown(messages: Message[]): string {
   });
 
   const lines: string[] = [
-    '# 问股会话',
+    `# ${title}`,
     '',
     `生成时间: ${timeStr}`,
     '',
@@ -38,15 +40,17 @@ export function formatSessionAsMarkdown(messages: Message[]): string {
 /**
  * Trigger browser download of session as .md file.
  * Revokes object URL after download to prevent memory leak.
+ *
+ * `titlePrefix` 控制文件名前缀（默认"问股会话"）。
  */
-export function downloadSession(messages: Message[]): void {
-  const content = formatSessionAsMarkdown(messages);
+export function downloadSession(messages: Message[], titlePrefix = '问股会话'): void {
+  const content = formatSessionAsMarkdown(messages, titlePrefix);
   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
   const pad = (n: number) => n.toString().padStart(2, '0');
   const timeStr = pad(now.getHours()) + pad(now.getMinutes());
-  const filename = `问股会话_${dateStr}_${timeStr}.md`;
+  const filename = `${titlePrefix}_${dateStr}_${timeStr}.md`;
 
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

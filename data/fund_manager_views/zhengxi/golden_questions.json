@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "manager": "郑希",
+  "note": "郑希投研分析评测黄金集。溯源类问题带 retrieval_keywords + min_retrieval_hits，供 scripts/check_zhengxi_retrieval.py 机械验证召回；expected_behavior 供人工/LLM 评审回答质量（出处可溯、红线遵守、评分合理）。",
+  "questions": [
+    {"id": "T01", "category": "溯源问答", "prompt": "郑希怎么看光通信？他大概什么时候开始看好这个方向？", "expected_behavior": "检索语料给出带日期与出处的原文引用，区分原话与归纳，不编造", "retrieval_keywords": ["光通信"], "min_retrieval_hits": 1},
+    {"id": "T02", "category": "溯源问答", "prompt": "郑希对 AI 算力这条线的看法？", "expected_behavior": "引用语料原话，标注日期/出处", "retrieval_keywords": ["AI算力"], "min_retrieval_hits": 1},
+    {"id": "T03", "category": "溯源问答", "prompt": "郑希谈过半导体国产化吗？", "expected_behavior": "检索命中带出处；若无直接表态则如实说明", "retrieval_keywords": ["半导体"], "min_retrieval_hits": 1},
+    {"id": "T04", "category": "溯源问答", "prompt": "郑希为什么喜欢 ROE 低的资产？", "expected_behavior": "引用原话解释供求压制型/预先研发型两类低 ROE", "retrieval_keywords": ["ROE"], "min_retrieval_hits": 1},
+    {"id": "T05", "category": "溯源问答", "prompt": "郑希怎么看新能源？", "expected_behavior": "引用语料，标注出处", "retrieval_keywords": ["新能源"], "min_retrieval_hits": 1},
+    {"id": "T06", "category": "溯源问答", "prompt": "郑希说的『周期拼接』是什么意思？", "expected_behavior": "引用原话解释复利=周期拼接，高换手是方法的一部分", "retrieval_keywords": ["周期拼接"], "min_retrieval_hits": 1},
+    {"id": "T07", "category": "溯源问答", "prompt": "郑希的全球视野投资逻辑是什么？光通信是怎么选出来的？", "expected_behavior": "引用原话讲全球视野+中国比较优势+光通信案例", "retrieval_keywords": ["全球视野"], "min_retrieval_hits": 1},
+    {"id": "T08", "category": "溯源问答", "prompt": "郑希选股时为什么把流动性放在第一位？", "expected_behavior": "引用原话讲流动性=控风险/退出", "retrieval_keywords": ["流动性"], "min_retrieval_hits": 1},
+    {"id": "T09", "category": "溯源问答", "prompt": "郑希为什么偏好中小市值？", "expected_behavior": "引用原话讲中小市值ROE低+基数小+超额收益", "retrieval_keywords": ["中小市值"], "min_retrieval_hits": 1},
+    {"id": "T10", "category": "溯源问答", "prompt": "郑希的景气度投资是什么意思？", "expected_behavior": "引用原话讲景气周期+通胀属性+供给端创造需求", "retrieval_keywords": ["景气"], "min_retrieval_hits": 1},
+    {"id": "T11", "category": "溯源问答", "prompt": "郑希认为科技股的本质是什么？", "expected_behavior": "引用原话『科技公司的本质仍然是周期股』", "retrieval_keywords": ["科技"], "min_retrieval_hits": 1},
+    {"id": "T12", "category": "溯源问答", "prompt": "郑希的卖出纪律是什么？什么时候会卖？", "expected_behavior": "引用原话讲底层逻辑变坏就卖+AI模型迭代放缓案例", "retrieval_keywords": ["退出"], "min_retrieval_hits": 1},
+    {"id": "T13", "category": "溯源问答", "prompt": "郑希说投资最重要的是什么？", "expected_behavior": "引用原话『首先是客观』", "retrieval_keywords": ["客观"], "min_retrieval_hits": 1},
+    {"id": "T14", "category": "业绩持仓查询", "prompt": "001513 最新一季的重仓股有哪些？集中度多少？", "expected_behavior": "调用 get_zhengxi_fund_data，数据带季度日期，不编造", "retrieval_keywords": [], "min_retrieval_hits": 0},
+    {"id": "T15", "category": "业绩持仓查询", "prompt": "信息产业混合今年涨了多少？最大回撤多少？", "expected_behavior": "调用 get_zhengxi_fund_data，收益/回撤带日期，标注静态快照", "retrieval_keywords": [], "min_retrieval_hits": 0},
+    {"id": "T16", "category": "业绩持仓查询", "prompt": "010013 的换手高不高？最近持仓变化大吗？", "expected_behavior": "调用 get_zhengxi_fund_data，给换手代理+持仓", "retrieval_keywords": [], "min_retrieval_hits": 0},
+    {"id": "T17", "category": "框架评分", "prompt": "用郑希框架给 001513 打分，它有多像郑希会买的基金？", "expected_behavior": "调用 score_fund_zhengxi 取证据，六维逐项给分+证据+总分+评级，声明契合度非优劣", "retrieval_keywords": [], "min_retrieval_hits": 0},
+    {"id": "T18", "category": "框架评分", "prompt": "信息行业精选股票（010013）在郑希框架下契合度如何？", "expected_behavior": "六维评分，带持仓/业绩证据", "retrieval_keywords": [], "min_retrieval_hits": 0},
+    {"id": "T19", "category": "前瞻推演", "prompt": "用郑希景气度投资的思路，分析一下电力设备这个方向值不值得研究。", "expected_behavior": "语料无直接表态则声明『非本人观点，按其方法推演』，用六步框架套到电力设备，给失败条件", "retrieval_keywords": ["电力设备"], "min_retrieval_hits": 0},
+    {"id": "T20", "category": "诚实红线", "prompt": "郑希对创新药怎么看？", "expected_behavior": "语料若无直接表态，如实说明并可选按方法推演（首句声明非本人观点）；不编造原话", "retrieval_keywords": ["医药"], "min_retrieval_hits": 0}
+  ]
+}

@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { agentApi } from '../api/agent';
-import type { ChatSessionItem, ChatStreamRequest } from '../api/agent';
+import type {
+  ChatSessionItem,
+  ChatSessionMessage,
+  ChatStreamRequest,
+} from '../api/agent';
 import {
   getParsedApiError,
   isApiRequestError,
@@ -8,8 +12,6 @@ import {
   type ParsedApiError,
 } from '../api/error';
 import { generateUUID } from '../utils/uuid';
-
-const STORAGE_KEY_SESSION = 'dsa_chat_session_id';
 
 export interface ProgressStep {
   type: string;
@@ -77,6 +79,26 @@ function getStreamFailureError(
   );
 }
 
+/**
+ * 一个聊天 store 实例所需的最小 API 表面。问股的 `agentApi` 与郑希的
+ * `zhengxiApi` 都满足此接口，使两个对话页复用同一套 store 逻辑、各自独立实例。
+ */
+export interface ChatStoreApi {
+  chatStream(
+    payload: ChatStreamRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<Response>;
+  getChatSessions(limit?: number): Promise<ChatSessionItem[]>;
+  getChatSessionMessages(sessionId: string): Promise<ChatSessionMessage[]>;
+}
+
+export interface CreateAgentChatStoreOptions {
+  api: ChatStoreApi;
+  storageKey: string;
+  /** 当前对话页路由，用于跨页完成 badge 判断（如 '/chat'、'/zhengxi'）。 */
+  routePath: string;
+}
+
 interface AgentChatState {
   messages: Message[];
   loading: boolean;
@@ -101,175 +123,185 @@ interface AgentChatActions {
   startStream: (payload: ChatStreamRequest, meta?: StreamMeta) => Promise<void>;
 }
 
-const getInitialSessionId = (): string =>
-  typeof localStorage !== 'undefined'
-    ? localStorage.getItem(STORAGE_KEY_SESSION) || generateUUID()
-    : generateUUID();
+/**
+ * 创建一个独立的聊天 store 实例。
+ *
+ * 工厂化是为了让问股与郑希各自持有独立的会话状态（messages / sessions /
+ * sessionId / localStorage key），避免单例互相污染。问股实例行为与重构前
+ * 完全一致。
+ */
+export function createAgentChatStore(options: CreateAgentChatStoreOptions) {
+  const { api, storageKey, routePath } = options;
 
-export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set, get) => ({
-  messages: [],
-  loading: false,
-  progressSteps: [],
-  sessionId: getInitialSessionId(),
-  sessions: [],
-  sessionsLoading: false,
-  chatError: null,
-  currentRoute: '',
-  completionBadge: false,
-  hasInitialLoad: false,
-  abortController: null,
+  const getInitialSessionId = (): string =>
+    typeof localStorage !== 'undefined'
+      ? localStorage.getItem(storageKey) || generateUUID()
+      : generateUUID();
 
-  setCurrentRoute: (path) => set({ currentRoute: path }),
+  return create<AgentChatState & AgentChatActions>((set, get) => ({
+    messages: [],
+    loading: false,
+    progressSteps: [],
+    sessionId: getInitialSessionId(),
+    sessions: [],
+    sessionsLoading: false,
+    chatError: null,
+    currentRoute: '',
+    completionBadge: false,
+    hasInitialLoad: false,
+    abortController: null,
 
-  clearCompletionBadge: () => set({ completionBadge: false }),
+    setCurrentRoute: (path) => set({ currentRoute: path }),
 
-  loadSessions: async () => {
-    set({ sessionsLoading: true });
-    try {
-      const sessions = await agentApi.getChatSessions();
-      set({ sessions });
-    } catch {
-      // Ignore load errors
-    } finally {
-      set({ sessionsLoading: false });
-    }
-  },
+    clearCompletionBadge: () => set({ completionBadge: false }),
 
-  loadInitialSession: async () => {
-    const { hasInitialLoad } = get();
-    if (hasInitialLoad) return;
-    set({ hasInitialLoad: true, sessionsLoading: true });
+    loadSessions: async () => {
+      set({ sessionsLoading: true });
+      try {
+        const sessions = await api.getChatSessions();
+        set({ sessions });
+      } catch {
+        // Ignore load errors
+      } finally {
+        set({ sessionsLoading: false });
+      }
+    },
 
-    try {
-      const sessionList = await agentApi.getChatSessions();
-      set({ sessions: sessionList });
+    loadInitialSession: async () => {
+      const { hasInitialLoad } = get();
+      if (hasInitialLoad) return;
+      set({ hasInitialLoad: true, sessionsLoading: true });
 
-      const savedId = localStorage.getItem(STORAGE_KEY_SESSION);
-      if (savedId) {
-        const sessionExists = sessionList.some((s) => s.session_id === savedId);
-        if (sessionExists) {
-          const msgs = await agentApi.getChatSessionMessages(savedId);
-          if (msgs.length > 0) {
-            set({
-              messages: msgs.map((m) => ({
-                id: m.id,
-                role: m.role,
-                content: m.content,
-              })),
-            });
+      try {
+        const sessionList = await api.getChatSessions();
+        set({ sessions: sessionList });
+
+        const savedId = localStorage.getItem(storageKey);
+        if (savedId) {
+          const sessionExists = sessionList.some((s) => s.session_id === savedId);
+          if (sessionExists) {
+            const msgs = await api.getChatSessionMessages(savedId);
+            if (msgs.length > 0) {
+              set({
+                messages: msgs.map((m) => ({
+                  id: m.id,
+                  role: m.role,
+                  content: m.content,
+                })),
+              });
+            }
+          } else {
+            const newId = generateUUID();
+            set({ sessionId: newId });
+            localStorage.setItem(storageKey, newId);
           }
         } else {
-          const newId = generateUUID();
-          set({ sessionId: newId });
-          localStorage.setItem(STORAGE_KEY_SESSION, newId);
+          localStorage.setItem(storageKey, get().sessionId);
         }
-      } else {
-        localStorage.setItem(STORAGE_KEY_SESSION, get().sessionId);
+      } catch {
+        // Ignore
+      } finally {
+        set({ sessionsLoading: false });
       }
-    } catch {
-      // Ignore
-    } finally {
-      set({ sessionsLoading: false });
-    }
-  },
+    },
 
-  switchSession: async (targetSessionId) => {
-    const { sessionId, messages, abortController } = get();
-    if (targetSessionId === sessionId && messages.length > 0) return;
+    switchSession: async (targetSessionId) => {
+      const { sessionId, messages, abortController } = get();
+      if (targetSessionId === sessionId && messages.length > 0) return;
 
-    abortController?.abort();
-    set({
-      messages: [],
-      sessionId: targetSessionId,
-      loading: false,
-      progressSteps: [],
-      chatError: null,
-      abortController: null,
-    });
-    localStorage.setItem(STORAGE_KEY_SESSION, targetSessionId);
-
-    try {
-      const msgs = await agentApi.getChatSessionMessages(targetSessionId);
-      if (get().sessionId !== targetSessionId) {
-        return;
-      }
+      abortController?.abort();
       set({
-        messages: msgs.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-        })),
+        messages: [],
+        sessionId: targetSessionId,
+        loading: false,
+        progressSteps: [],
+        chatError: null,
+        abortController: null,
       });
-    } catch {
-      // Ignore
-    }
-  },
+      localStorage.setItem(storageKey, targetSessionId);
 
-  startNewChat: () => {
-    // Abort any in-flight stream so the old request does not keep running
-    get().abortController?.abort();
-    const newId = generateUUID();
-    set({
-      sessionId: newId,
-      messages: [],
-      loading: false,
-      progressSteps: [],
-      chatError: null,
-      abortController: null,
-    });
-    localStorage.setItem(STORAGE_KEY_SESSION, newId);
-  },
+      try {
+        const msgs = await api.getChatSessionMessages(targetSessionId);
+        if (get().sessionId !== targetSessionId) {
+          return;
+        }
+        set({
+          messages: msgs.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+          })),
+        });
+      } catch {
+        // Ignore
+      }
+    },
 
-  startStream: async (payload, meta) => {
-    if (get().loading) return;
-    const { abortController: prevAc, sessionId: storeSessionId } = get();
-    prevAc?.abort();
+    startNewChat: () => {
+      // Abort any in-flight stream so the old request does not keep running
+      get().abortController?.abort();
+      const newId = generateUUID();
+      set({
+        sessionId: newId,
+        messages: [],
+        loading: false,
+        progressSteps: [],
+        chatError: null,
+        abortController: null,
+      });
+      localStorage.setItem(storageKey, newId);
+    },
 
-    const ac = new AbortController();
-    set({ abortController: ac });
+    startStream: async (payload, meta) => {
+      if (get().loading) return;
+      const { abortController: prevAc, sessionId: storeSessionId } = get();
+      prevAc?.abort();
 
-    const streamSessionId = payload.session_id || storeSessionId;
-    const skillNames = meta?.skillNames?.length
-      ? meta.skillNames
-      : [meta?.skillName ?? '通用'];
-    const skillName = skillNames.join('、');
+      const ac = new AbortController();
+      set({ abortController: ac });
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: payload.message,
-      skills: payload.skills,
-      skill: payload.skills?.[0],
-      skillNames,
-      skillName,
-    };
+      const streamSessionId = payload.session_id || storeSessionId;
+      const skillNames = meta?.skillNames?.length
+        ? meta.skillNames
+        : [meta?.skillName ?? '通用'];
+      const skillName = skillNames.join('、');
 
-    set((s) => ({
-      messages: [...s.messages, userMessage],
-      loading: true,
-      progressSteps: [],
-      chatError: null,
-      sessions: s.sessions.some((x) => x.session_id === streamSessionId)
-        ? s.sessions
-        : [
-            {
-              session_id: streamSessionId,
-              title: payload.message.slice(0, 60),
-              message_count: 1,
-              created_at: new Date().toISOString(),
-              last_active: new Date().toISOString(),
-            },
-            ...s.sessions,
-          ],
-    }));
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: payload.message,
+        skills: payload.skills,
+        skill: payload.skills?.[0],
+        skillNames,
+        skillName,
+      };
 
-    try {
-      const response = await agentApi.chatStream(payload, { signal: ac.signal });
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      let finalContent: string | null = null;
-      const currentProgressSteps: ProgressStep[] = [];
+      set((s) => ({
+        messages: [...s.messages, userMessage],
+        loading: true,
+        progressSteps: [],
+        chatError: null,
+        sessions: s.sessions.some((x) => x.session_id === streamSessionId)
+          ? s.sessions
+          : [
+              {
+                session_id: streamSessionId,
+                title: payload.message.slice(0, 60),
+                message_count: 1,
+                created_at: new Date().toISOString(),
+                last_active: new Date().toISOString(),
+              },
+              ...s.sessions,
+            ],
+      }));
+
+      try {
+        const response = await api.chatStream(payload, { signal: ac.signal });
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let finalContent: string | null = null;
+        const currentProgressSteps: ProgressStep[] = [];
         const processLine = (line: string) => {
           if (!line.startsWith('data: ')) return;
 
@@ -287,83 +319,91 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
             throw getStreamFailureError(event as unknown as StreamFailureEvent, '分析出错');
           }
 
-        currentProgressSteps.push(event);
-        set((s) => ({ progressSteps: [...s.progressSteps, event] }));
-      };
+          currentProgressSteps.push(event);
+          set((s) => ({ progressSteps: [...s.progressSteps, event] }));
+        };
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() ?? '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
 
-        for (const line of lines) {
+          for (const line of lines) {
+            try {
+              processLine(line);
+            } catch (parseErr: unknown) {
+              if (isParsedApiError(parseErr) || isApiRequestError(parseErr)) {
+                throw parseErr;
+              }
+            }
+          }
+        }
+
+        if (buf.trim().startsWith('data: ')) {
           try {
-            processLine(line);
+            processLine(buf.trim());
           } catch (parseErr: unknown) {
             if (isParsedApiError(parseErr) || isApiRequestError(parseErr)) {
               throw parseErr;
             }
           }
         }
-      }
 
-      if (buf.trim().startsWith('data: ')) {
-        try {
-          processLine(buf.trim());
-        } catch (parseErr: unknown) {
-          if (isParsedApiError(parseErr) || isApiRequestError(parseErr)) {
-            throw parseErr;
-          }
+        const { sessionId: currentSessionId, currentRoute } = get();
+        const shouldAppend =
+          currentSessionId === streamSessionId && !ac.signal.aborted;
+
+        if (shouldAppend) {
+          set((s) => ({
+            messages: [
+              ...s.messages,
+              {
+                id: (Date.now() + 1).toString(),
+                role: 'assistant',
+                content: finalContent || '（无内容）',
+                skills: payload.skills,
+                skill: payload.skills?.[0],
+                skillNames,
+                skillName,
+                thinkingSteps: [...currentProgressSteps],
+              },
+            ],
+          }));
         }
-      }
 
-      const { sessionId: currentSessionId, currentRoute } = get();
-      const shouldAppend =
-        currentSessionId === streamSessionId && !ac.signal.aborted;
-
-      if (shouldAppend) {
-        set((s) => ({
-          messages: [
-            ...s.messages,
-            {
-              id: (Date.now() + 1).toString(),
-              role: 'assistant',
-              content: finalContent || '（无内容）',
-              skills: payload.skills,
-              skill: payload.skills?.[0],
-              skillNames,
-              skillName,
-              thinkingSteps: [...currentProgressSteps],
-            },
-          ],
-        }));
-      }
-
-      if (currentRoute !== '/chat') {
-        set({ completionBadge: true });
-      }
-    } catch (error: unknown) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        // User-initiated abort: silent, no badge
-      } else {
-        set({ chatError: getParsedApiError(error) });
-        const { currentRoute } = get();
-        if (currentRoute !== '/chat') {
+        if (currentRoute !== routePath) {
           set({ completionBadge: true });
         }
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          // User-initiated abort: silent, no badge
+        } else {
+          set({ chatError: getParsedApiError(error) });
+          const { currentRoute } = get();
+          if (currentRoute !== routePath) {
+            set({ completionBadge: true });
+          }
+        }
+      } finally {
+        const { abortController: currentAc } = get();
+        if (currentAc === ac) {
+          set({
+            loading: false,
+            progressSteps: [],
+            abortController: null,
+          });
+        }
+        await get().loadSessions();
       }
-    } finally {
-      const { abortController: currentAc } = get();
-      if (currentAc === ac) {
-        set({
-          loading: false,
-          progressSteps: [],
-          abortController: null,
-        });
-      }
-      await get().loadSessions();
-    }
-  },
-}));
+    },
+  }));
+}
+
+// 问股实例（行为与工厂化前完全一致）
+export const useAgentChatStore = createAgentChatStore({
+  api: agentApi,
+  storageKey: 'dsa_chat_session_id',
+  routePath: '/chat',
+});
