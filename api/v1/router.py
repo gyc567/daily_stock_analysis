@@ -26,6 +26,7 @@ from api.v1.endpoints import (
     system_config,
     usage,
     zhengxi,
+    supply_chain,
 )
 
 # 创建 v1 版本主路由。
@@ -48,6 +49,12 @@ router.include_router(
     zhengxi.router,
     prefix="/zhengxi",
     tags=["Zhengxi"]
+)
+
+router.include_router(
+    supply_chain.router,
+    prefix="/supply-chain",
+    tags=["SupplyChain"]
 )
 
 router.include_router(

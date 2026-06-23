@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 修复供应链与郑希对话刷新页面后当前会话内容丢失的问题：后端会话列表返回的 session_id 去掉命名空间前缀（与前端 localStorage 无前缀格式对齐），GET/DELETE 会话端点兼容无前缀 id；问股不加前缀不受影响。
 - [修复] AlphaSift 热点题材刷新在 EastMoney 瞬断且无缓存时返回友好空态，并让桌面更新保留 AlphaSift 热点缓存。
 - [修复] 问股从历史报告进入后的追问会持续携带当前标的，切回或重载已有会话时可从历史消息恢复基础当前标的，并由后端阻断未明确切换时的错误股票工具调用、交易所片段和指标缩写误路由。
 - [修复] 自选股加入和删除按等价股票代码匹配港股及大小写美股变体，避免 `00700`、`HK00700`、`00700.HK` 或 `aapl`、`AAPL` 被误判为不同标的。
@@ -46,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 郑希会话用 `zhengxi:` 前缀隔离（复用 storage 的 session_prefix 过滤，后端零 schema 改动）；前端 chat store 工厂化（createAgentChatStore）支持问股与郑希各自独立实例，问股行为零回归。
 - [测试] 新增郑希数据完整性校验（scripts/check_zhengxi_data.py）与检索召回验证（scripts/check_zhengxi_retrieval.py，15 条溯源黄金集 + 主题同义词扩展表）。
 - [文档] 新增郑希投研专题文档（docs/zhengxi-research.md），说明能力边界、诚实红线、数据时效与后续版本规划。
+
+- [新功能] 新增「供应链分析」对话框（侧栏 /supply-chain）：基于 Serenity 9 步深度调研方法（市场故事→系统变化→产业链层级→稀缺卡点→候选公司→证据→证伪），集成自 serenity-skill（MIT）。
+- [新功能] SupplyChainExecutor（复用问股 get_tool_registry 工具集 + 1 个供应链瓶颈打分工具；max_steps=40 / wall_clock=1200s 长任务，硬编码不碰问股/郑希的 config.agent_max_steps）；system prompt 注入 SKILL.md + 核心 5 个 references + 合规红线 + 工具结果摘要约束（防 context 爆炸）。
+- [新功能] 供应链会话用 `supply_chain:` 前缀隔离（与问股/郑希 3 路不串台）；前端第 3 个 chat store 实例（createAgentChatStore 工厂化，问股/郑希零回归）。
+- [改进] serenity_scorecard 纯函数通过 importlib 直接加载（无需 subprocess），包装为 score_supply_chain_bottleneck 工具（8 因子 + 8 惩罚，满分 100，含非法值容错）。
+- [测试] 供应链数据完整性校验（scripts/check_supply_chain_data.py）+ scorecard/工具 pytest；serenity-skill 自带 6 个 evals 可作回归（3/5/6 廉价 CI smoke，1 离线完整评估）。
+- [文档] 新增供应链分析专题文档（docs/supply-chain-research.md），含 nginx 部署超时配置（proxy_read_timeout 960s）与成本预期（50–200K tokens/次）。
 
 ## [3.22.0] - 2026-06-13
 

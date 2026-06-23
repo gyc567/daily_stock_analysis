@@ -56,6 +56,8 @@ env/
 /data/*
 # 例外:郑希投研静态知识库(语料/方法/评分卡/基金快照,功能必需,来自 zhengxi-views MIT)
 !/data/fund_manager_views/
+# 例外:供应链分析 skill(Serenity 方法论+评分卡+示例,来自 serenity-skill MIT)
+!/data/supply_chain_skill/
 /.llm_usage_hmac_secret
 **/.llm_usage_hmac_secret
 logs/
@@ -89,3 +91,4 @@ static/
 /apps/dsa-desktop/dist/
 /apps/dsa-desktop/node_modules/
 docs/specs/
+.gstack/

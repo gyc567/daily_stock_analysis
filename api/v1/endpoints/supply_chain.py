@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-"""郑希投研分析 API endpoints.
+"""供应链分析 API endpoints（Serenity 方法）。
 
-对话 + 会话管理，与问股 ``/agent`` 端点结构一致但完全隔离：
+与问股 /agent、郑希 /zhengxi 结构一致但完全隔离：
 
-- Executor 走 :func:`src.agent.factory.build_zhengxi_executor`
-  （独立工具集 + 郑希专属 system prompt，不碰问股全局工具）。
-- 会话 ``session_id`` 统一用 ``zhengxi:`` 前缀，列表查询固定按 ``zhengxi``
+- Executor 走 :func:`src.agent.factory.build_supply_chain_executor`
+  （复用问股工具集 + 供应链打分工具，``max_steps=40``、``wall_clock=1200s`` 长任务）。
+- 会话 ``session_id`` 统一 ``supply_chain:`` 前缀，列表查询按 ``supply_chain``
   前缀过滤，复用 :func:`src.storage.get_chat_sessions` 的 ``session_prefix``
-  机制——**后端存储零 schema 改动**，与问股会话天然隔离。
+  机制——后端存储零 schema 改动，与问股/郑希会话天然隔离。
+- SSE event 间隔 timeout 拉到 **1200s**（9 步深度调研 5–15 分钟，审计 F9 修正）。
 """
 
 import asyncio
@@ -21,40 +22,43 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.config import get_config
+# 复用问股的工具中文显示名（供应链共享问股工具集），再叠加供应链专属工具
+from api.v1.endpoints.agent import TOOL_DISPLAY_NAMES as _AGENT_TOOL_DISPLAY_NAMES
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 郑希工具中文显示名（SSE 进度事件用）
-ZHENGXI_TOOL_DISPLAY_NAMES: Dict[str, str] = {
-    "search_zhengxi_views": "检索郑希观点",
-    "get_zhengxi_fund_data": "查询基金数据",
-    "score_fund_zhengxi": "郑希框架评分",
+SUPPLY_CHAIN_TOOL_DISPLAY_NAMES: Dict[str, str] = {
+    **_AGENT_TOOL_DISPLAY_NAMES,
+    "score_supply_chain_bottleneck": "瓶颈打分",
 }
 
-# 会话命名空间前缀，与问股会话隔离（复用 storage 的 session_prefix 过滤）
-SESSION_PREFIX = "zhengxi"
+# 会话命名空间前缀（与问股/郑希会话隔离）
+SESSION_PREFIX = "supply_chain"
+
+# SSE event 间隔 timeout（9 步深度调研长任务，审计 F9 修正：1200s）
+STREAM_QUEUE_TIMEOUT_S = 1200.0
 
 
 # ============================================================
 # Schemas
 # ============================================================
 
-class ZhengxiChatRequest(BaseModel):
+class SupplyChainChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
 
 
-class ZhengxiChatResponse(BaseModel):
+class SupplyChainChatResponse(BaseModel):
     success: bool
     content: str
     session_id: str
     error: Optional[str] = None
 
 
-class ZhengxiSessionItem(BaseModel):
+class SupplyChainSessionItem(BaseModel):
     session_id: str
     title: str
     message_count: int
@@ -62,11 +66,11 @@ class ZhengxiSessionItem(BaseModel):
     last_active: Optional[str] = None
 
 
-class ZhengxiSessionsResponse(BaseModel):
-    sessions: List[ZhengxiSessionItem]
+class SupplyChainSessionsResponse(BaseModel):
+    sessions: List[SupplyChainSessionItem]
 
 
-class ZhengxiSessionMessagesResponse(BaseModel):
+class SupplyChainSessionMessagesResponse(BaseModel):
     session_id: str
     messages: List[Dict[str, Any]]
 
@@ -75,18 +79,18 @@ class ZhengxiSessionMessagesResponse(BaseModel):
 # Helpers
 # ============================================================
 
-def _ensure_zhengxi_session_id(session_id: Optional[str]) -> str:
-    """保证 session_id 带 ``zhengxi:`` 前缀，缺失则生成。"""
+def _ensure_supply_chain_session_id(session_id: Optional[str]) -> str:
+    """保证 session_id 带 ``supply_chain:`` 前缀，缺失则生成。"""
     prefix = f"{SESSION_PREFIX}:"
     if session_id and session_id.startswith(prefix):
         return session_id
-    if session_id:  # 前端传了裸 id，补前缀
+    if session_id:
         return f"{prefix}{session_id}"
     return f"{prefix}{uuid.uuid4()}"
 
 
-def _strip_zhengxi_prefix(session_id: str) -> str:
-    """去掉 ``zhengxi:`` 前缀。
+def _strip_supply_chain_prefix(session_id: str) -> str:
+    """去掉 ``supply_chain:`` 前缀。
 
     list/get 端点返回 session_id 前调用，使前端拿到的 id 与 localStorage 存储
     的无前缀格式一致——避免刷新后 ``loadInitialSession`` 因前缀不匹配而无法恢复会话。
@@ -96,8 +100,8 @@ def _strip_zhengxi_prefix(session_id: str) -> str:
 
 
 def _build_executor(config):
-    from src.agent.factory import build_zhengxi_executor
-    return build_zhengxi_executor(config)
+    from src.agent.factory import build_supply_chain_executor
+    return build_supply_chain_executor(config)
 
 
 def _require_agent(config) -> None:
@@ -109,12 +113,12 @@ def _require_agent(config) -> None:
 # Chat (non-streaming)
 # ============================================================
 
-@router.post("/chat", response_model=ZhengxiChatResponse)
-async def zhengxi_chat(request: ZhengxiChatRequest):
-    """郑希投研问答（非流式）。"""
+@router.post("/chat", response_model=SupplyChainChatResponse)
+async def supply_chain_chat(request: SupplyChainChatRequest):
+    """供应链深度调研（非流式）。"""
     config = get_config()
     _require_agent(config)
-    session_id = _ensure_zhengxi_session_id(request.session_id)
+    session_id = _ensure_supply_chain_session_id(request.session_id)
     try:
         executor = _build_executor(config)
         loop = asyncio.get_running_loop()
@@ -126,14 +130,14 @@ async def zhengxi_chat(request: ZhengxiChatRequest):
                 context=request.context,
             ),
         )
-        return ZhengxiChatResponse(
+        return SupplyChainChatResponse(
             success=result.success,
             content=result.content,
             session_id=session_id,
             error=result.error,
         )
     except Exception as exc:
-        logger.error("Zhengxi chat API failed: %s", exc, exc_info=True)
+        logger.error("Supply chain chat API failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -142,22 +146,23 @@ async def zhengxi_chat(request: ZhengxiChatRequest):
 # ============================================================
 
 @router.post("/chat/stream")
-async def zhengxi_chat_stream(request: ZhengxiChatRequest):
-    """郑希投研问答 SSE 流式端点。
+async def supply_chain_chat_stream(request: SupplyChainChatRequest):
+    """供应链深度调研 SSE 流式端点（9 步 pipeline，预计 5–15 分钟）。
 
-    SSE 事件 ``type`` 与问股一致：``thinking`` / ``tool_start`` / ``tool_done``
-    / ``generating`` / ``done`` / ``error``。
+    SSE 事件 ``type`` 与问股/郑希一致：``thinking`` / ``tool_start`` /
+    ``tool_done`` / ``generating`` / ``done`` / ``error``。event 间隔
+    timeout 拉到 1200s 以容纳长任务。
     """
     config = get_config()
     _require_agent(config)
-    session_id = _ensure_zhengxi_session_id(request.session_id)
+    session_id = _ensure_supply_chain_session_id(request.session_id)
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
     def progress_callback(event: dict):
         if event.get("type") in ("tool_start", "tool_done"):
             tool = event.get("tool", "")
-            event["display_name"] = ZHENGXI_TOOL_DISPLAY_NAMES.get(tool, tool)
+            event["display_name"] = SUPPLY_CHAIN_TOOL_DISPLAY_NAMES.get(tool, tool)
         asyncio.run_coroutine_threadsafe(queue.put(event), loop)
 
     def run_sync():
@@ -181,7 +186,7 @@ async def zhengxi_chat_stream(request: ZhengxiChatRequest):
                 loop,
             )
         except Exception as exc:
-            logger.error("Zhengxi stream error: %s", exc, exc_info=True)
+            logger.error("Supply chain stream error: %s", exc, exc_info=True)
             asyncio.run_coroutine_threadsafe(
                 queue.put({"type": "error", "message": str(exc)}),
                 loop,
@@ -192,10 +197,10 @@ async def zhengxi_chat_stream(request: ZhengxiChatRequest):
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=300.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=STREAM_QUEUE_TIMEOUT_S)
                 except asyncio.TimeoutError:
                     yield "data: " + json.dumps(
-                        {"type": "error", "message": "分析超时"}, ensure_ascii=False
+                        {"type": "error", "message": "深度调研超时"}, ensure_ascii=False
                     ) + "\n\n"
                     break
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -207,28 +212,28 @@ async def zhengxi_chat_stream(request: ZhengxiChatRequest):
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             except Exception as exc:
-                logger.debug("zhengxi executor cleanup error (ignored): %s", exc)
+                logger.debug("supply chain executor cleanup error (ignored): %s", exc)
 
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
+            "X-Accel-Buffering": "no",  # nginx 关缓冲，配合 proxy_read_timeout
             "Connection": "keep-alive",
         },
     )
 
 
 # ============================================================
-# Session CRUD（会话隔离：固定 zhengxi 前缀）
+# Session CRUD（会话隔离：固定 supply_chain 前缀）
 # ============================================================
 
-@router.get("/chat/sessions", response_model=ZhengxiSessionsResponse)
-async def list_zhengxi_sessions(limit: int = 50):
-    """郑希会话列表（固定按 ``zhengxi`` 前缀过滤，与问股隔离）。
+@router.get("/chat/sessions", response_model=SupplyChainSessionsResponse)
+async def list_supply_chain_sessions(limit: int = 50):
+    """供应链会话列表（固定按 ``supply_chain`` 前缀过滤，与问股/郑希隔离）。
 
-    返回的 session_id 去除 ``zhengxi:`` 前缀，与前端 localStorage 的无前缀
+    返回的 session_id 去除 ``supply_chain:`` 前缀，与前端 localStorage 的无前缀
     格式保持一致，确保刷新后 ``loadInitialSession`` 能正确恢复当前会话。
     """
     from src.storage import get_db
@@ -237,31 +242,31 @@ async def list_zhengxi_sessions(limit: int = 50):
         session_prefix=SESSION_PREFIX,
     )
     for s in sessions:
-        s["session_id"] = _strip_zhengxi_prefix(s["session_id"])
-    return ZhengxiSessionsResponse(sessions=sessions)
+        s["session_id"] = _strip_supply_chain_prefix(s["session_id"])
+    return SupplyChainSessionsResponse(sessions=sessions)
 
 
-@router.get("/chat/sessions/{session_id}", response_model=ZhengxiSessionMessagesResponse)
-async def get_zhengxi_session_messages(session_id: str, limit: int = 100):
-    """获取单个郑希会话的完整消息。
+@router.get("/chat/sessions/{session_id}", response_model=SupplyChainSessionMessagesResponse)
+async def get_supply_chain_session_messages(session_id: str, limit: int = 100):
+    """获取单个供应链会话的完整消息。
 
     容忍前端传入无前缀 session_id（与 list 返回格式一致），内部统一补前缀后查 DB。
     """
     from src.storage import get_db
-    full_id = _ensure_zhengxi_session_id(session_id)
+    full_id = _ensure_supply_chain_session_id(session_id)
     messages = get_db().get_conversation_messages(full_id, limit=limit)
-    return ZhengxiSessionMessagesResponse(
-        session_id=_strip_zhengxi_prefix(full_id), messages=messages
+    return SupplyChainSessionMessagesResponse(
+        session_id=_strip_supply_chain_prefix(full_id), messages=messages
     )
 
 
 @router.delete("/chat/sessions/{session_id}")
-async def delete_zhengxi_session(session_id: str):
-    """删除指定郑希会话。
+async def delete_supply_chain_session(session_id: str):
+    """删除指定供应链会话。
 
     容忍前端传入无前缀 session_id，内部统一补前缀后删除。
     """
     from src.storage import get_db
-    full_id = _ensure_zhengxi_session_id(session_id)
+    full_id = _ensure_supply_chain_session_id(session_id)
     count = get_db().delete_conversation_session(full_id)
     return {"deleted": count}

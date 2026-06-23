@@ -112,6 +112,25 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
+      // SSE/流式端点：禁用超时 + 立即 flush，防止 Vite 代理缓冲截断长连接
+      '/api/v1/supply-chain/chat/stream': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        // timeout:0 禁用代理超时，容纳 1200s 深度调研长连接。
+        // 注意：vite 7.x 的 ProxyOptions 类型不含 flushInterval；SSE 的"立即 flush"
+        // 由响应头 X-Accel-Buffering: no（后端已设）+ nginx proxy_buffering off 负责，
+        // 不需要在 vite 代理层重复配置。
+        timeout: 0,
+      },
+      '/api/v1/zhengxi/chat/stream': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        // timeout:0 禁用代理超时，容纳 1200s 深度调研长连接。
+        // 注意：vite 7.x 的 ProxyOptions 类型不含 flushInterval；SSE 的"立即 flush"
+        // 由响应头 X-Accel-Buffering: no（后端已设）+ nginx proxy_buffering off 负责，
+        // 不需要在 vite 代理层重复配置。
+        timeout: 0,
+      },
     },
   },
   build: {

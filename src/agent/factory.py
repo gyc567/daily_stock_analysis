@@ -434,3 +434,46 @@ def build_zhengxi_executor(config=None):
             field_name="agent_orchestrator_timeout_s",
         ),
     )
+
+
+def build_supply_chain_executor(config=None):
+    """构建供应链分析（Serenity 方法）专属 Executor。
+
+    与问股/郑希的关键差异：
+    - **工具集**：复用问股 ``get_tool_registry()`` 的 18 个工具（行情/基本面/新闻/技术）
+      + 注册 1 个供应链打分工具，全部装入**独立 ToolRegistry 实例**（复制问股工具，
+      不在单例上 register，避免污染问股）。
+    - **长任务**：``max_steps=40`` / ``wall_clock=1200s``（9 步深度调研 5–15 分钟），
+      硬编码不读 ``config.agent_max_steps``（方案 A），问股/郑希仍用默认 10，互不影响。
+    """
+    if config is None:
+        from src.config import get_config
+        config = get_config()
+
+    from src.agent.llm_adapter import LLMToolAdapter
+    from src.agent.tools.registry import ToolRegistry
+    from src.agent.tools.supply_chain_tools import ALL_SUPPLY_CHAIN_TOOLS
+    from src.agent.supply_chain_executor import SupplyChainExecutor
+
+    # 复用问股工具集（新建 registry 实例，复制工具，不污染全局单例）+ 注册供应链工具
+    source_registry = get_tool_registry()
+    registry = ToolRegistry()
+    for tool in source_registry.list_tools():
+        registry.register(tool)
+    for tool in ALL_SUPPLY_CHAIN_TOOLS:
+        registry.register(tool)
+    logger.info(
+        "[AgentFactory] SupplyChain ToolRegistry built (%d tools = %d wengu + %d supply_chain)",
+        len(registry.list_tools()),
+        len(source_registry.list_tools()),
+        len(ALL_SUPPLY_CHAIN_TOOLS),
+    )
+
+    llm_adapter = LLMToolAdapter(config)
+
+    return SupplyChainExecutor(
+        tool_registry=registry,
+        llm_adapter=llm_adapter,
+        max_steps=40,
+        timeout_seconds=1200.0,
+    )
