@@ -99,8 +99,8 @@ def _prepare_weasyprint_env() -> None:
         return
     current = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "")
     existing = current.split(":") if current else []
-    for candidate in ("/opt/homebrew/lib", "/usr/local/lib"):
-        if not os.path.exists(os.path.join(candidate, "libgobject-2.0.0.dylib")):
+    for candidate in _BREW_LIB_CANDIDATES:
+        if not os.path.exists(os.path.join(candidate, _GOBJECT_MARKER)):
             continue
         if candidate in existing:
             return
@@ -130,7 +130,7 @@ def markdown_to_pdf_file(markdown_text: str, output_path: str) -> Optional[str]:
         os.makedirs(parent, exist_ok=True)
 
     # ---------- Semaphore 限流 ----------
-    acquired = _pdf_lock.acquire(timeout=5.0)
+    acquired = _pdf_lock.acquire(timeout=_PDF_LOCK_TIMEOUT)
     if not acquired:
         logger.warning("[md2pdf] Semaphore 获取超时（PDF 生成队列满），跳过")
         return None
