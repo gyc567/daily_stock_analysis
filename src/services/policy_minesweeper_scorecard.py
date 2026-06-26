@@ -256,8 +256,13 @@ def to_markdown(result: Dict[str, Any]) -> str:
                 source = str(ev.get("source", "")).strip()
                 date = str(ev.get("date", "")).strip()
                 strength = str(ev.get("strength", "")).strip()
+                url = str(ev.get("url", "")).strip()
                 if claim or source:
-                    lines.append(f"- [{strength}] {claim} — {source}（{date}）")
+                    line = f"- [{strength}] {claim} — {source}（{date}）"
+                    if url:
+                        # 公司公告原文地址（α 从检索工具结果捕获），作为可核验证据链接
+                        line += f" [原文]({url})"
+                    lines.append(line)
 
     lines.extend(["", "---", result.get("disclaimer", DISCLAIMER), ""])
     return "\n".join(lines)

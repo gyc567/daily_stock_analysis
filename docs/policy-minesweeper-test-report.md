@@ -8,23 +8,23 @@
 
 | 模块 | 语句数 | 未覆盖 | 覆盖率 |
 |------|-------|-------|-------|
-| `src/services/policy_minesweeper_scorecard.py` | 103 | 0 | **100%** |
+| `src/services/policy_minesweeper_scorecard.py` | 107 | 0 | **100%** |
 | `src/services/policy_minesweeper_service.py` | 164 | 0 | **100%** |
-| `src/agent/tools/policy_minesweeper_tools.py` | 17 | 0 | **100%** |
+| `src/agent/tools/policy_minesweeper_tools.py` | 51 | 0 | **100%** |
 | `src/agent/policy_minesweeper_executor.py` | 125 | 0 | **100%** |
-| **合计（可直接 scope 的 4 个模块）** | **409** | **0** | **100%** |
+| **合计（可直接 scope 的 4 个模块）** | **447** | **0** | **100%** |
 
 补充说明（共享文件，PM 新增部分由专属测试覆盖）：
 - `src/agent/factory.py::build_policy_minesweeper_executor`（新增函数，619 行起）— 100% 覆盖（`--cov` Missing 列中该函数行段零 miss）。
 - `src/storage.py` 新增 `PolicyMinesweeperReport` 模型 + 6 个 CRUD 方法 — 由 `test_policy_minesweeper_storage.py` 18 用例覆盖（真实内存 SQLite）。
 - `api/v1/endpoints/policy_minesweeper.py` — 由 `test_policy_minesweeper_api.py` 18 用例覆盖（TestClient，覆盖 SSE 400/success/error + CRUD 4 端点 + 路径穿越白名单）。该模块 `--cov` 测量受 conftest × 全量 endpoints 包导入的环境交互影响（numpy ImportError，非本模块代码问题），故以 18/18 测试通过率 + 所委托 service 100% 覆盖为保证。
 
-## 2. 后端测试用例清单（7 文件 / 147 用例，全过）
+## 2. 后端测试用例清单（7 文件 / 169 用例，全过）
 
 | 测试文件 | 用例数 | 覆盖重点 |
 |---------|-------|---------|
-| `test_policy_minesweeper_scorecard.py` | 31 | 六维加权 / 时间窗 blend / 5 档分级 / Markdown 渲染 / clamp / 防御分支 |
-| `test_policy_minesweeper_tools.py` | 13 | score 工具 handler 入参规整 / 返回契约 / 容错 / 异常 input_echo / 工具集元数据 |
+| `test_policy_minesweeper_scorecard.py` | 35 | 六维加权 / 时间窗 blend / 5 档分级 / Markdown 渲染（含证据原文地址 url 链接）/ clamp / 防御分支 |
+| `test_policy_minesweeper_tools.py` | 31 | score 工具 handler 入参规整 / 返回契约 / 容错 / 证据 url 端到端 / **公司公告检索（query 构造/provider 选择/源分类/handler 全路径 DI/元数据）** |
 | `test_policy_minesweeper_executor.py` | 23 | α/β 并行 / Ω 综合 / 各级降级（α 失败、β 失败、双失败、Ω 失败、Ω 空、全失败、loop 异常）/ 汇总 / 进度回调 / horizon 透传 / 纯函数辅助 |
 | `test_policy_minesweeper_service.py` | 37 | 生成闭环 / 评分 best-effort 解析 / id 唯一化 / 落盘 / 清理 / PDF 惰性 / 列表分页 / CRUD / 异常降级 |
 | `test_policy_minesweeper_storage.py` | 18 | save/get 闭环 / merge upsert / 列表分页过滤倒序 / to_dict / set_pdf_path / delete / prune / 异常分支 |
@@ -52,7 +52,7 @@
 
 - 后端改动**纯追加**：新增文件 + `storage.py`/`factory.py`/`config.py`/`.env.example` 仅追加 PM 专属内容（未编辑既有逻辑）。
 - `factory.py` 追加未破坏既有 builder：supply-chain e2e（factory 消费方）9/9 通过。
-- 全量后端套件中 PM 相关 147 用例全过；既有失败均为其他在研工作（P1–P3 scoring 缺 `runner` fixture、deep_research md2pdf `_font_registered` 等），非本模块引入。
+- 全量后端套件中 PM 相关 169 用例全过；既有失败均为其他在研工作（P1–P3 scoring 缺 `runner` fixture、deep_research md2pdf `_font_registered` 等），非本模块引入。
 - 全量前端套件 788 passed / 5 failed，5 个失败均为 pre-existing（`DeepResearchPage` 的 `title=` governance 违规、`SidebarNav` stale 断言、`ReportOverview` 3 项），本模块 14 用例全过且新页面 governance-clean（用 `aria-label`）。
 
 ## 6. 运行方式

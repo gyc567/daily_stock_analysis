@@ -46,12 +46,14 @@ class TestFactoryWiring:
         assert "get_chip_distribution" not in names
         assert "analyze_trend" not in names
 
-    def test_total_tool_count_is_six(self):
+    def test_total_tool_count_is_seven(self):
         executor = build_policy_minesweeper_executor()
         names = executor.tool_registry.list_names()
-        # 恰好 6 个（5 wengu + 1 score），去重后无重复注册
-        assert len(names) == 6
-        assert len(set(names)) == 6
+        # 恰好 7 个（5 wengu + score + search_company_announcements），去重后无重复注册
+        assert len(names) == 7
+        assert len(set(names)) == 7
+        # 两个 PM 专属工具都已注册
+        assert {"score_policy_minesweeper", "search_company_announcements"} <= set(names)
 
     def test_three_agent_bounds(self):
         executor = build_policy_minesweeper_executor()
