@@ -41,6 +41,18 @@
 - review 反馈后，不接受只在被指出的位置追加局部 patch。作者必须重新检查同一业务语义涉及的所有入口、配置、测试、文档、workflow 和用户可见路径。
 - 如果一个 PR 在多轮 review 后仍持续出现同类契约漂移、重复 fallback、测试绕过真实风险层、PR body 与实际 diff 不一致等问题，维护者可以要求关闭重做，而不是继续逐点 review。
 
+## 1.3 类型-契约-数据三层防御（强制）
+
+所有新增 / 修改代码必须遵守 `docs/type-contract-data-defense.md` 的「类型-契约-数据」三层防御体系（CI 门禁 `.github/workflows/type-safety.yml` 跑 pyright + mypy + 契约测试强制）。**每层只管自己该管的事，不重复校验**：
+
+- **Layer 1 类型（mypy / pyright）**：所有公开函数加类型注解；不用裸 `tuple` / `dict` / `list`（必须 `tuple[str, ...]` / `dict[str, int]`）；`Any` 尽量收窄，跨模块用 `TYPE_CHECKING` + 字符串注解避免循环 import。
+- **Layer 2 契约（icontract）**：复杂业务公式 / 跨字段不变式用 `@require` / `@ensure`；金融、风控、量化场景必加。契约测试放 `tests/test_*_contract.py`，CI 用 `ICONTRACT_SLOW=true` 跑。
+- **Layer 3 数据（Pydantic v2）**：API 请求 / 响应等 I/O 边界用 Pydantic + `model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)` + `Annotated[..., Field(...)]`（pattern / 范围）+ `Literal` 枚举；畸形输入解析期直接 422。
+
+**决策**：纯 CRUD / 只校验类型范围 → 只用 Pydantic；复杂业务公式 / 多参数依赖 → 加 icontract；API 入口 + 复杂逻辑 + 金融计算 → 三层全用。
+**陷阱**：Pydantic 已管的字段范围 icontract 不得再查（重复校验）；金融计算用 `Decimal`，不用 `float`。
+完整模式、配置与示例见 `docs/type-contract-data-defense.md`。
+
 ## 2. AI 协作资产治理
 
 - `AGENTS.md` 是仓库内 AI 协作规则的唯一真源。

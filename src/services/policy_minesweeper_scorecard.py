@@ -13,7 +13,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
+
+from icontract import ensure
 
 # ============================================================
 # 常量（单一真源）
@@ -56,8 +58,19 @@ HORIZON_BLEND: Dict[str, tuple[float, float]] = {
 W_DIM = 0.6    # 六维分析的权重
 W_BLEND = 0.4  # α/β 头条分（按 horizon 再权重）的权重
 
+class Tier(TypedDict):
+    """5 档等级条目（类型化，替代 Dict[str, Any]）。"""
+
+    key: str
+    lo: int
+    emoji: str
+    label: str
+    action: str
+    car: Dict[str, tuple[float, float]]
+
+
 # 5 档等级（按 lo 降序；lo 含义：final >= lo 即落入该档）
-TIERS: List[Dict[str, Any]] = [
+TIERS: List[Tier] = [
     {
         "key": "strong_bull", "lo": 70, "emoji": "🟢", "label": "强利好", "action": "加仓",
         "car": {"1d": (2.0, 5.0), "3d": (3.0, 8.0), "10d": (5.0, 12.0)},
@@ -117,7 +130,7 @@ def _coerce_optional(value: Any) -> Optional[float]:
     return _clamp_unit(number)
 
 
-def _tier_for(final: float) -> Dict[str, Any]:
+def _tier_for(final: float) -> Tier:
     """返回 final 命中的档位（TIERS 已按 lo 降序）。"""
     for tier in TIERS:
         if final >= tier["lo"]:
@@ -133,6 +146,7 @@ def _normalize_horizon(horizon: Any) -> str:
 # score
 # ============================================================
 
+@ensure(lambda result: -100 <= result["final"] <= 100, "综合分 final 必须落在 [-100, 100]")
 def score(payload: Dict[str, Any], horizon: str) -> Dict[str, Any]:
     """对一份排雷 payload 计算结构化评分结果。
 
