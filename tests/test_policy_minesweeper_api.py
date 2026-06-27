@@ -55,14 +55,20 @@ def _gen_events(*types_and_bodies):
 # ============================================================
 
 class TestGenerateStream:
-    def test_non_a_share_returns_400(self, client):
+    def test_malformed_code_returns_422(self, client):
+        # Layer 3：Pydantic pattern=^\d{6}$ 在解析期拦截非 6 位代码（AAPL）→ 422，不进 SSE
         resp = client.post("/generate/stream", json={"stock_code": "AAPL"})
-        assert resp.status_code == 400
-        assert "非 A 股" in resp.text
+        assert resp.status_code == 422
 
-    def test_empty_code_returns_400(self, client):
+    def test_empty_code_returns_422(self, client):
+        # Layer 3：空代码违反 pattern → 422
         resp = client.post("/generate/stream", json={"stock_code": ""})
-        assert resp.status_code == 400
+        assert resp.status_code == 422
+
+    def test_invalid_horizon_returns_422(self, client):
+        # Layer 3：horizon 是 Literal["short","medium","long"]，非法值 → 422
+        resp = client.post("/generate/stream", json={"stock_code": "600519", "horizon": "bogus"})
+        assert resp.status_code == 422
 
     def test_agent_disabled_returns_400(self, client, monkeypatch):
         monkeypatch.setattr("src.config.Config.is_agent_available", lambda self: False)

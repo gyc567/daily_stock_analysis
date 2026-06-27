@@ -18,11 +18,16 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from src.config import get_config
 from src.services.stock_code_utils import normalize_code
 from src.storage import get_db
+
+if TYPE_CHECKING:
+    # 仅类型检查期导入（from __future__ annotations 使运行期注解为字符串，无循环 import）
+    from src.agent.policy_minesweeper_executor import PolicyMinesweeperExecutor
+    from src.storage import PolicyMinesweeperReport
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +39,7 @@ _POLICY_MINESWEEPER_DIR = _REPORTS_ROOT / "policy_minesweeper"
 # report_id 格式：{6位A股代码}_{YYYYMMDDHHmm}（与下载白名单 ^\d{6}_\d{12}(_\d+)?$ 对齐）
 _REPORT_ID_PATTERN = "{code}_{ts:%Y%m%d%H%M}"
 
-_executor_instance: Optional[Any] = None
+_executor_instance: Optional[PolicyMinesweeperExecutor] = None
 
 # best-effort 解析 scorecard to_markdown 的 banner 行（emoji + **label**　综合分 **N**　置信度 **N%**）
 _VERDICT_LABELS = ("强利好", "中等利好", "中性", "中等利空", "强利空")
@@ -84,7 +89,7 @@ def _resolve_unique_report_id(base_id: str) -> str:
     return report_id
 
 
-def _get_executor() -> Any:
+def _get_executor() -> PolicyMinesweeperExecutor:
     """获取（缓存的）PolicyMinesweeperExecutor 单例。"""
     global _executor_instance
     if _executor_instance is None:
@@ -280,7 +285,7 @@ class PolicyMinesweeperService:
             return record.pdf_path
         return self._generate_pdf(record)
 
-    def _generate_pdf(self, record: Any) -> Optional[str]:
+    def _generate_pdf(self, record: PolicyMinesweeperReport) -> Optional[str]:
         """惰性生成 PDF（复用 src/md2pdf.py）。"""
         try:
             from src.md2pdf import markdown_to_pdf_file

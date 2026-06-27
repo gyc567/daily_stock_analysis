@@ -13,7 +13,7 @@
 
 安全：
 - ``report_id`` 白名单 ``^\\d{6}_\\d{12}$`` + ``_resolve_safe_path`` 双重防路径穿越。
-- 入口 A 股校验（``normalize_a_share``），非 A 股直接 HTTP 400。
+- 入口 A 股代码格式由 Pydantic ``pattern=^\\d{6}$`` 在解析期校验（畸形直接 HTTP 422）；语义校验在 service.generate_report。
 """
 
 from __future__ import annotations
@@ -23,18 +23,16 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.config import get_config
 from src.services.policy_minesweeper_service import (
     PolicyMinesweeperInputError,
-    PolicyMinesweeperService,
     get_policy_minesweeper_dir,
-    normalize_a_share,
     policy_minesweeper_service,
 )
 
@@ -54,12 +52,18 @@ _REPORT_ID_RE = re.compile(r"^\d{6}_\d{12}(_\d+)?$")
 # ============================================================
 
 class PolicyMinesweeperRequest(BaseModel):
-    stock_code: str
-    stock_name: Optional[str] = None
-    horizon: str = "medium"
+    # Layer 3（数据守门员）：I/O 边界第一道关 —— 格式/范围/枚举在解析期校验，
+    # 畸形输入直接 422，不浪费 SSE 线程。语义级 A 股校验仍由 service 层 normalize_a_share 兜底。
+    model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
+
+    stock_code: Annotated[str, Field(..., pattern=r"^\d{6}$", description="6 位 A 股代码")]
+    stock_name: Optional[Annotated[str, Field(min_length=1, max_length=64)]] = None
+    horizon: Literal["short", "medium", "long"] = "medium"
 
 
 class ReportListItem(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     id: str
     stock_code: str
     stock_name: Optional[str] = None
@@ -76,12 +80,16 @@ class ReportListItem(BaseModel):
 
 
 class ReportListResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     success: bool
     data: List[ReportListItem]
     total: int
 
 
 class ReportDetailResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     success: bool
     data: Dict[str, Any]
 
@@ -121,7 +129,7 @@ def _require_agent(config) -> None:
 # ============================================================
 
 @router.post("/generate/stream")
-async def generate_stream(request: PolicyMinesweeperRequest):
+async def generate_stream(request: PolicyMinesweeperRequest) -> StreamingResponse:
     """SSE 流式生成排雷报告。
 
     入口先同步校验 A 股代码（非 A 股直接 400，不浪费 SSE 连接），
@@ -131,11 +139,8 @@ async def generate_stream(request: PolicyMinesweeperRequest):
     config = get_config()
     _require_agent(config)
 
-    try:
-        normalize_a_share(request.stock_code)
-    except PolicyMinesweeperInputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
+    # A 股代码格式已由 Pydantic pattern=^\d{6}$ 在解析期校验（畸形 422，不浪费 SSE 连接）；
+    # 语义校验在 service.generate_report 内，run_sync 捕获后发 error 事件。
     loop = asyncio.get_running_loop()
     queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue()
 
