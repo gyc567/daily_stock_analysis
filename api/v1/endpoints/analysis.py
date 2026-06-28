@@ -352,7 +352,7 @@ def _handle_async_analysis_batch(
         getattr(request, "report_language", None), default=""
     )
 
-    submit_kwargs = dict(
+    submit_kwargs: Dict[str, Any] = dict(
         stock_codes=stock_codes,
         stock_name=stock_name,
         original_query=original_query,

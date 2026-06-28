@@ -596,7 +596,7 @@ class AgentOrchestrator:
 
         self._skill_agent_names = set()
 
-        common_kwargs = dict(
+        common_kwargs: Dict[str, Any] = dict(
             tool_registry=self.tool_registry,
             llm_adapter=self.llm_adapter,
             skill_instructions=self.skill_instructions,
