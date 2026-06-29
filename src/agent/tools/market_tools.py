@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 def _get_fetcher_manager():
     """Lazy import to avoid circular deps."""
     from data_provider import DataFetcherManager
+
     return DataFetcherManager()
 
 
@@ -25,25 +26,38 @@ def _get_fetcher_manager():
 # get_market_indices
 # ============================================================
 
-def _handle_get_market_indices(region: str = "cn") -> dict[str, Any]:
-    """Get major market indices."""
+
+def _handle_get_market_indices(
+    region: str = "cn", max_retries: int = 3
+) -> dict[str, Any]:
+    """Get major market indices with retry mechanism."""
+    import time
+
     manager = _get_fetcher_manager()
-    indices = manager.get_main_indices(region=region)
 
-    if not indices:
-        return {"error": f"No market index data available for region '{region}'"}
+    for attempt in range(max_retries):
+        indices = manager.get_main_indices(region=region)
+        if indices:
+            return {
+                "region": region,
+                "indices_count": len(indices),
+                "indices": indices,
+            }
 
-    return {
-        "region": region,
-        "indices_count": len(indices),
-        "indices": indices,
-    }
+        if attempt < max_retries - 1:
+            wait_time = 1.0 * (attempt + 1)
+            logger.debug(
+                f"get_market_indices attempt {attempt + 1} failed, retrying in {wait_time}s..."
+            )
+            time.sleep(wait_time)
+
+    return {"error": f"No market index data available for region '{region}'"}
 
 
 get_market_indices_tool = ToolDefinition(
     name="get_market_indices",
     description="Get major market indices (e.g., Shanghai Composite, Shenzhen Component, "
-                "CSI 300 for China; S&P 500, Nasdaq, Dow for US). Provides market overview.",
+    "CSI 300 for China; S&P 500, Nasdaq, Dow for US). Provides market overview.",
     parameters=[
         ToolParameter(
             name="region",
@@ -62,6 +76,7 @@ get_market_indices_tool = ToolDefinition(
 # ============================================================
 # get_sector_rankings
 # ============================================================
+
 
 def _handle_get_sector_rankings(top_n: int = 10) -> dict[str, Any]:
     """Get sector performance rankings."""
@@ -88,7 +103,7 @@ def _handle_get_sector_rankings(top_n: int = 10) -> dict[str, Any]:
 get_sector_rankings_tool = ToolDefinition(
     name="get_sector_rankings",
     description="Get sector/industry performance rankings. Returns top N and bottom N "
-                "sectors by daily change percentage. Useful for sector rotation analysis.",
+    "sectors by daily change percentage. Useful for sector rotation analysis.",
     parameters=[
         ToolParameter(
             name="top_n",
