@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,7 @@ class ValidationResult:
     conclusion_count: int = 0
     probability_sum: float = 0.0
     details: List[str] = field(default_factory=list)
+    pe_contradictions: List[PeContradiction] = field(default_factory=list)
 
 
 def _extract_called_tools(tool_calls_log: List[Dict[str, object]]) -> Set[str]:
@@ -140,6 +141,93 @@ def _check_probability_sum(markdown: str) -> float:
         vals = [int(p) for p in all_probs[:3]]
         return float(sum(vals))
     return 0.0
+
+
+# ---------------------------------------------------------------------------
+# PE 估值口径一致性检测
+#
+# 防止「溢价抬升至 X-Y x PE」但 X-Y 明显低于当前 PE(TTM) 的自相矛盾：报告头部
+# 声明的【当前 PE(TTM)】是估值基准锚点，溢价/抬升情景的 PE 区间上限必须 ≥ 当前 PE。
+# 本检测是只读、非阻断的 L2 质量信号：仅写入 details + pe_contradictions，不改变
+# passed/score（避免误判触发不必要的重生成，影响无关报告）。
+# ---------------------------------------------------------------------------
+
+# 当前 PE(TTM) 提取模式（仅识别 TTM 限定口径，避免误抓正文中的情景 PE）。
+# 按优先级匹配，命中其一即返回。
+_CURRENT_PE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"PE\s*[\(（]\s*TTM\s*[\)）][：:\s]*([0-9]+(?:\.[0-9]+)?)"),
+    re.compile(r"市盈率\s*[\(（]\s*TTM\s*[\)）][：:\s]*([0-9]+(?:\.[0-9]+)?)"),
+    re.compile(r"PE\s+TTM[：:\s]*([0-9]+(?:\.[0-9]+)?)"),
+)
+
+# 估值区间提取模式：区间位于 PE 之前，如 '120-130x PE' / '120~130倍PE' / '120至130 PE'。
+_PE_BAND_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[-–—~～至到]\s*(\d+(?:\.\d+)?)\s*[x×倍]*\s*PE")
+
+# 溢价/抬升类表述：此类情景的 PE 区间上限应 ≥ 当前 PE(TTM)，否则为估值口径矛盾。
+_PREMIUM_VERBS: tuple[str, ...] = ("溢价", "抬升", "拔估值", "估值扩张", "估值提升", "冲高", "享受")
+
+# 回归/消化类表述：此类情景的 PE 低于当前 PE(TTM) 是合理的，不算矛盾。
+_REVERSION_VERBS: tuple[str, ...] = ("回归", "消化", "回落", "压缩", "杀估值", "均值回归", "下杀")
+
+# 在 PE 区间前回看的字符窗口长度（用于判定该区间所属的估值表述类型）。
+_PE_CONTEXT_WINDOW = 50
+
+
+@dataclass(frozen=True)
+class PeContradiction:
+    """PE 估值口径矛盾（溢价/抬升情景 PE 上限低于当前 PE(TTM)）。"""
+
+    current_pe: float
+    scenario_pe_high: float
+    sentence: str
+    detail: str
+
+
+def _extract_current_pe(markdown: str) -> Optional[float]:
+    """从报告头部提取当前 PE(TTM)。仅识别 TTM 限定口径，未声明则返回 None。"""
+    for pattern in _CURRENT_PE_PATTERNS:
+        match = pattern.search(markdown)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+def _find_pe_bands(markdown: str) -> List[tuple[int, float, float]]:
+    """提取估值区间 'low-high x PE'。返回 [(起始位置, 区间下限, 区间上限), ...]。"""
+    return [
+        (match.start(), float(match.group(1)), float(match.group(2)))
+        for match in _PE_BAND_RE.finditer(markdown)
+    ]
+
+
+def _detect_pe_premium_contradictions(
+    markdown: str, current_pe: Optional[float]
+) -> List[PeContradiction]:
+    """检测『溢价/抬升』情景 PE 区间上限低于当前 PE(TTM) 的估值口径矛盾。"""
+    if current_pe is None:
+        return []
+
+    contradictions: List[PeContradiction] = []
+    for pos, _low, high in _find_pe_bands(markdown):
+        window = markdown[max(0, pos - _PE_CONTEXT_WINDOW):pos]
+        # 显式回归/消化表述 → PE 低于当前是合理的，跳过
+        if any(verb in window for verb in _REVERSION_VERBS):
+            continue
+        # 溢价/抬升表述且区间上限 < 当前 PE → 估值口径矛盾
+        if any(verb in window for verb in _PREMIUM_VERBS) and high < current_pe:
+            contradictions.append(
+                PeContradiction(
+                    current_pe=current_pe,
+                    scenario_pe_high=high,
+                    sentence=window + markdown[pos:pos + 20],
+                    detail=(
+                        f"『溢价/抬升』情景 PE 上限 {high:g}x 低于当前 PE(TTM) "
+                        f"{current_pe:g}x：估值口径矛盾（溢价情景 PE 应 ≥ 当前 PE，"
+                        "或改用『回归/消化』表述并说明 EPS 增速如何吸收估值下降）"
+                    ),
+                )
+            )
+    return contradictions
 
 
 class DeepResearchValidator:
@@ -233,6 +321,14 @@ class DeepResearchValidator:
         if verified or conflict:
             details.append(f"双源验证标注：✓×{verified}（验证通过）/ ⚠×{conflict}（冲突已披露）")
 
+        # PE 估值口径一致性检测（非阻断 L2 信号：只记入 details，不改变 passed/score）
+        current_pe = _extract_current_pe(markdown)
+        pe_contradictions = _detect_pe_premium_contradictions(markdown, current_pe)
+        if pe_contradictions:
+            details.append(
+                f"估值口径矛盾：{len(pe_contradictions)} 处『溢价/抬升』情景 PE 上限低于当前 PE(TTM) {current_pe:g}x"
+            )
+
         return ValidationResult(
             passed=passed,
             score=score,
@@ -242,4 +338,5 @@ class DeepResearchValidator:
             conclusion_count=conclusion_count,
             probability_sum=probability_sum,
             details=details,
+            pe_contradictions=pe_contradictions,
         )

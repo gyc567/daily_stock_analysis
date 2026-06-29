@@ -60,6 +60,8 @@ env/
 !/data/supply_chain_skill/
 # 例外:政策与公告双维度排雷 system prompt(α/β/Ω 三角色共享方法论)
 !/data/policy_minesweeper/
+# 例外:A股深度投研报告 system prompt(五层穿透框架,运行时读取,与 policy_minesweeper 同模式)
+!/data/deep_research/
 /.llm_usage_hmac_secret
 **/.llm_usage_hmac_secret
 logs/
