@@ -1172,6 +1172,10 @@ def get_analysis_status(task_id: str) -> TaskStatus:
                 ),
                 details=details,
                 research_framework=getattr(record, "research_framework", None),
+                bayesian_framework=getattr(record, "bayesian_framework", None),
+                supply_chain=getattr(record, "supply_chain", None),
+                value_scenarios=getattr(record, "value_scenarios", None),
+                investment_conclusion=getattr(record, "investment_conclusion", None),
             ).model_dump()
             return TaskStatus(
                 task_id=task_id,
@@ -1397,7 +1401,9 @@ def _build_analysis_report(
         summary=summary,
         strategy=strategy,
         details=details,
-        research_framework=details_data.get("research_framework")
-        if details_data
-        else None,
+        research_framework=report_data.get("research_framework"),
+        bayesian_framework=report_data.get("bayesian_framework"),
+        supply_chain=report_data.get("supply_chain"),
+        value_scenarios=report_data.get("value_scenarios"),
+        investment_conclusion=report_data.get("investment_conclusion"),
     )
