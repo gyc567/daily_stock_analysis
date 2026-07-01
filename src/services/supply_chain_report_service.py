@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
@@ -40,28 +39,12 @@ _SUPPLY_CHAIN_DIR = _REPORTS_ROOT / "supply_chain"
 # 报告保留数量上限（第一阶段用常量，不新增配置项）
 _MAX_REPORTS = 200
 
-# 彩色 emoji + 变体选择符：WeasyPrint 无法把彩色 emoji 位图（sbix/CBDT）嵌入 PDF，
-# 路由到 Apple-Color-Emoji 字体时渲染成豆腐块（乱码）。仅剥掉装饰性 emoji，保留
-# CJK / ①②③ / ≤ / μ / • / → / —— 等信息性字符。**PDF 渲染专用，不改 .md 原文**。
-_EMOJI_STRIP_RE = re.compile(
-    "[" "\U0001F1E6-\U0001F1FF"  # 区域指示符（旗帜）
-    "\U0001F300-\U0001FAFF"      # 补充平面 emoji / 象形（📈🔥✅🎯…）
-    "☀-➿"              # 杂项符号 & 丁巴符（⚠ ✂ ✏ ✅ …）
-    "⬀-⯿"              # 补充符号象形 A
-    "︀-️"              # 变体选择符 VS1-VS16
-    "‍"                     # 零宽连接符 ZWJ
-    "]+"
-)
+# 共享 emoji 剥离函数从 src.md2pdf 导入，PDF 渲染统一在那里处理。
+# （按 docs/pdf-generation-unification-plan.md §6.4：原 supply_chain 局部 strip_emoji_for_pdf
+# 与 _EMOJI_STRIP_RE 已下沉到 src/md2pdf.py，本 service 不再重复定义。）
 
-
-def strip_emoji_for_pdf(text: Optional[str]) -> str:
-    """剥掉 PDF 渲染时无法呈现的彩色 emoji / 变体选择符（保留 CJK 与常用符号）。
-
-    信息性字符（中文、①②③、≤、μm、•、→、—— 等）WeasyPrint 经 PingFang SC 能正常渲染，
-    故保留；仅剥装饰性 emoji（警告语义由周围文字承担）。``None`` / 空串安全返回空串。
-    """
-    return _EMOJI_STRIP_RE.sub("", text or "")
-
+# 保留向后兼容 re-export：旧 import 路径仍可工作（业务代码、测试可能仍在用）。
+from src.md2pdf import strip_emoji_for_pdf  # noqa: E402,F401  (re-export for back-compat)
 
 _executor_instance: Optional["SupplyChainExecutor"] = None
 
@@ -145,13 +128,46 @@ class SupplyChainReportService:
         self,
         raw_topic: str,
         raw_hint: Optional[str] = None,
+        raw_code: Optional[str] = None,
+        raw_name: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
-        """生成一份供应链报告并落盘。返回 {report_id, status, markdown, ...}。"""
+        """生成一份供应链报告并落盘。返回 {report_id, status, markdown, ...}。
+
+        可选绑定单股（按 docs/pdf-download-filename-plan.md §供应链报告边界）：
+        - ``raw_code``：6 位 A 股代码（自动归一化剥后缀 / 前缀）
+        - ``raw_name``：股票中文名
+        两者至少给一个时，PDF 文件名遵循 ``股票名（代码）报告类型YYYYMMDD.pdf``；
+        都为空时仍走主题型命名（向后兼容历史报告）。
+        """
         topic = (raw_topic or "").strip()
         if not topic:
             raise SupplyChainReportInputError("分析主题不能为空")
         hint = (raw_hint or "").strip() or None
+        # 单股代码归一化（与 deep_research / policy_minesweeper 一致）
+        code: Optional[str] = None
+        if raw_code:
+            try:
+                from data_provider.base import normalize_stock_code
+            except ImportError:
+                normalize_stock_code = None  # type: ignore
+            normalized = (
+                normalize_stock_code(str(raw_code).strip())
+                if normalize_stock_code
+                else str(raw_code).strip()
+            )
+            if normalized and normalized.isdigit() and len(normalized) == 6:
+                code = normalized
+            elif normalized:
+                # 非 A 股代码：留空（fallback 主题型）
+                logger.warning(
+                    "[SupplyChainReport] stock_code %r 归一化后非 6 位 A 股，fallback 主题型",
+                    raw_code,
+                )
+        name = (str(raw_name).strip() if raw_name else "") or None
+        # 名称未提供时，用代码兜底（让 helper 渲染为 ``600519（600519）...``）
+        if code and not name:
+            name = code
 
         report_id = _resolve_unique_report_id(datetime.now())
         report_dir = get_supply_chain_report_dir()
@@ -183,6 +199,8 @@ class SupplyChainReportService:
                 report_id=report_id,
                 topic=topic,
                 research_hint=hint,
+                stock_code=code,
+                stock_name=name,
                 md_path=str(md_path),
                 status=status,
                 total_steps=int(getattr(result, "total_steps", 0) or 0),
@@ -204,7 +222,9 @@ class SupplyChainReportService:
                     "total_steps": int(getattr(result, "total_steps", 0) or 0),
                     "total_tokens": int(getattr(result, "total_tokens", 0) or 0),
                     "provider": str(getattr(result, "provider", "") or ""),
-                    "error": result_error if not getattr(result, "success", False) else None,
+                    "error": result_error
+                    if not getattr(result, "success", False)
+                    else None,
                 }
             )
 
@@ -212,6 +232,8 @@ class SupplyChainReportService:
             "report_id": report_id if write_ok else None,
             "topic": topic,
             "research_hint": hint,
+            "stock_code": code,
+            "stock_name": name,
             "status": status,
             "markdown": markdown,
             "md_path": str(md_path) if write_ok else None,
@@ -226,7 +248,9 @@ class SupplyChainReportService:
     # 查询
     # ------------------------------------------------------------------
 
-    def list_reports(self, limit: int = 50, offset: int = 0) -> Tuple[List[Dict[str, Any]], int]:
+    def list_reports(
+        self, limit: int = 50, offset: int = 0
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """分页列表（不含 Markdown 正文，仅元数据）。"""
         rows, total = get_db().get_supply_chain_reports(offset=offset, limit=limit)
         return [r.to_dict() for r in rows], total
@@ -243,7 +267,9 @@ class SupplyChainReportService:
             if md_path.exists():
                 markdown = md_path.read_text(encoding="utf-8")
         except OSError as exc:
-            logger.warning("[SupplyChainReport] 读取报告正文失败 %s: %s", record.md_path, exc)
+            logger.warning(
+                "[SupplyChainReport] 读取报告正文失败 %s: %s", record.md_path, exc
+            )
         data["markdown"] = markdown
         return data
 
@@ -280,7 +306,12 @@ class SupplyChainReportService:
         return self._generate_pdf(record)
 
     def _generate_pdf(self, record: "SupplyChainReport") -> Optional[str]:
-        """惰性生成 PDF（复用 src/md2pdf.py）。"""
+        """惰性生成 PDF（复用 src/md2pdf.py）。
+
+        彩色 emoji 剥离由 ``src.md2pdf`` 内部统一处理（按
+        docs/pdf-generation-unification-plan.md §6.4 下沉），本 service 不再
+        局部剥离，避免与共享渲染器重复。``.md`` 原文不被修改。
+        """
         try:
             from src.md2pdf import markdown_to_pdf_file
         except ImportError:
@@ -290,9 +321,8 @@ class SupplyChainReportService:
         md_path = Path(record.md_path)
         if not md_path.exists():
             return None
-        # PDF 渲染前剥彩色 emoji（WeasyPrint 无法嵌入彩色 emoji 位图，会渲染成豆腐块）；
-        # .md 原文不动，Web/Markdown 视图仍显示 emoji。
-        markdown = strip_emoji_for_pdf(md_path.read_text(encoding="utf-8"))
+        # 直接读取 markdown 原文传给共享渲染器（emoji 剥离由 md2pdf 内部处理）
+        markdown = md_path.read_text(encoding="utf-8")
         pdf_path = str(md_path.with_suffix(".pdf"))
 
         result_path = markdown_to_pdf_file(markdown, pdf_path)
@@ -317,7 +347,9 @@ class SupplyChainReportService:
                     try:
                         Path(p).unlink(missing_ok=True)
                     except OSError as exc:
-                        logger.warning("[SupplyChainReport] 清理删除文件失败 %s: %s", p, exc)
+                        logger.warning(
+                            "[SupplyChainReport] 清理删除文件失败 %s: %s", p, exc
+                        )
         if pruned:
             logger.info("[SupplyChainReport] 清理超额报告 %d 份", len(pruned))
 

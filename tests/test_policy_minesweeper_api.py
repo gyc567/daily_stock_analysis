@@ -28,6 +28,7 @@ def app():
     """裸 FastAPI（无 AuthMiddleware），挂 policy_minesweeper router。"""
     app = FastAPI()
     from api.v1.endpoints.policy_minesweeper import router
+
     app.include_router(router)
     return app
 
@@ -36,9 +37,7 @@ def app():
 def client(app, monkeypatch):
     """TestClient with AuthMiddleware bypassed."""
     # bypass AuthMiddleware + is_agent_available
-    monkeypatch.setattr(
-        "src.config.Config.is_agent_available", lambda self: True
-    )
+    monkeypatch.setattr("src.config.Config.is_agent_available", lambda self: True)
     from fastapi.testclient import TestClient
 
     return TestClient(app)
@@ -54,20 +53,138 @@ def _gen_events(*types_and_bodies):
 # generate_stream
 # ============================================================
 
+
 class TestGenerateStream:
     def test_malformed_code_returns_422(self, client):
-        # Layer 3：Pydantic pattern=^\d{6}$ 在解析期拦截非 6 位代码（AAPL）→ 422，不进 SSE
+        # Layer 3：Pydantic field_validator 在解析期拦截非 A 股代码（AAPL）→ 422，不进 SSE
         resp = client.post("/generate/stream", json={"stock_code": "AAPL"})
         assert resp.status_code == 422
 
     def test_empty_code_returns_422(self, client):
-        # Layer 3：空代码违反 pattern → 422
+        # Layer 3：空代码违反 field_validator → 422
         resp = client.post("/generate/stream", json={"stock_code": ""})
+        assert resp.status_code == 422
+
+    def test_sz_suffix_accepted(self, client, monkeypatch):
+        """前端 StockAutocomplete 传 canonicalCode 含 .SZ 后缀 → field_validator 归一化为 002617 通过。
+
+        修复回归：原 pattern=^\\d{6}$ 严格化导致 "002617.SZ" 422，本测试验证修复。
+        """
+        # 模拟 SSE 成功响应（避免真跑 LLM）
+        from fastapi.responses import StreamingResponse
+
+        def fake_generate_report(*args, **kwargs):
+            kwargs["progress_callback"](
+                {
+                    "type": "done",
+                    "success": True,
+                    "report_id": "002617_202607011200",
+                    "status": "success",
+                    "markdown": "# 露笑科技 002617",
+                }
+            )
+            return {"report_id": "002617_202607011200"}
+
+        monkeypatch.setattr(
+            "api.v1.endpoints.policy_minesweeper.policy_minesweeper_service.generate_report",
+            fake_generate_report,
+        )
+
+        resp = client.post("/generate/stream", json={"stock_code": "002617.SZ"})
+        assert resp.status_code == 200
+        # 归一化后 002617 应被 service 收到（progress callback 拿到的 code）
+        # 这里仅验证端点接受，不深入校验下游
+
+    def test_sh_prefix_accepted(self, client, monkeypatch):
+        """前端可能传 ``SH600519`` 前缀格式 → 归一化为 ``600519`` 通过。"""
+        from fastapi.responses import StreamingResponse
+
+        def fake_generate_report(*args, **kwargs):
+            kwargs["progress_callback"](
+                {
+                    "type": "done",
+                    "success": True,
+                    "report_id": "600519_202607011200",
+                    "status": "success",
+                    "markdown": "# 贵州茅台 600519",
+                }
+            )
+            return {"report_id": "600519_202607011200"}
+
+        monkeypatch.setattr(
+            "api.v1.endpoints.policy_minesweeper.policy_minesweeper_service.generate_report",
+            fake_generate_report,
+        )
+
+        resp = client.post("/generate/stream", json={"stock_code": "SH600519"})
+        assert resp.status_code == 200
+
+    def test_bj_suffix_accepted(self, client, monkeypatch):
+        """北交所 ``920493.BJ`` 格式归一化为 ``920493`` 通过。"""
+
+        def fake_generate_report(*args, **kwargs):
+            kwargs["progress_callback"](
+                {
+                    "type": "done",
+                    "success": True,
+                    "report_id": "920493_202607011200",
+                    "status": "success",
+                    "markdown": "# 北交所 920493",
+                }
+            )
+            return {"report_id": "920493_202607011200"}
+
+        monkeypatch.setattr(
+            "api.v1.endpoints.policy_minesweeper.policy_minesweeper_service.generate_report",
+            fake_generate_report,
+        )
+
+        resp = client.post("/generate/stream", json={"stock_code": "920493.BJ"})
+        assert resp.status_code == 200
+
+    def test_whitespace_stripped(self, client, monkeypatch):
+        """用户输入 ``  600519  `` 含前后空格 → strip 后归一通过。"""
+
+        def fake_generate_report(*args, **kwargs):
+            kwargs["progress_callback"](
+                {
+                    "type": "done",
+                    "success": True,
+                    "report_id": "600519_202607011200",
+                    "status": "success",
+                    "markdown": "# 600519",
+                }
+            )
+            return {"report_id": "600519_202607011200"}
+
+        monkeypatch.setattr(
+            "api.v1.endpoints.policy_minesweeper.policy_minesweeper_service.generate_report",
+            fake_generate_report,
+        )
+
+        resp = client.post("/generate/stream", json={"stock_code": "  600519  "})
+        assert resp.status_code == 200
+
+    def test_hk_code_rejected(self, client):
+        """港股 ``00700.HK`` 归一后为 ``00700``（5 位）非 A 股 6 位 → 422。"""
+        resp = client.post("/generate/stream", json={"stock_code": "00700.HK"})
+        assert resp.status_code == 422
+
+    def test_us_code_rejected(self, client):
+        """美股 ``AAPL.US`` / ``AAPL`` 归一后非 A 股 6 位 → 422。"""
+        resp = client.post("/generate/stream", json={"stock_code": "AAPL.US"})
+        assert resp.status_code == 422
+
+    def test_garbage_code_rejected(self, client):
+        """无法识别的乱码 → 422。"""
+        resp = client.post("/generate/stream", json={"stock_code": "abc!@#"})
         assert resp.status_code == 422
 
     def test_invalid_horizon_returns_422(self, client):
         # Layer 3：horizon 是 Literal["short","medium","long"]，非法值 → 422
-        resp = client.post("/generate/stream", json={"stock_code": "600519", "horizon": "bogus"})
+        resp = client.post(
+            "/generate/stream", json={"stock_code": "600519", "horizon": "bogus"}
+        )
         assert resp.status_code == 422
 
     def test_agent_disabled_returns_400(self, client, monkeypatch):
@@ -77,12 +194,14 @@ class TestGenerateStream:
 
     def test_success_done_event(self, client, monkeypatch):
         def fake_generate(*, raw_code, raw_name, horizon, progress_callback):
-            progress_callback({
-                "type": "done",
-                "report_id": "600519_202606261200",
-                "status": "success",
-                "markdown": "# test",
-            })
+            progress_callback(
+                {
+                    "type": "done",
+                    "report_id": "600519_202606261200",
+                    "status": "success",
+                    "markdown": "# test",
+                }
+            )
             return {"report_id": "600519_202606261200"}
 
         monkeypatch.setattr(
@@ -123,6 +242,7 @@ class TestGenerateStream:
 # list_reports
 # ============================================================
 
+
 class TestListReports:
     def _wire(self, monkeypatch, rows=None, total=0):
         svc = MagicMock()
@@ -140,17 +260,21 @@ class TestListReports:
         assert resp.json()["data"] == []
 
     def test_list_items(self, client, monkeypatch):
-        self._wire(monkeypatch, rows=[
-            {
-                "id": "600519_202606261200",
-                "stock_code": "600519",
-                "stock_name": "贵州茅台",
-                "status": "success",
-                "composite_score": -35,
-                "verdict": "中等利空",
-                "confidence": 78,
-            }
-        ], total=1)
+        self._wire(
+            monkeypatch,
+            rows=[
+                {
+                    "id": "600519_202606261200",
+                    "stock_code": "600519",
+                    "stock_name": "贵州茅台",
+                    "status": "success",
+                    "composite_score": -35,
+                    "verdict": "中等利空",
+                    "confidence": 78,
+                }
+            ],
+            total=1,
+        )
         resp = client.get("/reports")
         data = resp.json()["data"]
         assert len(data) == 1
@@ -173,6 +297,7 @@ class TestListReports:
 # ============================================================
 # get_report
 # ============================================================
+
 
 class TestGetReport:
     def test_missing_returns_404(self, client, monkeypatch):
@@ -213,6 +338,7 @@ class TestGetReport:
 # delete_report
 # ============================================================
 
+
 class TestDeleteReport:
     def test_missing_returns_404(self, client, monkeypatch):
         svc = MagicMock()
@@ -243,6 +369,7 @@ class TestDeleteReport:
 # ============================================================
 # download_pdf
 # ============================================================
+
 
 class TestDownloadPdf:
     def test_missing_record_returns_404(self, client, monkeypatch):

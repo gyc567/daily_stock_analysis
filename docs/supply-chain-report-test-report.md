@@ -166,24 +166,32 @@ python -m pytest tests/test_supply_chain_clue_hype_tool.py -v
 
 ---
 
-## 附 5：PDF `⚠️` emoji 乱码修复（`strip_emoji_for_pdf`）
+## 附 5：PDF `⚠️` emoji 乱码修复（`strip_emoji_for_pdf`）— 后续：函数下沉到 `src/md2pdf`
 
-**现象**：供应链报告下载 PDF 出现「大量乱码」（上一轮已修表格列宽塌缩）。本轮 pymupdf 渲染 + 字体/字形取证定位新根因。
+**现象**：供应链报告下载 PDF 出现「大量乱码」（上一轮已修表格列宽塌缩）。pymupdf 渲染 + 字体/字形取证定位新根因。
 
 **取证（确定性）**：嵌入字体 `苹果-简`(PingFang SC) / Semi-Bold / Oblique + `Apple-Color-Emoji`。逐字符 font 取证：`①②③④⑤`/`≤`/`μm`/`•` 全走 PingFang SC（正常）；**只有 `⚠️`(U+26A0+U+FE0F) 走 `Apple-Color-Emoji`**——WeasyPrint 无法把彩色 emoji 位图嵌入 PDF → 渲染成豆腐块（乱码）。报告里 3 个 `⚠️`（题材炒作信号/技术面快照的显著警告位）。列表 `<ol><li>` 良构、标记 bbox 在左边距（正常），表格上一轮已修。
 
-**修复**（`src/services/supply_chain_report_service.py`，作用域仅供应链 PDF）：
+**第一阶段修复**（`src/services/supply_chain_report_service.py`，作用域仅供应链 PDF）：
 - 纯函数 `strip_emoji_for_pdf` + `_EMOJI_STRIP_RE`：剥彩色 emoji（旗帜/补充平面象形/杂项符号☀-➿含⚠/补充象形A/变体选择符/ZWJ），保留 CJK/①②③/≤/μ/•/→/——。
 - `_generate_pdf` 渲染前调 `strip_emoji_for_pdf(md 原文)`；`.md` 文件不动（Web/Markdown 视图仍显示 emoji）。
 
+**第二阶段（按 `docs/pdf-generation-unification-plan.md` §6.4 落地）**：emoji 剥离下沉到共享 `src/md2pdf.py`——
+- `src/md2pdf.py` 新增共享 `strip_emoji_for_pdf`（同一正则与剥离规则），`markdown_to_pdf_file` 内部自动调用。
+- `src/services/supply_chain_report_service.py` 删除模块级 `_EMOJI_STRIP_RE` + `strip_emoji_for_pdf` 定义，**旧 import 路径保留为 back-compat re-export**（`from src.services.supply_chain_report_service import strip_emoji_for_pdf` 仍可工作，不破坏现有调用方与测试）。
+- `SupplyChainReportService._generate_pdf` 改回直接读取 `.md` 原文传给共享渲染器（emoji 剥离由 `md2pdf` 内部处理）。
+- 深度投研 / 政策与公告排雷 **自动受益**（共享 `md2pdf` 入口），无需各自维护剥离逻辑。
+
 **验证**：
 - 真实报告 `sc_202606280945_1` 重生成（删旧 PDF→服务惰性重渲染）：PDF 文本层**无 `⚠`**、警告正文「这是最关键的风险信号」保留、`①②③④⑤`/`≤`/`μm` 保留、**不再嵌入 `Apple-Color-Emoji` 字体**。✅
-- 新增 `tests/test_supply_chain_report_pdf_emoji.py` **12 用例**（`strip_emoji_for_pdf` 纯函数 10：剥各类 emoji+VS+ZWJ、保留 CJK/符号/None/空、混合片段；渲染回归 2：`_generate_pdf` 对含 `⚠️` 的 md 生成无 `⚠` PDF + 正文保留、`.md` 原文不动）。
-- 回归：`md2pdf`(16) + `supply_chain_report_{service,api,e2e}` + `supply_chain_clue_hype`/`semianalysis`/`services` 全绿，合计 **136 通过**（唯一失败为既有 `test_deep_research.py::_font_registered` 漂移，与本次无关）。pyright/mypy `supply_chain_report_service.py` 0 error。
-
-**为什么不动共享 `md2pdf`**：作用域仅供应链 = 不影响深度投研/排雷 PDF（#4）；供应链的 emoji 由题材炒作信号新功能引入，在供应链层修最内聚。`.md` 原文不动 → Web 视图不受影响。
+- 第一阶段：`tests/test_supply_chain_report_pdf_emoji.py` 12 用例（`strip_emoji_for_pdf` 纯函数 10 + 渲染回归 2）。
+- 第二阶段：测试文件**改造保留**（按方案 §7 "二选一，优先选 A 减少 churn"），增加 2 个迁移验证：① `supply_chain_report_service` 模块不再持有 `_EMOJI_STRIP_RE` 符号；② `strip_emoji_for_pdf` 在 service 中为共享函数的 re-export（identity 相等）。合计 **14 用例**，全绿。
+- 回归：`md2pdf`(17) + `supply_chain_report_{service,api,e2e}` + 新增 `test_pdf_endpoints_cache.py`(4) 全绿，合计 17+14+4+其他 ≈ **140+ 通过**。
+- pyright/mypy `supply_chain_report_service.py` 0 error（仅剩与本次无关的预先存在错误）。
 
 **复现**：
 ```bash
-python -m pytest tests/test_supply_chain_report_pdf_emoji.py -v
+python -m pytest tests/test_supply_chain_report_pdf_emoji.py \
+           tests/test_md2pdf.py \
+           tests/test_pdf_endpoints_cache.py -v
 ```

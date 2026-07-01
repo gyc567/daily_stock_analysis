@@ -125,6 +125,12 @@ describe('policyMinesweeperApi', () => {
     // jsdom 真实 <a> 元素：appendChild/click/removeChild 均可正常执行
     fetchMock.mockResolvedValueOnce({
       ok: true,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === 'content-disposition'
+            ? "attachment; filename*=UTF-8''贵州茅台（600519）政策与公告排雷报告20260626.pdf"
+            : null,
+      },
       blob: async () => new Blob(['pdf'], { type: 'application/pdf' }),
     });
 

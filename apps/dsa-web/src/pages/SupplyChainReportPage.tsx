@@ -12,6 +12,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { ReportMarkdownBody } from '../components/report/ReportMarkdownBody';
+import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useSupplyChainReport } from '../hooks/useSupplyChainReport';
 import {
   supplyChainReportApi,
@@ -37,6 +38,8 @@ const TOPIC_TEMPLATES: readonly string[] = [
 export function SupplyChainReportPage() {
   const [topic, setTopic] = useState('');
   const [researchHint, setResearchHint] = useState('');
+  // 可选单股绑定（按 docs/pdf-download-filename-plan.md §供应链报告边界 阶段 1）
+  const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
   const [history, setHistory] = useState<SupplyChainReportItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -82,9 +85,13 @@ export function SupplyChainReportPage() {
     reset();
     // 线索只随本次请求发送，trim 后为空则不传；发送后清空、保留主题
     const hint = researchHint.trim() || undefined;
-    void generate(topic.trim(), hint);
+    // 可选单股绑定（按 docs/pdf-download-filename-plan.md）：绑定时 PDF 文件名走单股型
+    const code = selectedStock?.code || undefined;
+    const name = selectedStock?.name || undefined;
+    void generate(topic.trim(), hint, code, name);
     setResearchHint('');
-  }, [topic, researchHint, generate, reset]);
+    // 注意：清空 selectedStock 会让用户重复生成时失去绑定；先保留选择，下次手动清。
+  }, [topic, researchHint, selectedStock, generate, reset]);
 
   const handleSelectHistory = useCallback(
     async (id: string) => {
@@ -288,6 +295,39 @@ export function SupplyChainReportPage() {
               rows={2}
               className="w-full resize-none rounded-xl border border-white/10 bg-white/2 p-3 text-sm text-foreground placeholder:text-muted-text/60 focus:border-cyan/50 focus:outline-none disabled:opacity-60"
             />
+            {/* 可选单股绑定（按 docs/pdf-download-filename-plan.md §供应链报告边界 阶段 1）:
+                选中后 PDF 文件名按 ``股票名（代码）报告类型YYYYMMDD.pdf`` 命名。
+                清空时仍走主题型（向后兼容历史报告）。 */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <StockAutocomplete
+                  mode="form"
+                  value={selectedStock?.code ?? ''}
+                  onChange={(code) =>
+                    setSelectedStock((prev) =>
+                      code ? { code, name: prev?.code === code ? prev.name ?? code : code } : null,
+                    )
+                  }
+                  onSubmit={(code, name) => {
+                    if (code) {
+                      setSelectedStock({ code, name: name ?? code });
+                    }
+                  }}
+                  disabled={isGenerating}
+                  placeholder="可选：绑定单股（仅在历史列表 / PDF 文件名用，主题型可留空）"
+                />
+              </div>
+              {selectedStock && !isGenerating ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedStock(null)}
+                  className="inline-flex h-10 items-center gap-1 rounded-xl border border-white/10 px-3 text-xs text-secondary-text hover:bg-hover"
+                >
+                  <X className="h-3 w-3" />
+                  清空
+                </button>
+              ) : null}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={handleSubmit}

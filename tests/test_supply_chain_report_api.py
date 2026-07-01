@@ -48,6 +48,7 @@ _SVC = "src.services.supply_chain_report_service.supply_chain_report_service"
 # generate_stream
 # ============================================================
 
+
 class TestGenerateStream:
     def test_empty_topic_returns_422(self, client):
         # Layer 3：Pydantic min_length=1 在解析期拦截空主题 → 422，不进 SSE
@@ -63,7 +64,9 @@ class TestGenerateStream:
         assert resp.status_code == 422
 
     def test_too_long_hint_returns_422(self, client):
-        resp = client.post("/generate/stream", json={"topic": "ok", "research_hint": "x" * 2001})
+        resp = client.post(
+            "/generate/stream", json={"topic": "ok", "research_hint": "x" * 2001}
+        )
         assert resp.status_code == 422
 
     def test_agent_disabled_returns_400(self, client, monkeypatch):
@@ -72,17 +75,24 @@ class TestGenerateStream:
         assert resp.status_code == 400
 
     def test_success_done_event(self, client, monkeypatch):
-        def fake_generate(*, raw_topic, raw_hint, progress_callback):
+        def fake_generate(
+            *, raw_topic, raw_hint, raw_code=None, raw_name=None, progress_callback
+        ):
             assert raw_topic == "光模块产业链"
             assert raw_hint == "CPO 上游"
-            progress_callback({
-                "type": "done",
-                "success": True,
-                "report_id": "sc_202606271530_1",
-                "status": "success",
-                "markdown": "# 供应链分析报告",
-                "total_steps": 24,
-            })
+            # raw_code / raw_name 默认为 None（按 docs/pdf-download-filename-plan.md 阶段 1 主题型 fallback）
+            assert raw_code is None
+            assert raw_name is None
+            progress_callback(
+                {
+                    "type": "done",
+                    "success": True,
+                    "report_id": "sc_202606271530_1",
+                    "status": "success",
+                    "markdown": "# 供应链分析报告",
+                    "total_steps": 24,
+                }
+            )
             return {"report_id": "sc_202606271530_1"}
 
         monkeypatch.setattr(f"{_SVC}.generate_report", fake_generate)
@@ -136,6 +146,7 @@ class TestGenerateStream:
 # list_reports
 # ============================================================
 
+
 class TestListReports:
     def test_empty_list(self, client, monkeypatch):
         svc = MagicMock()
@@ -149,13 +160,15 @@ class TestListReports:
     def test_list_items(self, client, monkeypatch):
         svc = MagicMock()
         svc.list_reports.return_value = (
-            [{
-                "id": "sc_202606271530_1",
-                "topic": "光模块产业链",
-                "research_hint": "CPO 上游",
-                "status": "success",
-                "pdf_path": "/tmp/x.pdf",
-            }],
+            [
+                {
+                    "id": "sc_202606271530_1",
+                    "topic": "光模块产业链",
+                    "research_hint": "CPO 上游",
+                    "status": "success",
+                    "pdf_path": "/tmp/x.pdf",
+                }
+            ],
             1,
         )
         monkeypatch.setattr(f"{_SVC}.list_reports", svc.list_reports)
@@ -178,6 +191,7 @@ class TestListReports:
 # get_report
 # ============================================================
 
+
 class TestGetReport:
     def test_missing_returns_404(self, client, monkeypatch):
         svc = MagicMock()
@@ -187,7 +201,14 @@ class TestGetReport:
         assert resp.status_code == 404
 
     def test_invalid_report_id_returns_404(self, client):
-        for bad in ("../etc/passwd", "abc", "600519_202606261200", "sc_x", "sc_2026062715", "sc_202606271530_1a"):
+        for bad in (
+            "../etc/passwd",
+            "abc",
+            "600519_202606261200",
+            "sc_x",
+            "sc_2026062715",
+            "sc_202606271530_1a",
+        ):
             resp = client.get(f"/reports/{bad}")
             assert resp.status_code == 404, f"should reject {bad}"
 
@@ -209,6 +230,7 @@ class TestGetReport:
 # delete_report
 # ============================================================
 
+
 class TestDeleteReport:
     def test_missing_returns_404(self, client, monkeypatch):
         svc = MagicMock()
@@ -219,7 +241,9 @@ class TestDeleteReport:
 
     def test_invalid_id_returns_404(self, client):
         for bad in ("badid", "../etc/passwd", "600519_202606261200", "sc_x"):
-            assert client.delete(f"/reports/{bad}").status_code == 404, f"should reject {bad}"
+            assert client.delete(f"/reports/{bad}").status_code == 404, (
+                f"should reject {bad}"
+            )
 
     def test_success(self, client, monkeypatch):
         svc = MagicMock()
@@ -233,6 +257,7 @@ class TestDeleteReport:
 # ============================================================
 # download_pdf
 # ============================================================
+
 
 class TestDownloadPdf:
     def test_missing_record_returns_404(self, client, monkeypatch):
@@ -259,7 +284,12 @@ class TestDownloadPdf:
         pdf = tmp_path / "sc_202606271530_1.pdf"
         pdf.write_text("PDF", encoding="utf-8")
         svc = MagicMock()
-        svc.get_report.return_value = {"id": "x"}
+        # mock record 含 topic 字段（按 docs/pdf-download-filename-plan.md §供应链报告边界 阶段 1 主题型）
+        svc.get_report.return_value = {
+            "id": "sc_202606271530_1",
+            "topic": "AI半导体供应链",
+            "created_at": "2026-06-27T15:30:00",
+        }
         svc.get_pdf_path.return_value = str(pdf)
         monkeypatch.setattr(f"{_SVC}.get_report", svc.get_report)
         monkeypatch.setattr(f"{_SVC}.get_pdf_path", svc.get_pdf_path)
@@ -270,7 +300,97 @@ class TestDownloadPdf:
         resp = client.get("/reports/sc_202606271530_1/pdf")
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/pdf"
-        assert "supply_chain_sc_202606271530_1.pdf" in resp.headers.get("content-disposition", "")
+        cd = resp.headers.get("content-disposition", "")
+        # 业务文件名（按 pdf-download-filename-plan.md）：AI半导体供应链供应链分析报告20260627.pdf
+        # —— percent-encoded UTF-8 形式
+        assert "filename*=utf-8''" in cd
+        from urllib.parse import unquote
+        import re as _re
+
+        m = _re.search(r"filename\*=utf-8''([^;]+)", cd, _re.IGNORECASE)
+        assert m is not None
+        decoded = unquote(m.group(1))
+        assert "AI半导体供应链" in decoded
+        assert "供应链分析报告" in decoded
+        assert "20260627" in decoded
+        # 不再使用旧的 ASCII 名
+        assert "supply_chain_sc_202606271530_1.pdf" not in cd
+
+    def test_safe_path_with_stock_binding_returns_single_stock_filename(
+        self, client, monkeypatch, tmp_path
+    ):
+        """绑定单股的供应链报告：PDF 文件名走单股型 ``股票名（代码）报告类型YYYYMMDD.pdf``。
+
+        按 docs/pdf-download-filename-plan.md §供应链报告边界 阶段 1（用户可选绑定单股）。
+        """
+        pdf = tmp_path / "sc_202606281200_1.pdf"
+        pdf.write_text("PDF", encoding="utf-8")
+        svc = MagicMock()
+        svc.get_report.return_value = {
+            "id": "sc_202606281200_1",
+            "topic": "光模块产业链瓶颈",
+            "stock_code": "300394",
+            "stock_name": "天孚通信",
+            "created_at": "2026-06-28T12:00:00",
+        }
+        svc.get_pdf_path.return_value = str(pdf)
+        monkeypatch.setattr(f"{_SVC}.get_report", svc.get_report)
+        monkeypatch.setattr(f"{_SVC}.get_pdf_path", svc.get_pdf_path)
+        monkeypatch.setattr(
+            "api.v1.endpoints.supply_chain_reports.get_supply_chain_report_dir",
+            lambda: tmp_path,
+        )
+        resp = client.get("/reports/sc_202606281200_1/pdf")
+        assert resp.status_code == 200
+        cd = resp.headers.get("content-disposition", "")
+        from urllib.parse import unquote
+        import re as _re
+
+        m = _re.search(r"filename\*=utf-8''([^;]+)", cd, _re.IGNORECASE)
+        assert m is not None
+        decoded = unquote(m.group(1))
+        # 单股型业务名
+        assert "天孚通信（300394）" in decoded
+        assert "供应链分析报告" in decoded
+        assert "20260628" in decoded
+        # 不再使用旧的 ASCII 名
+        assert "supply_chain_sc_202606281200_1.pdf" not in cd
+
+    def test_safe_path_with_stock_code_only_falls_back_to_code(
+        self, client, monkeypatch, tmp_path
+    ):
+        """stock_code 存在但 stock_name 缺失：业务文件名 fallback 到 stock_code（按 helper 行为）。
+
+        helper 中 ``display_name = name_part or code_part or "未知"``，确保单股型仍有可用显示名。
+        """
+        pdf = tmp_path / "sc_202606281300_1.pdf"
+        pdf.write_text("PDF", encoding="utf-8")
+        svc = MagicMock()
+        svc.get_report.return_value = {
+            "id": "sc_202606281300_1",
+            "topic": "CPO 上游",
+            "stock_code": "300394",
+            "stock_name": None,
+            "created_at": "2026-06-28T13:00:00",
+        }
+        svc.get_pdf_path.return_value = str(pdf)
+        monkeypatch.setattr(f"{_SVC}.get_report", svc.get_report)
+        monkeypatch.setattr(f"{_SVC}.get_pdf_path", svc.get_pdf_path)
+        monkeypatch.setattr(
+            "api.v1.endpoints.supply_chain_reports.get_supply_chain_report_dir",
+            lambda: tmp_path,
+        )
+        resp = client.get("/reports/sc_202606281300_1/pdf")
+        assert resp.status_code == 200
+        cd = resp.headers.get("content-disposition", "")
+        from urllib.parse import unquote
+        import re as _re
+
+        m = _re.search(r"filename\*=utf-8''([^;]+)", cd, _re.IGNORECASE)
+        assert m is not None
+        decoded = unquote(m.group(1))
+        # fallback: 名称 = code
+        assert "300394（300394）" in decoded
 
     def test_path_outside_root_returns_404(self, client, monkeypatch, tmp_path):
         # get_pdf_path 返回一个 root 外的路径 → _resolve_safe_path 拒绝 → 404

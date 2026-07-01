@@ -27,7 +27,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.config import get_config
 from src.services.policy_minesweeper_service import (
@@ -35,6 +35,8 @@ from src.services.policy_minesweeper_service import (
     get_policy_minesweeper_dir,
     policy_minesweeper_service,
 )
+from src.services.report_filename import format_stock_report_pdf_filename
+from src.services.stock_code_utils import normalize_code
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +53,46 @@ _REPORT_ID_RE = re.compile(r"^\d{6}_\d{12}(_\d+)?$")
 # Schemas
 # ============================================================
 
+
 class PolicyMinesweeperRequest(BaseModel):
     # Layer 3（数据守门员）：I/O 边界第一道关 —— 格式/范围/枚举在解析期校验，
     # 畸形输入直接 422，不浪费 SSE 线程。语义级 A 股校验仍由 service 层 normalize_a_share 兜底。
+    #
+    # 注：``stock_code`` 接受多种输入格式（与前端 StockAutocomplete 的 canonicalCode 一致）：
+    #   - 纯 6 位：``600519``
+    #   - 后缀格式：``600519.SH`` / ``002617.SZ`` / ``920493.BJ``
+    #   - 前缀格式：``SH600519`` / ``SZ000001`` / ``BJ920493``（不区分大小写）
+    # ``field_validator`` 在解析期统一归一化为 6 位纯数字；非 A 股（HK / 美股）直接 422。
+    # 这与 deep_research 的 ``endpoint 层 normalize_a_share 兜底`` 行为一致。
     model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
 
-    stock_code: Annotated[str, Field(..., pattern=r"^\d{6}$", description="6 位 A 股代码")]
+    stock_code: Annotated[
+        str,
+        Field(
+            ...,
+            min_length=1,
+            max_length=20,
+            description="A 股代码（6 位 / 含 .SH/.SZ/.BJ 后缀 / 含 SH/SZ 前缀，不区分大小写）",
+        ),
+    ]
     stock_name: Optional[Annotated[str, Field(min_length=1, max_length=64)]] = None
     horizon: Literal["short", "medium", "long"] = "medium"
+
+    @field_validator("stock_code", mode="before")
+    @classmethod
+    def _normalize_stock_code(cls, v: Any) -> str:
+        """归一化股票代码：``600519.SH`` / ``SH600519`` / 前后空格 → ``600519``。
+
+        非 A 股（HK / 美股 / 无法识别）→ 直接 422，不浪费 SSE 线程。
+        """
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("股票代码不能为空")
+        normalized = normalize_code(v.strip())
+        if not normalized or not (normalized.isdigit() and len(normalized) == 6):
+            raise ValueError(
+                f"政策与公告排雷当前仅支持 A 股（6 位数字代码），收到：{v!r}"
+            )
+        return normalized
 
 
 class ReportListItem(BaseModel):
@@ -98,6 +132,7 @@ class ReportDetailResponse(BaseModel):
 # Helpers
 # ============================================================
 
+
 def _validate_report_id(report_id: str) -> str:
     """report_id 白名单校验（防路径穿越第一道关）。不通过抛 404。"""
     if not report_id or not _REPORT_ID_RE.fullmatch(report_id):
@@ -127,6 +162,7 @@ def _require_agent(config) -> None:
 # ============================================================
 # 生成（SSE 流式）
 # ============================================================
+
 
 @router.post("/generate/stream")
 async def generate_stream(request: PolicyMinesweeperRequest) -> StreamingResponse:
@@ -181,7 +217,11 @@ async def generate_stream(request: PolicyMinesweeperRequest) -> StreamingRespons
                     )
                 except asyncio.TimeoutError:
                     if time.time() - last_event_time >= HEARTBEAT_INTERVAL_S:
-                        yield "data: " + json.dumps({"type": "heartbeat"}, ensure_ascii=False) + "\n\n"
+                        yield (
+                            "data: "
+                            + json.dumps({"type": "heartbeat"}, ensure_ascii=False)
+                            + "\n\n"
+                        )
                     continue
                 last_event_time = time.time()
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -193,7 +233,9 @@ async def generate_stream(request: PolicyMinesweeperRequest) -> StreamingRespons
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             except Exception as exc:
-                logger.debug("[PolicyMinesweeper] executor cleanup error (ignored): %s", exc)
+                logger.debug(
+                    "[PolicyMinesweeper] executor cleanup error (ignored): %s", exc
+                )
 
     return StreamingResponse(
         event_generator(),
@@ -209,6 +251,7 @@ async def generate_stream(request: PolicyMinesweeperRequest) -> StreamingRespons
 # ============================================================
 # 历史报告 CRUD
 # ============================================================
+
 
 @router.get("/reports", response_model=ReportListResponse)
 async def list_reports(
@@ -266,6 +309,7 @@ async def delete_report(report_id: str):
 # PDF 下载（惰性生成）
 # ============================================================
 
+
 @router.get("/reports/{report_id}/pdf")
 async def download_pdf(report_id: str):
     """PDF 下载：惰性生成（首次请求在线程池生成，后续直接发文件）。"""
@@ -288,8 +332,23 @@ async def download_pdf(report_id: str):
     if safe_path is None or not safe_path.exists():
         raise HTTPException(status_code=404, detail="PDF 文件不存在")
 
+    # 业务文件名（按 docs/pdf-download-filename-plan.md）：
+    # 科瑞技术（002957）政策与公告排雷报告20260630.pdf
+    download_filename = format_stock_report_pdf_filename(
+        stock_name=record.get("stock_name"),
+        stock_code=record.get("stock_code") or report_id.split("_", 1)[0],
+        report_type="policy_minesweeper",
+        created_at=record.get("created_at"),
+    )
+
     return FileResponse(
         str(safe_path),
         media_type="application/pdf",
-        filename=f"policy_minesweeper_{report_id}.pdf",
+        filename=download_filename,
+        headers={
+            # 按 docs/pdf-generation-unification-plan.md §6.5：禁止浏览器/中间层缓存 PDF。
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )

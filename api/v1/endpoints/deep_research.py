@@ -36,6 +36,7 @@ from src.services.deep_research_service import (
     get_deep_research_dir,
     normalize_a_share,
 )
+from src.services.report_filename import format_stock_report_pdf_filename
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ _REPORT_ID_RE = re.compile(r"^\d{6}_\d{12}(_\d+)?$")
 # ============================================================
 # Schemas
 # ============================================================
+
 
 class DeepResearchRequest(BaseModel):
     stock_code: str
@@ -87,6 +89,7 @@ class ReportDetailResponse(BaseModel):
 # Helpers
 # ============================================================
 
+
 def _validate_report_id(report_id: str) -> str:
     """report_id 白名单校验（防路径穿越第一道关）。不通过抛 404。"""
     if not report_id or not _REPORT_ID_RE.fullmatch(report_id):
@@ -119,6 +122,7 @@ def _require_agent(config) -> None:
 # ============================================================
 # 生成（SSE 流式）
 # ============================================================
+
 
 @router.post("/generate/stream")
 async def generate_stream(request: DeepResearchRequest):
@@ -180,7 +184,11 @@ async def generate_stream(request: DeepResearchRequest):
                 except asyncio.TimeoutError:
                     # 心跳：保活连接（防 nginx 静默切断）
                     if time.time() - last_event_time >= HEARTBEAT_INTERVAL_S:
-                        yield "data: " + json.dumps({"type": "heartbeat"}, ensure_ascii=False) + "\n\n"
+                        yield (
+                            "data: "
+                            + json.dumps({"type": "heartbeat"}, ensure_ascii=False)
+                            + "\n\n"
+                        )
                     continue
                 last_event_time = time.time()
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -208,6 +216,7 @@ async def generate_stream(request: DeepResearchRequest):
 # ============================================================
 # 历史报告 CRUD
 # ============================================================
+
 
 @router.get("/reports", response_model=ReportListResponse)
 async def list_reports(
@@ -260,6 +269,7 @@ async def delete_report(report_id: str):
 # PDF 下载（惰性生成）
 # ============================================================
 
+
 @router.get("/reports/{report_id}/pdf")
 async def download_pdf(report_id: str):
     """PDF 下载：惰性生成（首次请求在线程池生成，后续直接发文件）。
@@ -275,7 +285,9 @@ async def download_pdf(report_id: str):
         raise HTTPException(status_code=404, detail="报告不存在")
 
     # 惰性生成（线程池，防阻塞）
-    pdf_path_str = await asyncio.to_thread(deep_research_service.get_pdf_path, report_id)
+    pdf_path_str = await asyncio.to_thread(
+        deep_research_service.get_pdf_path, report_id
+    )
     if not pdf_path_str:
         raise HTTPException(
             status_code=404,
@@ -287,8 +299,25 @@ async def download_pdf(report_id: str):
     if safe_path is None or not safe_path.exists():
         raise HTTPException(status_code=404, detail="PDF 文件不存在")
 
+    # 业务文件名（按 docs/pdf-download-filename-plan.md）：
+    # 科瑞技术（002957）深度投研报告20260630.pdf
+    download_filename = format_stock_report_pdf_filename(
+        stock_name=record.get("stock_name"),
+        stock_code=record.get("stock_code") or report_id.split("_", 1)[0],
+        report_type="deep_research",
+        created_at=record.get("created_at"),
+    )
+
     return FileResponse(
         str(safe_path),
         media_type="application/pdf",
-        filename=f"deep_research_{report_id}.pdf",  # 触发 Content-Disposition: attachment
+        filename=download_filename,  # 触发 Content-Disposition: attachment（前端 download.ts 会优先用）
+        headers={
+            # 按 docs/pdf-generation-unification-plan.md §6.5：禁止浏览器/中间层缓存 PDF，
+            # 避免服务端修复后用户仍看到旧文件。服务端 pdf_path 缓存仍复用，no-store
+            # 只要求浏览器回源，不会每次重新渲染。
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )

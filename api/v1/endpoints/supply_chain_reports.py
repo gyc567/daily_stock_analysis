@@ -37,6 +37,11 @@ from src.services.supply_chain_report_service import (
     get_supply_chain_report_dir,
     supply_chain_report_service,
 )
+from src.services.report_filename import (
+    format_stock_report_pdf_filename,
+    format_topic_report_pdf_filename,
+)
+
 # 复用旧 supply_chain 端点的工具中文显示名（供应链共享问股工具集 + 专属打分工具）
 from api.v1.endpoints.supply_chain import SUPPLY_CHAIN_TOOL_DISPLAY_NAMES
 
@@ -56,13 +61,22 @@ _REPORT_ID_RE = re.compile(r"^sc_\d{12}(_\d+)?$")
 # Schemas
 # ============================================================
 
+
 class SupplyChainGenerateRequest(BaseModel):
     # Layer 3（数据守门员）：I/O 边界第一道关 —— 格式/范围在解析期校验，
     # 畸形输入直接 422，不浪费 SSE 线程。语义级空主题校验在 service 层兜底。
+    #
+    # 可选单股绑定（按 docs/pdf-download-filename-plan.md §供应链报告边界 阶段 1）：
+    # 当 ``stock_code`` / ``stock_name`` 至少给一个时，PDF 文件名遵循
+    # ``股票名（代码）报告类型YYYYMMDD.pdf``；都为空时仍走主题型命名（向后兼容）。
     model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
 
-    topic: Annotated[str, Field(..., min_length=1, max_length=1000, description="分析主题")]
+    topic: Annotated[
+        str, Field(..., min_length=1, max_length=1000, description="分析主题")
+    ]
     research_hint: Optional[Annotated[str, Field(max_length=2000)]] = None
+    stock_code: Optional[Annotated[str, Field(min_length=1, max_length=20)]] = None
+    stock_name: Optional[Annotated[str, Field(min_length=1, max_length=64)]] = None
 
 
 class ReportListItem(BaseModel):
@@ -95,6 +109,7 @@ class ReportDetailResponse(BaseModel):
 # Helpers
 # ============================================================
 
+
 def _validate_report_id(report_id: str) -> str:
     """report_id 白名单校验（防路径穿越第一道关）。不通过抛 404。"""
     if not report_id or not _REPORT_ID_RE.fullmatch(report_id):
@@ -124,6 +139,7 @@ def _require_agent(config: Any) -> None:
 # ============================================================
 # 生成（SSE 流式）
 # ============================================================
+
 
 @router.post("/generate/stream")
 async def generate_stream(request: SupplyChainGenerateRequest) -> StreamingResponse:
@@ -155,6 +171,8 @@ async def generate_stream(request: SupplyChainGenerateRequest) -> StreamingRespo
             supply_chain_report_service.generate_report(
                 raw_topic=request.topic,
                 raw_hint=request.research_hint,
+                raw_code=request.stock_code,
+                raw_name=request.stock_name,
                 progress_callback=progress_callback,
             )
         except SupplyChainReportInputError as exc:
@@ -180,9 +198,11 @@ async def generate_stream(request: SupplyChainGenerateRequest) -> StreamingRespo
                     )
                 except asyncio.TimeoutError:
                     if time.time() - last_event_time >= HEARTBEAT_INTERVAL_S:
-                        yield "data: " + json.dumps(
-                            {"type": "heartbeat"}, ensure_ascii=False
-                        ) + "\n\n"
+                        yield (
+                            "data: "
+                            + json.dumps({"type": "heartbeat"}, ensure_ascii=False)
+                            + "\n\n"
+                        )
                     continue
                 last_event_time = time.time()
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -194,7 +214,9 @@ async def generate_stream(request: SupplyChainGenerateRequest) -> StreamingRespo
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
             except Exception as exc:
-                logger.debug("[SupplyChainReport] executor cleanup error (ignored): %s", exc)
+                logger.debug(
+                    "[SupplyChainReport] executor cleanup error (ignored): %s", exc
+                )
 
     return StreamingResponse(
         event_generator(),
@@ -210,6 +232,7 @@ async def generate_stream(request: SupplyChainGenerateRequest) -> StreamingRespo
 # ============================================================
 # 历史报告 CRUD
 # ============================================================
+
 
 @router.get("/reports", response_model=ReportListResponse)
 async def list_reports(
@@ -257,6 +280,7 @@ async def delete_report(report_id: str):
 # PDF 下载（惰性生成）
 # ============================================================
 
+
 @router.get("/reports/{report_id}/pdf")
 async def download_pdf(report_id: str):
     """PDF 下载：惰性生成（首次请求在线程池生成，后续直接发文件）。"""
@@ -279,8 +303,32 @@ async def download_pdf(report_id: str):
     if safe_path is None or not safe_path.exists():
         raise HTTPException(status_code=404, detail="PDF 文件不存在")
 
+    # 业务文件名（按 docs/pdf-download-filename-plan.md §供应链报告边界）：
+    # 绑定了单股（stock_code 非空）→ 单股型 ``股票名（代码）报告类型YYYYMMDD.pdf``
+    # 未绑定（历史报告 / 用户未填）→ 主题型 ``主题供应链分析报告YYYYMMDD.pdf`` 兜底
+    record_stock_code = record.get("stock_code")
+    record_stock_name = record.get("stock_name")
+    if record_stock_code:
+        download_filename = format_stock_report_pdf_filename(
+            stock_name=record_stock_name,
+            stock_code=record_stock_code,
+            report_type="supply_chain",
+            created_at=record.get("created_at"),
+        )
+    else:
+        download_filename = format_topic_report_pdf_filename(
+            topic=record.get("topic") or "供应链分析",
+            created_at=record.get("created_at"),
+        )
+
     return FileResponse(
         str(safe_path),
         media_type="application/pdf",
-        filename=f"supply_chain_{report_id}.pdf",
+        filename=download_filename,
+        headers={
+            # 按 docs/pdf-generation-unification-plan.md §6.5：禁止浏览器/中间层缓存 PDF。
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )

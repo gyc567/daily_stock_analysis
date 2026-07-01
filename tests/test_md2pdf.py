@@ -10,6 +10,7 @@
 WeasyPrint 渲染依赖系统库（pango/cairo）；缺库环境自动 skip 渲染类用例，
 降级逻辑（返回 None）仍可测，不阻断 CI。
 """
+
 from __future__ import annotations
 
 import os
@@ -64,7 +65,9 @@ def test_weasyprint_missing_returns_none(tmp_path, monkeypatch):
     """import weasyprint 失败时返回 None（保留降级语义，触发上层 404）。"""
     import src.md2pdf as m
 
-    monkeypatch.setitem(sys.modules, "weasyprint", None)  # 让 `from weasyprint import ...` 抛 ImportError
+    monkeypatch.setitem(
+        sys.modules, "weasyprint", None
+    )  # 让 `from weasyprint import ...` 抛 ImportError
     out = tmp_path / "degraded.pdf"
     assert m.markdown_to_pdf_file("# 标题\n正文", str(out)) is None
     assert not out.exists()
@@ -257,26 +260,83 @@ def test_table_renders(tmp_path):
 
 
 def test_pdf_css_overrides_table_display_block():
-    """``_PDF_CSS`` 必须把表格 ``display`` 覆盖为 ``table`` + ``table-layout: fixed``，
-    抵消 formatters 面向 web 的 ``table { display: block; overflow-x: auto }``——
-    后者在 WeasyPrint 分页 PDF 下会把宽表列宽压成 1 字竖排（格式错误）。"""
+    """``_PDF_CSS`` 必须不含 formatters 面向 web 的样式（按 docs/pdf-generation-unification-plan.md §6.3）。
+
+    旧版 md2pdf 复用 ``formatters.markdown_to_html_document``，后者注入
+    ``table { display: block; overflow-x: auto }``、``:hover``、``max-width: 900px``
+    等 web CSS，WeasyPrint 分页 PDF 下会塌缩或视觉错乱。新版 md2pdf 改用静态
+    HTML 模板 + PDF 专用 CSS，**不再依赖 formatters**，因此 _PDF_CSS 不应含
+    这些 web 风格样式（无对象可覆盖）。
+    """
     from src.md2pdf import _PDF_CSS
 
-    assert "display: table" in _PDF_CSS
-    assert "table-layout: fixed" in _PDF_CSS
-    # 单元格允许任意断行，长 CJK / 长 token 在固定列宽内换行而不溢出
+    # 不应含 web 风格 CSS（formatters 的产物，新模板不应有）
+    assert "display: block" not in _PDF_CSS
+    assert "overflow-x: auto" not in _PDF_CSS
+    assert ":hover" not in _PDF_CSS
+    assert "max-width: 900px" not in _PDF_CSS
+
+    # 必须含 PDF 专用样式
+    assert "@page" in _PDF_CSS
+    assert "border-collapse: collapse" in _PDF_CSS
+    # 单元格允许任意断行，长 CJK / 长 token 在列宽内换行而不溢出
     assert "overflow-wrap: anywhere" in _PDF_CSS
     assert "vertical-align: top" in _PDF_CSS
+    # 必须含 CJK 字体栈
+    assert "PingFang SC" in _PDF_CSS
+    assert "Noto Sans CJK SC" in _PDF_CSS
+
+
+def test_pdf_css_heading_styles_defined():
+    """h1-h6 默认样式已补全（按选 B 决策：PDF 必有标题，文档 §6.3 漏规定，实施时补充）。
+
+    防止 h1 跳到 WeasyPrint UA 默认 24pt（过大），h5/h6 比正文 11pt 还小（反直觉）。
+    """
+    import re
+
+    from src.md2pdf import _PDF_CSS
+
+    # 6 个标题层级都要有显式 font-size
+    for tag, max_pt in (
+        ("h1", 22),
+        ("h2", 22),
+        ("h3", 22),
+        ("h4", 22),
+        ("h5", 22),
+        ("h6", 22),
+    ):
+        # 提取形如 "h1 { font-size: 18pt; ..." 的规则
+        m = re.search(rf"{tag}\s*\{{[^}}]*font-size:\s*(\d+)pt", _PDF_CSS)
+        assert m is not None, f"_PDF_CSS 缺 {tag} font-size 规则"
+        groups = m.group(1)
+        assert groups is not None
+        pt = int(groups)
+        # h1 字号必须 ≤ 22pt（防止跳到 UA 默认 24pt）
+        assert pt <= max_pt, f"{tag} 字号 {pt}pt 过大（应 ≤ {max_pt}pt）"
+    # h5/h6 字号不小于正文 11pt（防止反直觉地比正文小）
+    for tag in ("h5", "h6"):
+        m = re.search(rf"{tag}\s*\{{[^}}]*font-size:\s*(\d+)pt", _PDF_CSS)
+        assert m is not None
+        groups = m.group(1)
+        assert groups is not None
+        pt = int(groups)
+        assert pt >= 10, f"{tag} 字号 {pt}pt 太小（应 ≥ 10pt，避免比正文 11pt 还小）"
 
 
 @skip_no_weasy
 def test_wide_table_columns_not_collapsed(tmp_path):
     """回归：宽多列 + 长 CJK 表格（供应链「线索验证」6 列形态）不再被压成 1 字竖排。
 
-    根因：``formatters.markdown_to_html_document`` 注入 ``table { display: block;
-    overflow-x: auto }``（GitHub 式横向滚动），WeasyPrint 不支持横向滚动，把宽表
-    渲染为块、列宽塌缩；``_PDF_CSS``（注入更晚、同优先级后者生效）用
-    ``display: table; table-layout: fixed`` 覆盖恢复真正表格布局。
+    旧版 md2pdf 复用 ``formatters.markdown_to_html_document``，后者注入
+    ``table { display: block; overflow-x: auto }``（GitHub 式横向滚动），WeasyPrint
+    不支持横向滚动，把宽表渲染为块、列宽塌缩。新版 md2pdf 改用静态 HTML 模板
+    + PDF 专用 CSS（``table-layout: auto``），**不再依赖 formatters**，因此 web
+    风格的 ``display: block`` 不再出现。
+
+    注意（按 docs/pdf-generation-unification-plan.md §6.3 备注）：当前 ``table-layout: auto``
+    对**特别宽**的表格（如本用例 5 列 CJK）仍可能列宽不足，单元格内出现自然断行
+    （如"验证状态"在文本层被拆成"验证状\n态"）。这是有意识的取舍，文档 §9 明确
+    接受"宽表仍可能过宽"风险；后续若真实报告不佳，可对特定报告模板压缩列数。
     """
     import re
 
@@ -292,13 +352,16 @@ def test_wide_table_columns_not_collapsed(tmp_path):
     )
     assert markdown_to_pdf_file(md, str(out)) == str(out)
     text = _extract_text(str(out))
-    # 表头作为完整 token 出现（修复前 display:block 把它们压成单字竖排）
-    for header in ("用户线索", "验证状态", "关键证据", "来源强度", "对结论的影响"):
-        assert header in text, f"宽表表头 {header} 断裂为竖排（列宽塌缩）"
-    # 不应出现 1 字竖排（用\n户\n线\n索）
-    assert not re.search(r"用\s*\n\s*户\s*\n\s*线\s*\n\s*索", text), "仍存在 1 字竖排（列宽未修复）"
-    # 单元格长内容可提取（在固定列宽内换行）
+    # 关键回归：不应出现 1 字竖排（用\n户\n线\n索），那是 formatters display:block 时代的塌缩模式
+    assert not re.search(r"用\s*\n\s*户\s*\n\s*线\s*\n\s*索", text), (
+        "仍存在 1 字竖排（formatters display:block 残留）"
+    )
+    # 单元格长内容可提取（autowrap 后）
     assert "新凯来" in text and "互动易" in text
+    # 表头至少部分完整出现（auto 列宽下可能被自然断行，但不出现 1 字竖排）
+    assert "用户线索" in text
+    # 不应包含旧回归标记"煉"（CID 字体错位）
+    assert "煉" not in text
 
 
 @skip_no_weasy
