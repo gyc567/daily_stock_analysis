@@ -1,6 +1,7 @@
 import apiClient from './index';
 import { API_BASE_URL } from '../utils/constants';
 import { createApiError, isApiRequestError, parseApiError } from './error';
+import { downloadPdfFromUrl } from './download';
 
 /** 时间窗口：short(1-5日) / medium(1-4周) / long(1-6月)。 */
 export type PolicyMinesweeperHorizon = 'short' | 'medium' | 'long';
@@ -138,28 +139,6 @@ export const policyMinesweeperApi = {
   async downloadPdf(reportId: string): Promise<void> {
     const base = API_BASE_URL || '';
     const url = `${base}/api/v1/policy-minesweeper/reports/${reportId}/pdf`;
-    const response = await fetch(url, { credentials: 'include' });
-    if (!response.ok) {
-      let backendDetail = '';
-      try {
-        const body = await response.json();
-        const msg = body?.message || body?.detail;
-        backendDetail = msg ? `: ${msg}` : '';
-      } catch {
-        // 非 JSON 响应，忽略
-      }
-      throw new Error(
-        `PDF 下载失败（${response.status}）${backendDetail}，请检查日志或稍后重试`,
-      );
-    }
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = `policy_minesweeper_${reportId}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
+    await downloadPdfFromUrl(url, 'policy_minesweeper', reportId);
   },
 };

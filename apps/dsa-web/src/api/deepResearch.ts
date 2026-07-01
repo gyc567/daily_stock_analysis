@@ -1,6 +1,7 @@
 import apiClient from './index';
 import { API_BASE_URL } from '../utils/constants';
 import { createApiError, isApiRequestError, parseApiError } from './error';
+import { downloadPdfFromUrl } from './download';
 
 export interface DeepResearchGenerateRequest {
   stock_code: string;
@@ -127,29 +128,6 @@ export const deepResearchApi = {
   async downloadPdf(reportId: string): Promise<void> {
     const base = API_BASE_URL || '';
     const url = `${base}/api/v1/deep-research/reports/${reportId}/pdf`;
-    const response = await fetch(url, { credentials: 'include' });
-    if (!response.ok) {
-      // 后端失败返回 {error, message, detail}（全局异常包装）；解析回显更具体原因
-      let backendDetail = '';
-      try {
-        const body = await response.json();
-        const msg = body?.message || body?.detail;
-        backendDetail = msg ? `: ${msg}` : '';
-      } catch {
-        // 非 JSON 响应，忽略
-      }
-      throw new Error(
-        `PDF 下载失败（${response.status}）${backendDetail}，请检查日志或稍后重试`,
-      );
-    }
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = `deep_research_${reportId}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
+    await downloadPdfFromUrl(url, 'deep_research', reportId);
   },
 };

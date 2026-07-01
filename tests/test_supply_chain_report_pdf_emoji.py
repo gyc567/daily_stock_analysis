@@ -2,11 +2,21 @@
 """供应链报告 PDF emoji 乱码修复测试。
 
 根因：WeasyPrint 无法把彩色 emoji 位图嵌入 PDF，⚠️ 等路由到 Apple-Color-Emoji
-字体时渲染成豆腐块。修复 = ``supply_chain_report_service._generate_pdf`` 渲染前用
-``strip_emoji_for_pdf`` 剥彩色 emoji + 变体选择符（保留 CJK/①②③/≤/μ/•/→/——）。
+字体时渲染成豆腐块。
+
+按 docs/pdf-generation-unification-plan.md §6.4，原 supply_chain service 局部
+``strip_emoji_for_pdf`` + ``_EMOJI_STRIP_RE`` 已**下沉到 ``src.md2pdf``** 作为共享
+函数。本测试改造（保留全部用例）：
+- 改为从 ``src.md2pdf`` 导入 ``strip_emoji_for_pdf``（同时验证 supply_chain service
+  不再持有该函数定义）。
+- 保留 10 个 strip_* 纯函数用例（断言无需大改）。
+- 保留 2 个渲染回归用例：验证共享 ``md2pdf`` 在 ``_generate_pdf`` 流程里仍正确
+  剥离 emoji、``_generate_pdf`` 不再手动调用 ``strip_emoji_for_pdf``、``.md`` 原文
+  不动。
 
 覆盖：
 - ``strip_emoji_for_pdf`` 纯函数：剥 emoji、保信息性字符、None/空安全。
+- service 内部不再定义 ``strip_emoji_for_pdf``（迁移到 md2pdf）。
 - 渲染回归：含 ⚠️ 的 md 经 ``_generate_pdf`` → PDF 文本层无 ⚠、正文保留。
 """
 
@@ -22,11 +32,12 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+# 共享 strip_emoji_for_pdf 现位于 src.md2pdf（按 docs/pdf-generation-unification-plan.md §6.4）
+# 旧 import 路径（src.services.supply_chain_report_service.strip_emoji_for_pdf）保留为
+# back-compat re-export 仍可工作，但**首选**直接导入新位置。
+from src.md2pdf import strip_emoji_for_pdf  # noqa: E402
 import src.services.supply_chain_report_service as svc  # noqa: E402
-from src.services.supply_chain_report_service import (  # noqa: E402
-    SupplyChainReportService,
-    strip_emoji_for_pdf,
-)
+from src.services.supply_chain_report_service import SupplyChainReportService  # noqa: E402
 
 # macOS 先配好 brew lib 路径，确保 weasyprint 可 import
 try:
@@ -39,6 +50,26 @@ try:
     from pypdf import PdfReader  # noqa: E402
 except Exception:  # noqa: BLE001
     PdfReader = None
+
+
+# --------------------------------------------------------------------------- #
+# 迁移验证：supply_chain service 不再持有 _EMOJI_STRIP_RE 与本地 strip_emoji_for_pdf 定义
+# --------------------------------------------------------------------------- #
+
+
+def test_service_no_longer_defines_emoji_strip_re():
+    """emoji 剥离已下沉到 src.md2pdf，service 模块不再持有 _EMOJI_STRIP_RE 私有符号。"""
+    assert not hasattr(svc, "_EMOJI_STRIP_RE"), (
+        "supply_chain_report_service._EMOJI_STRIP_RE 已迁移到 src.md2pdf，"
+        "service 模块不应再持有该符号"
+    )
+
+
+def test_strip_emoji_for_pdf_re_exported_from_service():
+    """back-compat re-export：旧 import 路径仍可工作（避免破坏现有调用方）。"""
+    assert svc.strip_emoji_for_pdf is strip_emoji_for_pdf, (
+        "supply_chain_report_service.strip_emoji_for_pdf 应为 src.md2pdf 共享函数的 re-export"
+    )
 
 
 def _weasyprint_ready() -> bool:
@@ -150,7 +181,9 @@ def test_generate_pdf_md_file_not_untouched(tmp_path, monkeypatch):
     original = "# 报告\n\n⚠️ 警告内容 📈\n"
     md_file.write_text(original, encoding="utf-8")
     record = SimpleNamespace(id="sc_test", md_path=str(md_file), pdf_path=None)
-    monkeypatch.setattr(svc, "get_db", lambda: MagicMock(set_supply_chain_pdf_path=lambda *a: True))
+    monkeypatch.setattr(
+        svc, "get_db", lambda: MagicMock(set_supply_chain_pdf_path=lambda *a: True)
+    )
 
     SupplyChainReportService()._generate_pdf(record)
 

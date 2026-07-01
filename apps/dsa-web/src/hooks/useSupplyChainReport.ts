@@ -58,7 +58,12 @@ export function useSupplyChainReport() {
   }, [clearWatchdog]);
 
   const generate = useCallback(
-    async (topic: string, researchHint?: string) => {
+    async (
+      topic: string,
+      researchHint?: string,
+      stockCode?: string,
+      stockName?: string,
+    ) => {
       // 重置状态
       setStatus('generating');
       setProgressSteps([]);
@@ -72,7 +77,12 @@ export function useSupplyChainReport() {
 
       try {
         const response = await supplyChainReportApi.generateStream(
-          { topic, research_hint: researchHint },
+          {
+            topic,
+            research_hint: researchHint,
+            stock_code: stockCode,
+            stock_name: stockName,
+          },
           { signal: ac.signal },
         );
         const reader = response.body?.getReader();
@@ -120,6 +130,8 @@ export function useSupplyChainReport() {
                 id: rid ?? '',
                 topic,
                 research_hint: researchHint,
+                stock_code: stockCode,
+                stock_name: stockName,
                 markdown: event.markdown || '',
                 status: event.status,
                 total_steps: event.total_steps,
