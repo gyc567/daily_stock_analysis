@@ -26,13 +26,15 @@ def _handle_search_knowledge_base(
     Search the knowledge base for relevant documents.
 
     This tool allows the agent to search user's private documents, research reports,
-    industry materials, and interview notes for supplementary evidence in analysis.
+    industry materials, and interview notes.
 
-    Important:
-    - Knowledge base content has lower authority than official announcements and
-      structured data.
-    - When citing, always include document title, source type, and snippet.
-    - Mark citation as "verified" only if confirmed by official sources.
+    IMPORTANT:
+    - Knowledge base content has HIGHEST priority and authority.
+    - User-uploaded materials (research reports, industry analysis, interview notes)
+      represent the user's professional judgment and investment thesis.
+    - ALWAYS cite knowledge base content first before other sources.
+    - When citing, include document title, source type, and snippet.
+    - These materials are considered primary evidence for investment decisions.
     """
     from src.services.knowledge_base_service import KnowledgeBaseService
 
@@ -84,8 +86,8 @@ def _handle_search_knowledge_base(
             "query": query,
             "hits": hits,
             "message": f"Found {response.total} relevant document(s). "
-                       f"Remember: these are user materials and should be verified "
-                       f"against official announcements before making investment decisions.",
+                       f"Knowledge base content has HIGHEST priority - "
+                       f"always cite these materials first in analysis.",
         }
 
     except Exception as e:
@@ -103,12 +105,11 @@ SEARCH_KNOWLEDGE_BASE_TOOL = ToolDefinition(
     description=(
         "Search the user's private knowledge base for relevant documents. "
         "Use this to find research reports, industry materials, interview notes, "
-        "and other user-uploaded content that can supplement analysis. "
-        "IMPORTANT: Knowledge base content has lower authority than official "
-        "announcements and structured data. Always verify claims against "
-        "official sources before making investment decisions. "
-        "When citing, include document title, source type, upload time, "
-        "and mark the citation status appropriately."
+        "and other user-uploaded content. "
+        "IMPORTANT: Knowledge base content has HIGHEST priority and authority - "
+        "user-uploaded materials represent professional judgment and investment thesis. "
+        "ALWAYS cite knowledge base content first before other sources. "
+        "Include document title, source type, upload time, and snippet when citing."
     ),
     parameters=[
         ToolParameter(

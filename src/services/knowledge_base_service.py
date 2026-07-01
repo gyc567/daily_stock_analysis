@@ -529,7 +529,11 @@ class KnowledgeBaseService:
                 score = row.rank if row.rank else 0.5
                 # Recency boost: newer docs get slightly higher score
                 if row.updated_at:
-                    days_old = (datetime.now() - row.updated_at).days
+                    updated_at = row.updated_at
+                    # Handle both datetime and string formats
+                    if isinstance(updated_at, str):
+                        updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                    days_old = (datetime.now() - updated_at).days
                     recency_boost = max(0, 0.1 - days_old * 0.001)
                     score = score * (1 + recency_boost)
 
@@ -568,27 +572,35 @@ class KnowledgeBaseService:
             )
 
     def _prepare_fts_query(self, query: str) -> str:
-        """Prepare query for FTS5 (handle special chars, support Chinese)."""
-        # FTS5 query syntax: terms separated by space are AND
-        # Support quoted phrases
-        import re
+        """
+        Prepare query for FTS5 (handle special chars, support Chinese).
 
+        SQLite FTS5 default tokenizer doesn't support Chinese word segmentation.
+        Use prefix matching (wildcard) for Chinese: '华为*' matches documents
+        containing words starting with '华为'.
+        """
         query = query.strip()
         if not query:
             return '""'
 
-        # Escape special FTS5 characters
-        special_chars = ['"', "'", "(", ")", "*", ":", "^", "-", "+", "~"]
+        # Escape special FTS5 characters except *
+        special_chars = ['"', "'", "(", ")", ":", "^", "-", "+", "~"]
         for char in special_chars:
             query = query.replace(char, " ")
 
-        # Split into terms and rephrase for Chinese/English
+        # Split into terms
         terms = query.split()
-        if len(terms) == 1:
-            return f'"{terms[0]}"' if terms[0] else '""'
+        if not terms:
+            return '""'
 
-        # Use AND for multiple terms
-        return " ".join(f'"{t}"' for t in terms if t)
+        # For Chinese text, FTS5 default tokenizer requires prefix matching.
+        # Use wildcard suffix for each term: '华为*' matches '华为', '华为芯片', etc.
+        # This works because Chinese characters are treated as individual tokens.
+        fts_terms = [f"{term}*" for term in terms if term]
+
+        # Use OR for multiple terms (more permissive) or AND (stricter)
+        # Use AND for precise matching
+        return " AND ".join(fts_terms)
 
     # =====================================================================
     # Helper Methods

@@ -96,3 +96,7 @@ static/
 /apps/dsa-desktop/node_modules/
 docs/specs/
 .gstack/
+
+# graphify skill 输出（一次性本地产物，不入仓）
+/graphify-out/
+/src/graphify-out/
