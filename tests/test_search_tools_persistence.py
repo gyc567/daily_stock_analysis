@@ -26,7 +26,9 @@ def _response(query: str, *, success: bool = True) -> SearchResponse:
                 source="example.com",
                 published_date="2026-04-24",
             )
-        ] if success else [],
+        ]
+        if success
+        else [],
     )
 
 
@@ -39,8 +41,12 @@ class SearchToolsPersistenceTest(unittest.TestCase):
         )
         db = SimpleNamespace(save_news_intel=MagicMock(return_value=1))
 
-        with patch("src.agent.tools.search_tools._get_search_service", return_value=service), \
-             patch("src.agent.tools.search_tools._get_db", return_value=db):
+        with (
+            patch(
+                "src.agent.tools.search_tools._get_search_service", return_value=service
+            ),
+            patch("src.agent.tools.search_tools._get_db", return_value=db),
+        ):
             result = _handle_search_stock_news("600519", "贵州茅台")
 
         self.assertTrue(result["success"])
@@ -51,9 +57,13 @@ class SearchToolsPersistenceTest(unittest.TestCase):
             query=response.query,
             response=response,
             query_context=None,
+            source_type=None,
+            reliability_hint=None,
         )
 
-    def test_search_comprehensive_intel_persists_successful_dimensions_only(self) -> None:
+    def test_search_comprehensive_intel_persists_successful_dimensions_only(
+        self,
+    ) -> None:
         latest = _response("latest")
         failed = _response("risk", success=False)
         service = SimpleNamespace(
@@ -65,8 +75,12 @@ class SearchToolsPersistenceTest(unittest.TestCase):
         )
         db = SimpleNamespace(save_news_intel=MagicMock(return_value=1))
 
-        with patch("src.agent.tools.search_tools._get_search_service", return_value=service), \
-             patch("src.agent.tools.search_tools._get_db", return_value=db):
+        with (
+            patch(
+                "src.agent.tools.search_tools._get_search_service", return_value=service
+            ),
+            patch("src.agent.tools.search_tools._get_db", return_value=db),
+        ):
             result = _handle_search_comprehensive_intel("600519", "贵州茅台")
 
         self.assertEqual(result["report"], "report")
@@ -78,6 +92,8 @@ class SearchToolsPersistenceTest(unittest.TestCase):
             query=latest.query,
             response=latest,
             query_context=None,
+            source_type=None,
+            reliability_hint=None,
         )
 
     def test_persistence_failure_keeps_search_result(self) -> None:
@@ -86,10 +102,16 @@ class SearchToolsPersistenceTest(unittest.TestCase):
             is_available=True,
             search_stock_news=MagicMock(return_value=response),
         )
-        db = SimpleNamespace(save_news_intel=MagicMock(side_effect=RuntimeError("db locked")))
+        db = SimpleNamespace(
+            save_news_intel=MagicMock(side_effect=RuntimeError("db locked"))
+        )
 
-        with patch("src.agent.tools.search_tools._get_search_service", return_value=service), \
-             patch("src.agent.tools.search_tools._get_db", return_value=db):
+        with (
+            patch(
+                "src.agent.tools.search_tools._get_search_service", return_value=service
+            ),
+            patch("src.agent.tools.search_tools._get_db", return_value=db),
+        ):
             result = _handle_search_stock_news("600519", "贵州茅台")
 
         self.assertTrue(result["success"])
@@ -98,8 +120,13 @@ class SearchToolsPersistenceTest(unittest.TestCase):
     def test_unavailable_or_failed_search_does_not_persist(self) -> None:
         unavailable = SimpleNamespace(is_available=False)
         db = SimpleNamespace(save_news_intel=MagicMock())
-        with patch("src.agent.tools.search_tools._get_search_service", return_value=unavailable), \
-             patch("src.agent.tools.search_tools._get_db", return_value=db):
+        with (
+            patch(
+                "src.agent.tools.search_tools._get_search_service",
+                return_value=unavailable,
+            ),
+            patch("src.agent.tools.search_tools._get_db", return_value=db),
+        ):
             result = _handle_search_stock_news("600519", "贵州茅台")
 
         self.assertIn("error", result)
@@ -107,10 +134,16 @@ class SearchToolsPersistenceTest(unittest.TestCase):
 
         failed = SimpleNamespace(
             is_available=True,
-            search_stock_news=MagicMock(return_value=_response("latest", success=False)),
+            search_stock_news=MagicMock(
+                return_value=_response("latest", success=False)
+            ),
         )
-        with patch("src.agent.tools.search_tools._get_search_service", return_value=failed), \
-             patch("src.agent.tools.search_tools._get_db", return_value=db):
+        with (
+            patch(
+                "src.agent.tools.search_tools._get_search_service", return_value=failed
+            ),
+            patch("src.agent.tools.search_tools._get_db", return_value=db),
+        ):
             result = _handle_search_stock_news("600519", "贵州茅台")
 
         self.assertFalse(result["success"])

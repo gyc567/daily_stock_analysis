@@ -30,13 +30,18 @@ if TYPE_CHECKING:  # 避免 import 时强依赖 litellm（部署环境才有）
 logger = logging.getLogger(__name__)
 
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_SYSTEM_PROMPT_PATH = os.path.join(_PROJECT_ROOT, "data", "deep_research", "system_prompt.md")
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+_SYSTEM_PROMPT_PATH = os.path.join(
+    _PROJECT_ROOT, "data", "deep_research", "system_prompt.md"
+)
 
 
 # system_prompt.md 缺失时的兜底（极简版，保证不崩）
-_FALLBACK_SYSTEM_PROMPT = """你是 A 股投研总监。对指定股票生成深度投研报告，遵循五层穿透框架：宏观→产业→财务→估值→博弈。
-每层必须调用工具获取真实数据，每章首句用【结论】前置，三情景概率和=100%，数字锚定所有观点，禁止编造数据。
+_FALLBACK_SYSTEM_PROMPT = """你是 A 股投研总监。对指定股票生成深度投研报告，遵循「消息面+产业链主导」框架：
+消息面与产业政策 → 产业链位置与瓶颈 → 国产替代 / 中美链 → 材料工艺独特地位 → 财务与估值 → 技术面与筹码（次要，≤15%）。
+每章必含【结论】前置；国产替代/中美链先答适用性（强相关/低相关/不适用）；三情景概率和=100%；数字锚定所有观点，禁止编造。
 （注：完整框架加载失败，正在使用兜底提示，请检查 data/deep_research/system_prompt.md）"""
 
 
@@ -46,7 +51,11 @@ def build_deep_research_system_prompt() -> str:
         with open(_SYSTEM_PROMPT_PATH, encoding="utf-8") as fh:
             return fh.read()
     except OSError as exc:
-        logger.warning("[DeepResearch] system_prompt.md 读取失败 (%s): %s", _SYSTEM_PROMPT_PATH, exc)
+        logger.warning(
+            "[DeepResearch] system_prompt.md 读取失败 (%s): %s",
+            _SYSTEM_PROMPT_PATH,
+            exc,
+        )
         return _FALLBACK_SYSTEM_PROMPT
 
 
@@ -114,7 +123,10 @@ class DeepResearchExecutor:
                 {
                     "type": "thinking",
                     "step": 0,
-                    "message": f"开始对 {stock_name}（{stock_code}）进行五层穿透深度分析...",
+                    "message": (
+                        f"开始对 {stock_name}（{stock_code}）进行"
+                        "消息面+产业链主导的深度投研分析（技术面降权）..."
+                    ),
                 }
             )
 
@@ -148,7 +160,11 @@ class DeepResearchExecutor:
             retry_result = self._retry_with_hints(
                 messages, validation.missing_layers, progress_callback
             )
-            if retry_result is not None and retry_result.success and retry_result.content:
+            if (
+                retry_result is not None
+                and retry_result.success
+                and retry_result.content
+            ):
                 retry_validation = validator.validate(
                     retry_result.content, retry_result.tool_calls_log
                 )
@@ -190,17 +206,37 @@ class DeepResearchExecutor:
 
     @staticmethod
     def _build_user_message(stock_code: str, stock_name: str, report_type: str) -> str:
+        """按 docs/deep_research-chain-news-logic-plan.md 调整：
+
+        - 框架由「五层穿透」改为「消息面 + 产业链 + 国产替代 + 中美链 + 财务估值 + 技术辅助」
+        - 数据收集顺序：消息面 → 产业链 → 国产替代 / 中美链 → 财务估值 → 技术辅助
+        - 国产替代 / 中美链先判适用性；低相关行业不硬套
+        - 技术面降权（≤ 15% 篇幅，不得推翻产业链主判断）
+        - 报告骨架严格按 system prompt 的新八章（投资结论 + 一至八）
+        """
         return (
             f"请对 A 股 **{stock_name}（{stock_code}）** 生成一份完整的深度投研报告（{report_type}）。\n\n"
-            "严格要求：\n"
-            "1. 严格按五层穿透框架（宏观→产业→财务→估值→博弈）逐层分析，**不可跳层**；\n"
-            "2. 每一层都必须调用相应工具获取真实数据（宏观层调 get_market_indices + search_comprehensive_intel，"
-            "产业层调 get_sector_rankings，财务层调 get_stock_info，博弈层调 analyze_trend/get_chip_distribution/get_capital_flow）；\n"
-            "3. 每一层都注入「政策敏感度因子」和「筹码结构因子」；\n"
-            "4. 每个一级章节首句用 **【结论】** 前置；\n"
-            "5. 三情景（牛市/基准/熊市）概率和严格=100%；\n"
-            "6. 所有观点用数字锚定，取不到的数据标注「数据缺失」，禁止编造。\n\n"
-            "数据收集充分后，按 system prompt 的八章节骨架输出完整 Markdown 报告。"
+            "分析框架（消息面 + 产业链主导，技术面降权）：\n"
+            "1. **按下列顺序收集数据**：消息面与产业政策 → 产业链位置与瓶颈 → 国产替代 / 中美链 → "
+            "材料工艺独特地位 → 财务与估值 → 技术面与筹码节奏（次要）；\n"
+            "2. **必须先调工具**（按章节匹配）：\n"
+            "   - 消息面：`search_stock_news` 或 `search_comprehensive_intel`（**且** `get_market_indices`）\n"
+            "   - 产业链：`get_sector_rankings`（**且** `search_comprehensive_intel`）；P1 后必调 `verify_supply_chain_evidence` 校验板块归属\n"
+            "   - 财务估值：`get_stock_info`\n"
+            "   - 技术面：`analyze_trend` / `get_chip_distribution` / `get_capital_flow` 满足其一即可，**不调用不阻断**\n"
+            "3. **国产替代 / 中美链必须先答适用性**：\n"
+            "   - 强相关行业（半导体/AI算力/光模块/CPO/芯片设备材料/新能源车/锂电/光伏/储能/高端制造/机器人/军工/工业母机/医药器械/创新药关键设备材料/工业软件/信创/基础材料/关键零部件）：必须展开，**必须标注替代阶段** `传闻/送样/验证/导入/量产`；\n"
+            "   - 低相关行业（白酒/银行/保险/传统地产/公用事业/纯消费品牌）：固定写「国产替代 / 中美平行链：低相关。本公司核心逻辑不来自进口替代或中美链重构，报告不强行套用」，**不展开**；\n"
+            "   - **不得**把社区传闻或媒体标题写成「已替代」「已导入」「已量产」；\n"
+            "4. **来源等级必标**：所有具体客户/订单/份额/产能/价格/毛利率/客户名/供应商名必须带 `primary / news / industry / community_cn / community_global / inferred / unverified` 等级标签；社区源**只做市场分歧线索**，不得单独支撑「确认/实锤/已导入/已量产」；\n"
+            "5. **技术面降权（强制）**：技术面章节**≤ 报告主体 15% 篇幅**；技术面**不得推翻产业链主判断**，只回答「当前价格位置是否适合建仓/等待」；\n"
+            "6. **结论前置**：每个一级章节首句用 `**【结论】**` 起头；\n"
+            "7. **三情景**（牛市/基准/熊市）概率和严格 = 100%；\n"
+            "8. **数字锚定**：所有观点用数字（PE/PB/ROE/增速/占比/价格/概率）支撑，取不到的数据标「数据缺失」或 `inferred`（必须写明推断依据），**禁止编造**；\n"
+            "9. **PE 估值口径一致性**：报告头部声明的【当前 PE(TTM)】是估值基准锚点，牛市/溢价/抬升/估值扩张情景的 PE 上限必须 ≥ 当前 PE(TTM)，否则改用「回归/消化/估值压缩」表述并说明 EPS 增速如何吸收估值下降。\n\n"
+            "数据收集充分后，按 system prompt 的新八章骨架输出完整 Markdown 报告：投资结论 + 一、消息面与产业政策 + "
+            "二、产业链位置与瓶颈环节 + 三、国产替代与平行替换 + 四、材料/工艺/环节独特地位 + 五、中美产业链关系 + "
+            "六、财务与估值验证 + 七、技术面与筹码节奏（次要）+ 八、风险、证伪条件与下一步验证。"
         )
 
     @staticmethod
@@ -230,10 +266,12 @@ class DeepResearchExecutor:
         from src.agent.runner import run_agent_loop
 
         hint = (
-            "你的报告未通过五层穿透质量校验，以下层次的分析不充分或缺失："
+            "你的报告未通过深度投研质量校验，以下层次的分析不充分或缺失："
             f"{', '.join(missing_layers)}。"
             "请调用必要工具补充这些层次的完整分析，然后重新输出**完整的**深度投研报告"
-            "（必须包含全部八个章节，保留已写好的部分并补全缺失部分）。"
+            "（必须包含全部新八章：投资结论 + 一~八，保留已写好的部分并补全缺失部分）。"
+            "注意：技术面与筹码节奏层（第七层）允许不调用工具，只降分不阻断；"
+            "国产替代 / 中美链必须先答「适用性判断（强相关 / 低相关 / 不适用）」。"
         )
         retry_messages = list(messages)
         retry_messages.append({"role": "user", "content": hint})
@@ -243,7 +281,9 @@ class DeepResearchExecutor:
                 {
                     "type": "thinking",
                     "step": 0,
-                    "message": f"质量校验发现 {', '.join(missing_layers)} 层不足，正在补充重生成...",
+                    "message": (
+                        f"质量校验发现 {', '.join(missing_layers)} 层不足，正在补充重生成..."
+                    ),
                 }
             )
 
@@ -254,7 +294,9 @@ class DeepResearchExecutor:
                 llm_adapter=self.llm_adapter,
                 max_steps=min(self.max_steps, 12),
                 progress_callback=progress_callback,
-                max_wall_clock_seconds=min(float(self.timeout_seconds or 1200.0), 360.0),
+                max_wall_clock_seconds=min(
+                    float(self.timeout_seconds or 1200.0), 360.0
+                ),
                 stock_scope=None,
             )
         except Exception as exc:

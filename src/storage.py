@@ -208,6 +208,12 @@ class NewsIntel(Base):
     dimension: Mapped[Optional[str]] = mapped_column(
         String(32), index=True
     )  # latest_news / risk_check / earnings / market_analysis / industry
+    # P3 信息源分层（按 docs/deep-research-chain-news-logic-plan.md §信息源策略）：
+    # official / news / industry / community_cn / community_global
+    # 老记录 NULL 表示历史 primary/news 入库，不强制 backfill。
+    source_type: Mapped[Optional[str]] = mapped_column(String(32), index=True)
+    # 可靠性提示：high / medium / low / unverified。社区源固定 low。
+    reliability_hint: Mapped[Optional[str]] = mapped_column(String(16), index=True)
     query: Mapped[Optional[str]] = mapped_column(String(255))
     provider: Mapped[Optional[str]] = mapped_column(String(32), index=True)
 
@@ -1457,6 +1463,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             Base.metadata.create_all(self._engine)
             self._ensure_llm_usage_telemetry_columns()
             self._ensure_supply_chain_stock_columns()
+            self._ensure_news_intel_source_columns()  # P3
             self._ensure_schema_migration_record()
             self._ensure_knowledge_base_fts()
 
@@ -1621,6 +1628,55 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     logger.info("Created knowledge_chunks_fts virtual table")
         except Exception as exc:
             logger.warning("[Knowledge Base] failed to create FTS5 table: %s", exc)
+
+    def _ensure_news_intel_source_columns(self) -> None:
+        """P3 信息源分层（按 docs/deep-research-chain-news-logic-plan.md §信息源策略）。
+
+        news_intel 新增 source_type（official / news / industry / community_cn /
+        community_global）+ reliability_hint（high / medium / low / unverified）两列。
+        老记录允许 NULL（默认 news_intel 是 primary/news 隐式语义，文档不强求 backfill）。
+        新装用户走 ``Base.metadata.create_all`` 自动建列；已有用户走 best-effort ALTER。
+        """
+        if not self._is_sqlite_engine or self._engine is None:
+            return
+        try:
+            existing = {
+                column["name"]
+                for column in inspect(self._engine).get_columns("news_intel")
+            }
+        except Exception as exc:
+            logger.warning(
+                "[NewsIntel] failed to inspect source columns; "
+                "skipping best-effort backfill: %s",
+                exc,
+            )
+            return
+
+        # source_type VARCHAR(32) / reliability_hint VARCHAR(16)，均为 NULLABLE
+        backfills: List[Tuple[str, str]] = [
+            ("source_type", "VARCHAR(32)"),
+            ("reliability_hint", "VARCHAR(16)"),
+        ]
+        for column, column_type in backfills:
+            if column in existing:
+                continue
+            try:
+                with self._engine.begin() as connection:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE news_intel ADD COLUMN {column} {column_type}"
+                    )
+                existing.add(column)
+                logger.info(
+                    "[NewsIntel] best-effort ADD COLUMN %s %s OK",
+                    column,
+                    column_type,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[NewsIntel] best-effort ADD COLUMN %s failed: %s",
+                    column,
+                    exc,
+                )
 
     @classmethod
     def get_instance(cls) -> "DatabaseManager":
@@ -1866,6 +1922,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         query: str,
         response: "SearchResponse",
         query_context: Optional[Dict[str, str]] = None,
+        source_type: Optional[str] = None,
+        reliability_hint: Optional[str] = None,
     ) -> int:
         """
         保存新闻情报到数据库
@@ -1953,6 +2011,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                             code=code,
                             name=name,
                             dimension=dimension,
+                            source_type=source_type,
+                            reliability_hint=reliability_hint,
                             query=query,
                             provider=response.provider,
                             title=title,

@@ -6,6 +6,9 @@
 - normalize_a_share：A 股通过、港股/美股/空/非法拒绝。
 - report_id 白名单契约：``^\\d{6}_\\d{12}$``（防路径穿越，与 endpoint 对齐）。
 - md2pdf：Markdown→PDF（纯 Python xhtml2pdf + reportlab CID CJK 字体，离线可跑）。
+
+注：2026-07-03 起深度投研框架由"五层穿透"迁移到"消息面+产业链主导"新八章
+（按 ``docs/deep-research-chain-news-logic-plan.md``）。本测试的 fixture 同步更新。
 """
 
 import re
@@ -24,31 +27,39 @@ from src.services.deep_research_service import (
 REPORT_ID_RE = re.compile(r"^\d{6}_\d{12}(_\d+)?$")
 
 
+# 新八章 GOOD_MD（消息面+产业链主导）
+# 强相关行业：含 "强相关" 适用性判断；缺一"低相关"判定但另一"强相关" → 扣 5
 GOOD_MD = """# x
 ## 投资结论
 **【结论】** 买入。三情景：牛市25% 基准50% 熊市25%
-## 一、宏观与政策环境
-**【结论】** 大盘指数市场流动性ERP政策社融PPI宏观
-## 二、产业与赛道
-**【结论】** 产业链行业供应链竞争壁垒市占率生命周期格局
-## 三、公司分析
-**【结论】** 模式项目产能
-## 四、财务质量
-**【结论】** 营收利润ROE毛利率现金流杜邦
-## 五、估值与目标价
-**【结论】** 估值PEPBDCFSOTP目标价情景PEG安全边际
-## 六、博弈与节奏
+### 国产替代 / 中美平行链适用性
+- 适用性：强相关
+## 一、消息面与产业政策
+**【结论】** 公告新闻社区政策监管分歧市场大盘指数流动性宏观
+## 二、产业链位置与瓶颈环节
+**【结论】** 产业链上中下游瓶颈卡点关键材料关键设备关键工艺板块归属
+## 三、国产替代与平行替换
+**【结论】** 国产替代进口替代平行替换送样验证导入量产不适用低相关
+## 四、材料 / 工艺 / 环节独特地位
+**【结论】** 材料工艺良率纯度认证扩产客户验证专利配方壁垒
+## 五、中美产业链关系
+**【结论】** 中美美国链中国链出口管制制裁平行链EDA不适用低相关
+## 六、财务与估值
+**【结论】** 营收利润ROE毛利率现金流杜邦估值PEPBDCFSOTP目标价情景PEG安全边际
+## 七、技术面与筹码节奏
 **【结论】** 筹码均线K线量能资金流主力催化股东户数融资余额
-## 七、风险提示
+## 八、风险、证伪条件与下一步验证
 风险1
 """
 
 FULL_TOOLS = [
     {"tool": "get_market_indices"},
     {"tool": "search_comprehensive_intel"},
+    {"tool": "search_stock_news"},
     {"tool": "get_sector_rankings"},
     {"tool": "get_stock_info"},
     {"tool": "analyze_trend"},
+    {"tool": "verify_supply_chain_evidence"},
 ]
 
 
@@ -56,7 +67,8 @@ class TestDeepResearchValidator:
     def test_empty_report_scores_zero(self):
         result = DeepResearchValidator().validate("")
         assert result.score == 0
-        assert len(result.missing_layers) == 5
+        # 新八章：6 required + 1 optional = 7 层
+        assert len(result.missing_layers) == 7
 
     def test_complete_report_high_score(self):
         result = DeepResearchValidator().validate(GOOD_MD, FULL_TOOLS)
@@ -65,26 +77,28 @@ class TestDeepResearchValidator:
         assert result.probability_sum == 100.0
 
     def test_missing_tool_flags_layer(self):
-        # 缺 get_market_indices → 宏观层被标记
+        # 缺 get_market_indices → 消息面与产业政策层被标记（要求 `get_market_indices` 与 `search_*` 两组）
         tools_no_macro = [t for t in FULL_TOOLS if t["tool"] != "get_market_indices"]
         result = DeepResearchValidator().validate(GOOD_MD, tools_no_macro)
-        assert "宏观" in result.missing_layers
+        assert "消息面与产业政策" in result.missing_layers
 
     def test_missing_content_keyword_flags_layer(self):
-        # 直接构造一份缺少宏观层的报告（不含任何宏观关键词）
-        # 注：validator 关键词检测是"任意位置命中即覆盖"
-        md_no_macro = (
+        # 直接构造一份缺少消息面与产业政策层（无任何消息/公告/新闻/社区/政策/监管/分歧/宏观/市场/大盘/指数/流动性）关键词的报告
+        md_no_news = (
             "# x\n"
             "## 投资结论\n**【结论】** 买入\n"
-            "## 二、产业与赛道\n**【结论】** 产业链行业供应链竞争壁垒市占率生命周期格局\n"
-            "## 三、公司分析\n**【结论】** 模式项目产能\n"
-            "## 四、财务质量\n**【结论】** 营收利润ROE毛利率现金流杜邦\n"
-            "## 五、估值与目标价\n**【结论】** 估值PEPBDCFSOTP目标价情景PEG安全边际\n"
-            "## 六、博弈与节奏\n**【结论】** 筹码均线K线量能资金流主力催化股东户数融资余额\n"
-            "## 七、风险提示\n风险1\n"
+            "## 二、产业链位置与瓶颈环节\n**【结论】** 产业链上中下游瓶颈卡点关键材料关键设备关键工艺板块归属\n"
+            "## 三、国产替代与平行替换\n**【结论】** 国产替代进口替代平行替换送样验证导入量产不适用低相关\n"
+            "## 四、材料 / 工艺 / 环节独特地位\n**【结论】** 材料工艺良率纯度认证扩产客户验证专利配方壁垒\n"
+            "## 五、中美产业链关系\n**【结论】** 中美美国链中国链出口管制制裁平行链EDA不适用低相关\n"
+            "## 六、财务与估值\n**【结论】** 营收利润ROE毛利率现金流杜邦估值PEPBDCFSOTP目标价情景PEG安全边际\n"
+            "## 七、技术面与筹码节奏\n**【结论】** 筹码均线K线量能资金流主力催化股东户数融资余额\n"
+            "## 八、风险、证伪条件与下一步验证\n风险1\n"
         )
-        result = DeepResearchValidator().validate(md_no_macro, FULL_TOOLS)
-        assert "宏观" in result.missing_layers, f"expected 宏观 missing: {result.details}"
+        result = DeepResearchValidator().validate(md_no_news, FULL_TOOLS)
+        assert "消息面与产业政策" in result.missing_layers, (
+            f"expected 消息面与产业政策 missing: {result.details}"
+        )
 
     def test_none_input_is_safe(self):
         # None / 空输入不应抛异常
@@ -93,6 +107,7 @@ class TestDeepResearchValidator:
 
     def test_validation_markers_counted_in_details(self):
         from src.agent.deep_research_validator import _count_validation_markers
+
         assert _count_validation_markers("PE 30.5 ✓ 冲突 ⚠") == (1, 1)
         assert _count_validation_markers("无标记") == (0, 0)
         md = GOOD_MD + "\nPE 30.5 ✓（双源验证）\nROE ⚠ 冲突\n"
@@ -120,7 +135,9 @@ class TestNormalizeAShare:
     def test_accept_a_share(self, raw, expected):
         assert normalize_a_share(raw) == expected
 
-    @pytest.mark.parametrize("bad", ["AAPL", "HK00700", "00700", "TSLA", "", "abc", "12345"])
+    @pytest.mark.parametrize(
+        "bad", ["AAPL", "HK00700", "00700", "TSLA", "", "abc", "12345"]
+    )
     def test_reject_non_a_share(self, bad):
         with pytest.raises(DeepResearchInputError):
             normalize_a_share(bad)
@@ -167,11 +184,12 @@ class TestResolveUniqueReportId:
         """base_id 不存在 → 原样返回。"""
         from src.services.deep_research_service import _resolve_unique_report_id
 
-        with patch(
-            "src.services.deep_research_service.get_db"
-        ) as mock_db:
+        with patch("src.services.deep_research_service.get_db") as mock_db:
             mock_db.return_value.get_deep_research_report.return_value = None
-            assert _resolve_unique_report_id("600519_202606241200") == "600519_202606241200"
+            assert (
+                _resolve_unique_report_id("600519_202606241200")
+                == "600519_202606241200"
+            )
 
     def test_conflict_appends_sequence(self):
         """base_id 已存在 → 追加 _1；_1 也存在 → 追加 _2。"""
@@ -182,11 +200,12 @@ class TestResolveUniqueReportId:
         def fake_get(rid):
             return object() if existing.get(rid) else None
 
-        with patch(
-            "src.services.deep_research_service.get_db"
-        ) as mock_db:
+        with patch("src.services.deep_research_service.get_db") as mock_db:
             mock_db.return_value.get_deep_research_report.side_effect = fake_get
-            assert _resolve_unique_report_id("600519_202606241200") == "600519_202606241200_2"
+            assert (
+                _resolve_unique_report_id("600519_202606241200")
+                == "600519_202606241200_2"
+            )
 
 
 class TestLookupStockName:
@@ -196,30 +215,30 @@ class TestLookupStockName:
         from src.services.deep_research_service import _lookup_stock_name
         from types import SimpleNamespace
 
-        with patch(
-            "src.agent.tools.data_tools._get_fetcher_manager"
-        ) as mock_mgr:
-            mock_mgr.return_value.get_realtime_quote.return_value = SimpleNamespace(name="中国巨石")
+        with patch("src.agent.tools.data_tools._get_fetcher_manager") as mock_mgr:
+            mock_mgr.return_value.get_realtime_quote.return_value = SimpleNamespace(
+                name="中国巨石"
+            )
             assert _lookup_stock_name("600176") == "中国巨石"
 
     def test_returns_empty_on_failure(self):
         """实时行情失败 → 返回空串（调用方 fallback 到 code），不抛异常。"""
         from src.services.deep_research_service import _lookup_stock_name
 
-        with patch(
-            "src.agent.tools.data_tools._get_fetcher_manager"
-        ) as mock_mgr:
-            mock_mgr.return_value.get_realtime_quote.side_effect = RuntimeError("net down")
+        with patch("src.agent.tools.data_tools._get_fetcher_manager") as mock_mgr:
+            mock_mgr.return_value.get_realtime_quote.side_effect = RuntimeError(
+                "net down"
+            )
             assert _lookup_stock_name("600176") == ""
 
     def test_returns_empty_when_no_name(self):
         from src.services.deep_research_service import _lookup_stock_name
         from types import SimpleNamespace
 
-        with patch(
-            "src.agent.tools.data_tools._get_fetcher_manager"
-        ) as mock_mgr:
-            mock_mgr.return_value.get_realtime_quote.return_value = SimpleNamespace(name=None)
+        with patch("src.agent.tools.data_tools._get_fetcher_manager") as mock_mgr:
+            mock_mgr.return_value.get_realtime_quote.return_value = SimpleNamespace(
+                name=None
+            )
             assert _lookup_stock_name("600176") == ""
 
 
@@ -285,6 +304,7 @@ class TestMd2Pdf:
         mock ``weasyprint.HTML`` 的 ``write_pdf`` 抛错，断言优雅降级返回 None。
         """
         import src.md2pdf as md2pdf_mod
+
         md2pdf_mod._prepare_weasyprint_env()  # macOS: 先配好 brew lib 路径，下方 import weasyprint 才能成功
         import weasyprint
 
