@@ -781,8 +781,8 @@ class NotificationService(
             sections = content.split("\n")
             separator = "\n"
 
-        chunks = []
-        current_chunk = []
+        chunks: List[str] = []
+        current_chunk: List[str] = []
         current_bytes = 0
         separator_bytes = get_bytes(separator)
 

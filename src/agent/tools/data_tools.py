@@ -628,7 +628,7 @@ def _handle_get_analysis_context(stock_code: str) -> dict[str, Any]:
         return {"error": f"No analysis context in DB for {stock_code}"}
 
     # Return safely serializable version (remove raw_data to save tokens)
-    safe_context = {}
+    safe_context: Dict[str, Any] = {}
     for k, v in context.items():
         if k == "raw_data":
             safe_context["has_raw_data"] = True
