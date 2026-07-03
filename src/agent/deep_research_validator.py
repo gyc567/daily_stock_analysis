@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, cast
 
 logger = logging.getLogger(__name__)
 
@@ -24,23 +24,72 @@ logger = logging.getLogger(__name__)
 # 与 system_prompt.md 第二章「强制工具调用检查点」保持一致。
 _LAYER_REQUIREMENTS: Dict[str, Dict[str, object]] = {
     "宏观": {
-        "keywords": ["市场", "大盘", "指数", "宏观", "流动性", "ERP", "政策", "社融", "PPI"],
+        "keywords": [
+            "市场",
+            "大盘",
+            "指数",
+            "宏观",
+            "流动性",
+            "ERP",
+            "政策",
+            "社融",
+            "PPI",
+        ],
         "tool_groups": [{"get_market_indices"}, {"search_comprehensive_intel"}],
     },
     "产业": {
-        "keywords": ["产业", "行业", "供应链", "竞争", "壁垒", "市占", "生命周期", "格局"],
+        "keywords": [
+            "产业",
+            "行业",
+            "供应链",
+            "竞争",
+            "壁垒",
+            "市占",
+            "生命周期",
+            "格局",
+        ],
         "tool_groups": [{"get_sector_rankings"}, {"search_comprehensive_intel"}],
     },
     "财务": {
-        "keywords": ["营收", "利润", "ROE", "毛利率", "现金流", "杜邦", "资产负债", "净利率"],
+        "keywords": [
+            "营收",
+            "利润",
+            "ROE",
+            "毛利率",
+            "现金流",
+            "杜邦",
+            "资产负债",
+            "净利率",
+        ],
         "tool_groups": [{"get_stock_info"}],
     },
     "估值": {
-        "keywords": ["估值", "PE", "PB", "DCF", "SOTP", "目标价", "安全边际", "情景", "PEG", "EV/EBITDA"],
+        "keywords": [
+            "估值",
+            "PE",
+            "PB",
+            "DCF",
+            "SOTP",
+            "目标价",
+            "安全边际",
+            "情景",
+            "PEG",
+            "EV/EBITDA",
+        ],
         "tool_groups": [],  # 估值层无强制工具，靠内容关键词
     },
     "博弈": {
-        "keywords": ["筹码", "均线", "K线", "量能", "资金流", "主力", "催化", "股东户数", "融资余额"],
+        "keywords": [
+            "筹码",
+            "均线",
+            "K线",
+            "量能",
+            "资金流",
+            "主力",
+            "催化",
+            "股东户数",
+            "融资余额",
+        ],
         "tool_groups": [{"analyze_trend", "get_chip_distribution", "get_capital_flow"}],
     },
 }
@@ -90,10 +139,12 @@ def _check_layer(
     called_tools: Set[str],
 ) -> Dict[str, object]:
     """检查单层覆盖情况。返回 {content_ok, tools_ok, missing_groups}。"""
-    keywords = requirement.get("keywords", []) or []
+    keywords: List[str] = list(cast(Iterable[str], requirement.get("keywords") or []))
     content_ok = any(kw in markdown for kw in keywords)
 
-    tool_groups = requirement.get("tool_groups", []) or []
+    tool_groups: List[Any] = list(
+        cast(Iterable[Any], requirement.get("tool_groups") or [])
+    )
     missing_groups: List[str] = []
     tools_ok = True
     if tool_groups:
@@ -131,7 +182,11 @@ def _check_probability_sum(markdown: str) -> float:
     容错：取前 3 个最可能的概率值求和（牛市/基准/熊市）。
     """
     # 优先匹配「情景 ... XX%」表格行
-    table_probs = re.findall(r"(?:牛市|基准|熊市|base|bull|bear)[^\d]{0,20}?(\d{1,3})\s*%", markdown, re.IGNORECASE)
+    table_probs = re.findall(
+        r"(?:牛市|基准|熊市|base|bull|bear)[^\d]{0,20}?(\d{1,3})\s*%",
+        markdown,
+        re.IGNORECASE,
+    )
     if len(table_probs) >= 3:
         vals = [int(p) for p in table_probs[:3]]
         return float(sum(vals))
@@ -161,13 +216,31 @@ _CURRENT_PE_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 # 估值区间提取模式：区间位于 PE 之前，如 '120-130x PE' / '120~130倍PE' / '120至130 PE'。
-_PE_BAND_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[-–—~～至到]\s*(\d+(?:\.\d+)?)\s*[x×倍]*\s*PE")
+_PE_BAND_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*[-–—~～至到]\s*(\d+(?:\.\d+)?)\s*[x×倍]*\s*PE"
+)
 
 # 溢价/抬升类表述：此类情景的 PE 区间上限应 ≥ 当前 PE(TTM)，否则为估值口径矛盾。
-_PREMIUM_VERBS: tuple[str, ...] = ("溢价", "抬升", "拔估值", "估值扩张", "估值提升", "冲高", "享受")
+_PREMIUM_VERBS: tuple[str, ...] = (
+    "溢价",
+    "抬升",
+    "拔估值",
+    "估值扩张",
+    "估值提升",
+    "冲高",
+    "享受",
+)
 
 # 回归/消化类表述：此类情景的 PE 低于当前 PE(TTM) 是合理的，不算矛盾。
-_REVERSION_VERBS: tuple[str, ...] = ("回归", "消化", "回落", "压缩", "杀估值", "均值回归", "下杀")
+_REVERSION_VERBS: tuple[str, ...] = (
+    "回归",
+    "消化",
+    "回落",
+    "压缩",
+    "杀估值",
+    "均值回归",
+    "下杀",
+)
 
 # 在 PE 区间前回看的字符窗口长度（用于判定该区间所属的估值表述类型）。
 _PE_CONTEXT_WINDOW = 50
@@ -209,7 +282,7 @@ def _detect_pe_premium_contradictions(
 
     contradictions: List[PeContradiction] = []
     for pos, _low, high in _find_pe_bands(markdown):
-        window = markdown[max(0, pos - _PE_CONTEXT_WINDOW):pos]
+        window = markdown[max(0, pos - _PE_CONTEXT_WINDOW) : pos]
         # 显式回归/消化表述 → PE 低于当前是合理的，跳过
         if any(verb in window for verb in _REVERSION_VERBS):
             continue
@@ -219,7 +292,7 @@ def _detect_pe_premium_contradictions(
                 PeContradiction(
                     current_pe=current_pe,
                     scenario_pe_high=high,
-                    sentence=window + markdown[pos:pos + 20],
+                    sentence=window + markdown[pos : pos + 20],
                     detail=(
                         f"『溢价/抬升』情景 PE 上限 {high:g}x 低于当前 PE(TTM) "
                         f"{current_pe:g}x：估值口径矛盾（溢价情景 PE 应 ≥ 当前 PE，"
@@ -236,7 +309,7 @@ class DeepResearchValidator:
     def validate(
         self,
         markdown: str,
-        tool_calls_log: List[Dict[str, object]] = None,
+        tool_calls_log: Optional[List[Dict[str, object]]] = None,
     ) -> ValidationResult:
         """校验报告。纯函数，不抛异常。"""
         if not markdown or not markdown.strip():
@@ -256,7 +329,9 @@ class DeepResearchValidator:
         for layer, requirement in _LAYER_REQUIREMENTS.items():
             check = _check_layer(layer, requirement, markdown, called_tools)
             # 估值层无工具组，满分靠内容；其余层内容+工具各占一半
-            tool_groups = requirement.get("tool_groups", []) or []
+            tool_groups: List[Any] = list(
+                cast(Iterable[Any], requirement.get("tool_groups") or [])
+            )
             if tool_groups:
                 layer_point = 0.0
                 layer_incomplete = False
@@ -268,7 +343,7 @@ class DeepResearchValidator:
                     layer_point += 10.0
                 else:
                     layer_incomplete = True
-                    missing_tool_groups.extend(check["missing_groups"])
+                    missing_tool_groups.extend(cast(List[str], check["missing_groups"]))
                 if layer_incomplete:
                     missing_layers.append(layer)
             else:
@@ -319,7 +394,9 @@ class DeepResearchValidator:
         # 双源验证标注统计（信息性，不扣分；LLM 按 system_prompt 标 ✓/⚠）
         verified, conflict = _count_validation_markers(markdown)
         if verified or conflict:
-            details.append(f"双源验证标注：✓×{verified}（验证通过）/ ⚠×{conflict}（冲突已披露）")
+            details.append(
+                f"双源验证标注：✓×{verified}（验证通过）/ ⚠×{conflict}（冲突已披露）"
+            )
 
         # PE 估值口径一致性检测（非阻断 L2 信号：只记入 details，不改变 passed/score）
         current_pe = _extract_current_pe(markdown)

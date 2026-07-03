@@ -11,7 +11,7 @@ from __future__ import annotations
 import glob
 import json
 import os
-from typing import Any, List, Optional
+from typing import Any, List, Optional, cast
 
 from src.services.zhengxi import scoring
 from src.services.zhengxi.paths import fund_data_dir
@@ -20,12 +20,12 @@ from src.services.zhengxi.paths import fund_data_dir
 def _index() -> dict[str, Any]:
     path = os.path.join(fund_data_dir(), "_index.json")
     with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+        return cast(dict[str, Any], json.load(fh))
 
 
 def list_funds() -> List[dict[str, Any]]:
     """返回 ``_index.json`` 的基金清单（代码/名称/角色/区间/类型/季度数）。"""
-    return _index().get("funds", [])
+    return cast(List[dict[str, Any]], _index().get("funds", []))
 
 
 def _fund_dir(code: str) -> Optional[str]:
@@ -65,7 +65,7 @@ def load_holdings(code: str) -> List[dict[str, Any]]:
     with open(path, encoding="utf-8") as fh:
         quarters = json.load(fh)
     quarters.sort(key=lambda q: (q.get("year", 0), q.get("quarter", 0)))
-    return quarters
+    return cast(List[dict[str, Any]], quarters)
 
 
 def latest_holdings(code: str) -> Optional[dict[str, Any]]:
@@ -117,15 +117,17 @@ def load_performance_summary(code: str) -> dict[str, Any]:
         "data_cutoff_note": "静态快照，非实时数据",
     }
     if nav:
-        summary.update({
-            "return_ytd_pct": scoring.year_return(nav),
-            "return_1y_pct": scoring.window_return(nav, 365),
-            "return_3y_pct": scoring.window_return(nav, 365 * 3),
-            "return_since_inception_pct": scoring.since_inception_return(nav),
-            "max_drawdown_pct": scoring.max_drawdown(nav),
-            "nav_period_start": scoring.fmt_ts(nav[0][0]),
-            "nav_period_end": scoring.fmt_ts(nav[-1][0]),
-        })
+        summary.update(
+            {
+                "return_ytd_pct": scoring.year_return(nav),
+                "return_1y_pct": scoring.window_return(nav, 365),
+                "return_3y_pct": scoring.window_return(nav, 365 * 3),
+                "return_since_inception_pct": scoring.since_inception_return(nav),
+                "max_drawdown_pct": scoring.max_drawdown(nav),
+                "nav_period_start": scoring.fmt_ts(nav[0][0]),
+                "nav_period_end": scoring.fmt_ts(nav[-1][0]),
+            }
+        )
 
     # 区间收益对比（天天基金：本基金 vs 同类 vs 沪深300 等）
     benchmark = raw.get("累计收益率走势") or []
@@ -136,10 +138,14 @@ def load_performance_summary(code: str) -> dict[str, Any]:
             if not data:
                 continue
             last = data[-1]
-            ranges.append({
-                "name": series.get("name"),
-                "latest_pct": last[1] if isinstance(last, (list, tuple)) and len(last) >= 2 else None,
-            })
+            ranges.append(
+                {
+                    "name": series.get("name"),
+                    "latest_pct": last[1]
+                    if isinstance(last, (list, tuple)) and len(last) >= 2
+                    else None,
+                }
+            )
         if ranges:
             summary["benchmark_ranges"] = ranges
 

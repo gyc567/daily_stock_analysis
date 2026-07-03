@@ -49,6 +49,7 @@ except (ImportError, ModuleNotFoundError):
         return bool(n and n.upper() != str(stock_code).strip().upper())
 
 import os
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ class YfinanceFetcher(BaseFetcher):
         yf_symbol, _ = get_us_index_yf_symbol(code)
         if yf_symbol:
             logger.debug(f"识别为美股指数: {code} -> {yf_symbol}")
-            return yf_symbol
+            return cast(str, yf_symbol)
 
         # 美股：1-5 个大写字母（可选 .X 后缀），原样返回
         if is_us_stock_code(code):
@@ -176,7 +177,7 @@ class YfinanceFetcher(BaseFetcher):
 
         try:
             # 使用 yfinance 下载数据
-            df = yf.download(
+            df_raw: Any = yf.download(
                 tickers=yf_code,
                 start=start_date,
                 end=end_date,
@@ -184,6 +185,9 @@ class YfinanceFetcher(BaseFetcher):
                 auto_adjust=True,  # 自动调整价格（复权）
                 multi_level_index=True
             )
+            if df_raw is None:
+                raise DataFetchError(f"Yahoo Finance 未返回 {stock_code} 数据")
+            df = df_raw
 
             # 筛选出 yf_code 的列, 避免多只股票数据混淆
             if isinstance(df.columns, pd.MultiIndex) and len(df.columns) > 1:
@@ -195,7 +199,7 @@ class YfinanceFetcher(BaseFetcher):
             if df.empty:
                 raise DataFetchError(f"Yahoo Finance 未查询到 {stock_code} 的数据")
 
-            return df
+            return cast(pd.DataFrame, df)
 
         except Exception as e:
             if isinstance(e, DataFetchError):

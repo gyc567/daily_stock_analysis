@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 _XCALS_AVAILABLE = False
 try:
     import exchange_calendars as xcals
+
     _XCALS_AVAILABLE = True
 except ImportError:
     logger.warning(
@@ -148,9 +149,9 @@ def is_market_open(market: str, check_date: date) -> bool:
     if not ex:
         return True
     try:
-        cal = xcals.get_calendar(ex)
+        cal = xcals.get_calendar(ex)  # type: ignore[reportOptionalMemberAccess]
         session = datetime(check_date.year, check_date.month, check_date.day)
-        return cal.is_session(session)
+        return cast(bool, cal.is_session(session))
     except Exception as e:
         logger.warning("trading_calendar.is_market_open fail-open: %s", e)
         return True
@@ -205,11 +206,13 @@ def get_effective_trading_date(
         return fallback_date
 
     try:
-        cal = xcals.get_calendar(ex)
+        cal = xcals.get_calendar(ex)  # type: ignore[reportOptionalMemberAccess]
         local_date = market_now.date()
 
         if not cal.is_session(local_date):
-            return cal.date_to_session(local_date, direction="previous").date()
+            return cast(
+                date, cal.date_to_session(local_date, direction="previous").date()
+            )
 
         session = cal.date_to_session(local_date, direction="previous")
         session_close = cal.session_close(session)
@@ -221,9 +224,9 @@ def get_effective_trading_date(
             close_local = session_close.replace(tzinfo=ZoneInfo(tz_name))
 
         if market_now >= close_local:
-            return session.date()
+            return cast(date, session.date())
 
-        return cal.previous_session(session).date()
+        return cast(date, cal.previous_session(session).date())
     except Exception as e:
         logger.warning("trading_calendar.get_effective_trading_date fail-open: %s", e)
         return fallback_date
@@ -290,7 +293,7 @@ def infer_market_phase(
     local_date = market_now.date()
 
     try:
-        cal = xcals.get_calendar(ex)
+        cal = xcals.get_calendar(ex)  # type: ignore[reportOptionalMemberAccess]
         if not cal.is_session(local_date):
             return MarketPhase.NON_TRADING
 
@@ -369,7 +372,7 @@ def _session_open_close_for_today(
     if not ex or not tz_name or not _XCALS_AVAILABLE:
         return None, None
 
-    cal = xcals.get_calendar(ex)
+    cal = xcals.get_calendar(ex)  # type: ignore[reportOptionalMemberAccess]
     local_date = market_now.date()
     if not cal.is_session(local_date):
         return None, None
@@ -386,10 +389,11 @@ def _phase_minutes(
     market_now: datetime,
     phase: MarketPhase,
 ) -> Tuple[Optional[int], Optional[int], bool]:
-    if (
-        market not in MARKET_EXCHANGE
-        or phase in {MarketPhase.UNKNOWN, MarketPhase.NON_TRADING, MarketPhase.POSTMARKET}
-    ):
+    if market not in MARKET_EXCHANGE or phase in {
+        MarketPhase.UNKNOWN,
+        MarketPhase.NON_TRADING,
+        MarketPhase.POSTMARKET,
+    }:
         return None, None, False
     if not _XCALS_AVAILABLE:
         return None, None, False
@@ -407,11 +411,15 @@ def _phase_minutes(
         seconds = (session_open - market_now).total_seconds()
         return max(0, int(seconds // 60)), None, False
 
-    if phase in {
-        MarketPhase.INTRADAY,
-        MarketPhase.LUNCH_BREAK,
-        MarketPhase.CLOSING_AUCTION,
-    } and market_now < session_close:
+    if (
+        phase
+        in {
+            MarketPhase.INTRADAY,
+            MarketPhase.LUNCH_BREAK,
+            MarketPhase.CLOSING_AUCTION,
+        }
+        and market_now < session_close
+    ):
         seconds = (session_close - market_now).total_seconds()
         return None, max(0, int(seconds // 60)), False
 

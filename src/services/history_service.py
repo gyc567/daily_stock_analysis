@@ -40,6 +40,7 @@ from src.utils.data_processing import (
     normalize_model_used,
     parse_json_field,
 )
+from typing import cast  # added by mypy_codemod
 
 if TYPE_CHECKING:
     from src.analyzer import AnalysisResult
@@ -50,7 +51,7 @@ logger = logging.getLogger(__name__)
 class MarkdownReportGenerationError(Exception):
     """Exception raised when Markdown report generation fails due to internal errors."""
 
-    def __init__(self, message: str, record_id: str = None):
+    def __init__(self, message: str, record_id: Optional[str] = None):
         self.message = message
         self.record_id = record_id
         super().__init__(self.message)
@@ -160,7 +161,10 @@ class HistoryService:
         """
         try:
             if stock_code:
-                stock_code = self._history_code_filter_candidates(stock_code)
+                # _history_code_filter_candidates returns List[str]; take first match
+                candidates: List[str] = self._history_code_filter_candidates(stock_code)
+                if candidates:
+                    stock_code = candidates[0]
 
             # Parse date parameters
             start_dt = None
@@ -369,7 +373,7 @@ class HistoryService:
                     f"resolve_and_get_news: record not found for {record_id}"
                 )
                 return []
-            return self.get_news_intel(query_id=record.query_id, limit=limit)
+            return self.get_news_intel(query_id=record.query_id or "", limit=limit)  # type: ignore[reportArgumentType]
         except Exception as e:
             logger.error(
                 f"resolve_and_get_news failed for {record_id}: {e}", exc_info=True
@@ -488,7 +492,7 @@ class HistoryService:
             for candidate in (raw_result.get("dashboard"), raw_result):
                 if not isinstance(candidate, dict):
                     continue
-                raw_points = find_sniper_points(candidate) or raw_points
+                raw_points = cast(Dict[str, Any], find_sniper_points(candidate)) or raw_points
                 if any(
                     raw_points.get(k) is not None
                     for k in ("ideal_buy", "secondary_buy", "stop_loss", "take_profit")
@@ -615,12 +619,15 @@ class HistoryService:
         self, record, raw_result: Any
     ) -> Dict[str, Any]:
         raw = raw_result if isinstance(raw_result, dict) else {}
-        return build_action_fields(
-            operation_advice=raw.get("operation_advice")
-            or getattr(record, "operation_advice", None),
-            explicit_action=raw.get("action"),
-            report_type=getattr(record, "report_type", None),
-            report_language=normalize_report_language(raw.get("report_language")),
+        return cast(
+            Dict[str, Any],
+            build_action_fields(
+                operation_advice=raw.get("operation_advice")
+                or getattr(record, "operation_advice", None),
+                explicit_action=raw.get("action"),
+                report_type=getattr(record, "report_type", None),
+                report_language=normalize_report_language(raw.get("report_language")),
+            ),
         )
 
     def delete_history_records(self, record_ids: List[int]) -> int:
@@ -700,7 +707,7 @@ class HistoryService:
                 return []
 
             # Get query_id from record, then call original method
-            return self.get_news_intel(query_id=record.query_id, limit=limit)
+            return self.get_news_intel(query_id=record.query_id or "", limit=limit)  # type: ignore[reportArgumentType]
 
         except Exception as e:
             logger.error(f"根据 record_id 查询新闻情报失败: {e}", exc_info=True)
@@ -1313,7 +1320,7 @@ class HistoryService:
             try:
                 return f"{float(value):{fmt}}"
             except (ValueError, TypeError):
-                return value
+                return cast(str, value)
         return str(value)
 
     @staticmethod

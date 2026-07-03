@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from src.config import Config, get_config
 from src.repositories.portfolio_repo import PortfolioRepository
@@ -42,11 +42,21 @@ class PortfolioRiskService:
         )
 
         thresholds = {
-            "concentration_alert_pct": float(getattr(self.config, "portfolio_risk_concentration_alert_pct", 35.0)),
-            "drawdown_alert_pct": float(getattr(self.config, "portfolio_risk_drawdown_alert_pct", 15.0)),
-            "stop_loss_alert_pct": float(getattr(self.config, "portfolio_risk_stop_loss_alert_pct", 10.0)),
-            "stop_loss_near_ratio": float(getattr(self.config, "portfolio_risk_stop_loss_near_ratio", 0.8)),
-            "lookback_days": int(getattr(self.config, "portfolio_risk_lookback_days", 180)),
+            "concentration_alert_pct": float(
+                getattr(self.config, "portfolio_risk_concentration_alert_pct", 35.0)
+            ),
+            "drawdown_alert_pct": float(
+                getattr(self.config, "portfolio_risk_drawdown_alert_pct", 15.0)
+            ),
+            "stop_loss_alert_pct": float(
+                getattr(self.config, "portfolio_risk_stop_loss_alert_pct", 10.0)
+            ),
+            "stop_loss_near_ratio": float(
+                getattr(self.config, "portfolio_risk_stop_loss_near_ratio", 0.8)
+            ),
+            "lookback_days": int(
+                getattr(self.config, "portfolio_risk_lookback_days", 180)
+            ),
         }
 
         concentration = self._build_concentration(
@@ -63,14 +73,14 @@ class PortfolioRiskService:
             account_id=account_id,
             as_of_date=as_of_date,
             cost_method=cost_method,
-            lookback_days=thresholds["lookback_days"],
+            lookback_days=cast(int, thresholds["lookback_days"]),
         )
         drawdown = self._build_drawdown(
             account_id=account_id,
             as_of_date=as_of_date,
             cost_method=cost_method,
             threshold_pct=thresholds["drawdown_alert_pct"],
-            lookback_days=thresholds["lookback_days"],
+            lookback_days=cast(int, thresholds["lookback_days"]),
         )
         stop_loss = self._build_stop_loss(snapshot, thresholds)
 
@@ -112,7 +122,11 @@ class PortfolioRiskService:
             lookback_days=lookback_days,
         )
         if account_id is not None:
-            existing_dates = {row.snapshot_date for row in existing_rows if int(row.account_id) == int(account_id)}
+            existing_dates = {
+                row.snapshot_date
+                for row in existing_rows
+                if int(cast(int, row.account_id)) == int(account_id)
+            }  # type: ignore[arg-type]
             current_date = start_date
             while current_date <= as_of_date:
                 if current_date not in existing_dates:
@@ -121,14 +135,19 @@ class PortfolioRiskService:
                         as_of=current_date,
                         cost_method=cost_method,
                     )
-                    existing_dates.add(current_date)
+                    existing_dates.add(cast(Any, current_date))  # type: ignore[arg-type]
                 current_date += timedelta(days=1)
             return
 
-        account_ids = [int(account.id) for account in self.repo.list_accounts(include_inactive=False)]
+        account_ids = [
+            int(cast(int, account.id))
+            for account in self.repo.list_accounts(include_inactive=False)
+        ]  # type: ignore[arg-type]
         if not account_ids:
             return
-        existing_pairs = {(int(row.account_id), row.snapshot_date) for row in existing_rows}
+        existing_pairs = {
+            (int(cast(int, row.account_id)), row.snapshot_date) for row in existing_rows
+        }  # type: ignore[arg-type]
         current_date = start_date
         while current_date <= as_of_date:
             if not all((aid, current_date) in existing_pairs for aid in account_ids):
@@ -138,7 +157,7 @@ class PortfolioRiskService:
                     cost_method=cost_method,
                 )
                 for aid in account_ids:
-                    existing_pairs.add((aid, current_date))
+                    existing_pairs.add((aid, current_date))  # type: ignore[arg-type]
             current_date += timedelta(days=1)
 
     def _resolve_backfill_start_date(
@@ -150,19 +169,25 @@ class PortfolioRiskService:
     ) -> date:
         window_start = as_of_date - timedelta(days=lookback_days)
         if account_id is not None:
-            first_activity = self.repo.get_first_activity_date(account_id=account_id, as_of=as_of_date)
+            first_activity = self.repo.get_first_activity_date(
+                account_id=account_id, as_of=as_of_date
+            )
             return max(window_start, first_activity or as_of_date)
 
         first_activity_candidates: List[date] = []
         for account in self.repo.list_accounts(include_inactive=False):
-            first_activity = self.repo.get_first_activity_date(account_id=int(account.id), as_of=as_of_date)
+            first_activity = self.repo.get_first_activity_date(
+                account_id=int(cast(int, account.id)), as_of=as_of_date
+            )  # type: ignore[arg-type]
             if first_activity is not None:
                 first_activity_candidates.append(first_activity)
         if not first_activity_candidates:
             return as_of_date
         return max(window_start, min(first_activity_candidates))
 
-    def _build_concentration(self, snapshot: Dict[str, Any], threshold_pct: float, *, as_of_date: date) -> Dict[str, Any]:
+    def _build_concentration(
+        self, snapshot: Dict[str, Any], threshold_pct: float, *, as_of_date: date
+    ) -> Dict[str, Any]:
         total_mv = float(snapshot.get("total_market_value", 0.0) or 0.0)
         exposure_by_symbol: Dict[str, float] = {}
         for account in snapshot.get("accounts", []):
@@ -171,14 +196,20 @@ class PortfolioRiskService:
                 if not symbol:
                     continue
                 market_value = float(pos.get("market_value_base") or 0.0)
-                valuation_currency = str(pos.get("valuation_currency") or account.get("base_currency") or "CNY")
+                valuation_currency = str(
+                    pos.get("valuation_currency")
+                    or account.get("base_currency")
+                    or "CNY"
+                )
                 converted, _, _ = self.portfolio_service.convert_amount(
                     amount=market_value,
                     from_currency=valuation_currency,
                     to_currency="CNY",
                     as_of_date=as_of_date,
                 )
-                exposure_by_symbol[symbol] = exposure_by_symbol.get(symbol, 0.0) + converted
+                exposure_by_symbol[symbol] = (
+                    exposure_by_symbol.get(symbol, 0.0) + converted
+                )
 
         rows = []
         for symbol, exposure in exposure_by_symbol.items():
@@ -191,13 +222,15 @@ class PortfolioRiskService:
                     "is_alert": bool(weight >= threshold_pct),
                 }
             )
-        rows.sort(key=lambda item: item["market_value_base"], reverse=True)
+        rows.sort(
+            key=lambda item: float(cast(Any, item["market_value_base"])), reverse=True
+        )
 
         top_weight = rows[0]["weight_pct"] if rows else 0.0
         return {
             "total_market_value": round(total_mv, 6),
-            "top_weight_pct": round(float(top_weight), 4),
-            "alert": bool(top_weight >= threshold_pct),
+            "top_weight_pct": round(float(cast(Any, top_weight)), 4),
+            "alert": bool(float(cast(Any, top_weight)) >= threshold_pct),
             "top_positions": rows[:10],
         }
 
@@ -222,12 +255,20 @@ class PortfolioRiskService:
         for account in snapshot.get("accounts", []):
             for pos in account.get("positions", []):
                 symbol = str(pos.get("symbol") or "").strip().upper()
-                market = str(pos.get("market") or account.get("market") or "").strip().lower()
+                market = (
+                    str(pos.get("market") or account.get("market") or "")
+                    .strip()
+                    .lower()
+                )
                 if not symbol:
                     continue
 
                 market_value = float(pos.get("market_value_base") or 0.0)
-                valuation_currency = str(pos.get("valuation_currency") or account.get("base_currency") or "CNY")
+                valuation_currency = str(
+                    pos.get("valuation_currency")
+                    or account.get("base_currency")
+                    or "CNY"
+                )
                 converted, _, _ = self.portfolio_service.convert_amount(
                     amount=market_value,
                     from_currency=valuation_currency,
@@ -257,13 +298,15 @@ class PortfolioRiskService:
                     "is_alert": bool(weight >= threshold_pct),
                 }
             )
-        rows.sort(key=lambda item: item["market_value_base"], reverse=True)
+        rows.sort(
+            key=lambda item: float(cast(Any, item["market_value_base"])), reverse=True
+        )
         top_weight = rows[0]["weight_pct"] if rows else 0.0
 
         return {
             "total_market_value": round(total_mv, 6),
-            "top_weight_pct": round(float(top_weight), 4),
-            "alert": bool(top_weight >= threshold_pct),
+            "top_weight_pct": round(float(cast(Any, top_weight)), 4),
+            "alert": bool(float(cast(Any, top_weight)) >= threshold_pct),
             "top_sectors": rows[:10],
             "coverage": coverage,
             "errors": errors[:20],
@@ -375,15 +418,17 @@ class PortfolioRiskService:
         for row in rows:
             key = row.snapshot_date.isoformat()
             converted, stale, _ = self.portfolio_service.convert_amount(
-                amount=float(row.total_equity or 0.0),
+                amount=float(row.total_equity or 0.0),  # type: ignore[arg-type]
                 from_currency=str(row.base_currency or "CNY"),
                 to_currency="CNY",
-                as_of_date=row.snapshot_date,
+                as_of_date=row.snapshot_date,  # type: ignore[arg-type]
             )
             grouped[key] = grouped.get(key, 0.0) + converted
             stale_flag = stale_flag or stale or bool(row.fx_stale)
 
-        series: List[Tuple[str, float]] = sorted(grouped.items(), key=lambda item: item[0])
+        series: List[Tuple[str, float]] = sorted(
+            grouped.items(), key=lambda item: item[0]
+        )
         peak = 0.0
         max_drawdown = 0.0
         current_drawdown = 0.0
@@ -405,7 +450,9 @@ class PortfolioRiskService:
         }
 
     @staticmethod
-    def _build_stop_loss(snapshot: Dict[str, Any], thresholds: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_stop_loss(
+        snapshot: Dict[str, Any], thresholds: Dict[str, Any]
+    ) -> Dict[str, Any]:
         stop_loss_pct = float(thresholds["stop_loss_alert_pct"])
         near_ratio = float(thresholds["stop_loss_near_ratio"])
         near_threshold = stop_loss_pct * near_ratio

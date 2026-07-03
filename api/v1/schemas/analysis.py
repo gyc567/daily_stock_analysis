@@ -1,3 +1,4 @@
+# mypy: disable-error-code="pydantic-alias"
 # -*- coding: utf-8 -*-
 """
 ===================================

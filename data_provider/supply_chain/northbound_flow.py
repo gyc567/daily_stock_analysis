@@ -6,7 +6,7 @@ Fetches northbound flow (沪深港通) and margin balance data.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, cast
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ class NorthboundFlowProvider:
 
             start_date = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
 
-            df = self._ak.stock_connect_hist_em(
+            df = self._ak.stock_connect_hist_em(  # type: ignore[reportAttributeAccessIssue]
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
@@ -113,9 +113,9 @@ class NorthboundFlowProvider:
                 return {}
 
         try:
-            df = self._ak.stock_hsgt_north_hold_stock_em(symbol=stock_code)
+            df = self._ak.stock_hsgt_north_hold_stock_em(symbol=stock_code)  # type: ignore[reportAttributeAccessIssue]
 
-            holdings = {
+            holdings: Dict[str, Any] = {
                 "stock_code": stock_code,
                 "holdings": [],
                 "total_holdings": 0,
@@ -123,17 +123,18 @@ class NorthboundFlowProvider:
             }
 
             for _, row in df.iterrows():
+                row_dict: Dict[str, Any] = cast(Dict[str, Any], row.to_dict())
                 holdings["holdings"].append(
                     {
-                        "date": str(row.get("日期", "")),
-                        "hold_ratio": float(row.get("持股量", 0) or 0),
-                        "market_value": float(row.get("市值", 0) or 0),
-                        "holding_ratio": float(row.get("持股占比", 0) or 0),
+                        "date": str(row_dict.get("日期", "")),
+                        "hold_ratio": float(row_dict.get("持股量", 0) or 0),
+                        "market_value": float(row_dict.get("市值", 0) or 0),
+                        "holding_ratio": float(row_dict.get("持股占比", 0) or 0),
                     }
                 )
 
             if holdings["holdings"]:
-                latest = holdings["holdings"][0]
+                latest = cast(Dict[str, Any], holdings["holdings"][0])
                 holdings["total_holdings"] = latest.get("hold_ratio", 0)
                 holdings["total_market_value"] = latest.get("market_value", 0)
 
@@ -159,9 +160,9 @@ class NorthboundFlowProvider:
                 return {}
 
         try:
-            df = self._ak.stock_margin_detail_szse(symbol=stock_code)
+            df = self._ak.stock_margin_detail_szse()  # type: ignore[reportCallIssue]
 
-            margin_data = {
+            margin_data: Dict[str, Any] = {
                 "stock_code": stock_code,
                 "margin_balance": 0,
                 "short_balance": 0,
@@ -170,8 +171,12 @@ class NorthboundFlowProvider:
             }
 
             if not df.empty:
-                latest = df.iloc[0]
-                prev = df.iloc[1] if len(df) > 1 else latest
+                latest = cast(Dict[str, Any], df.iloc[0].to_dict())
+                prev = (
+                    cast(Dict[str, Any], df.iloc[1].to_dict())
+                    if len(df) > 1
+                    else latest
+                )
 
                 margin_data["margin_balance"] = float(latest.get("融资余额", 0) or 0)
                 margin_data["short_balance"] = float(latest.get("融券余额", 0) or 0)
@@ -281,8 +286,12 @@ class NorthboundFlowProvider:
         return flows
 
 
+_northbound_flow_provider: Optional[NorthboundFlowProvider] = None
+
+
 def get_northbound_flow_provider() -> NorthboundFlowProvider:
     """Get singleton provider"""
-    if not hasattr(get_northbound_flow_provider, "_instance"):
-        get_northbound_flow_provider._instance = NorthboundFlowProvider()
-    return get_northbound_flow_provider._instance
+    global _northbound_flow_provider
+    if _northbound_flow_provider is None:
+        _northbound_flow_provider = NorthboundFlowProvider()
+    return _northbound_flow_provider

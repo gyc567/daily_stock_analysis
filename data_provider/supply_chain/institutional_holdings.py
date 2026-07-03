@@ -10,7 +10,7 @@ Fetches institutional holdings data using akshare:
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, cast
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ class InstitutionalHoldingsProvider:
                 return self._get_mock_shareholders(stock_code)
 
         try:
-            df = self._ak.stock_spot_top10_shareholder_em(symbol=stock_code)
+            df = self._ak.stock_spot_top10_shareholder_em(symbol=stock_code)  # type: ignore[reportAttributeAccessIssue]
 
             holders = []
             for _, row in df.iterrows():
@@ -76,7 +76,9 @@ class InstitutionalHoldingsProvider:
                 "stock_code": stock_code,
                 "holders": holders,
                 "total_holders": len(holders),
-                "institutional_ratio": sum(h.get("hold_ratio", 0) for h in holders),
+                "institutional_ratio": sum(
+                    cast(float, h.get("hold_ratio", 0)) for h in holders
+                ),
                 "updated_at": datetime.now().isoformat(),
             }
 
@@ -110,7 +112,7 @@ class InstitutionalHoldingsProvider:
                 return []
 
         try:
-            df = self._ak.stock_fund_stock_spot(symbol=stock_code, indicator="公募基金")
+            df = self._ak.stock_fund_stock_spot(symbol=stock_code, indicator="公募基金")  # type: ignore[reportAttributeAccessIssue]
 
             holdings = []
             for _, row in df.iterrows():
@@ -154,7 +156,7 @@ class InstitutionalHoldingsProvider:
                 return {}
 
         try:
-            df = self._ak.stock_institute_hold_em(symbol=stock_code)
+            df = self._ak.stock_institute_hold_em(symbol=stock_code)  # type: ignore[reportAttributeAccessIssue]
 
             if df is None or df.empty:
                 return {}
@@ -296,8 +298,12 @@ class InstitutionalHoldingsProvider:
         }
 
 
+_institutional_holdings_provider: Optional[InstitutionalHoldingsProvider] = None
+
+
 def get_institutional_holdings_provider() -> InstitutionalHoldingsProvider:
     """Get singleton provider"""
-    if not hasattr(get_institutional_holdings_provider, "_instance"):
-        get_institutional_holdings_provider._instance = InstitutionalHoldingsProvider()
-    return get_institutional_holdings_provider._instance
+    global _institutional_holdings_provider
+    if _institutional_holdings_provider is None:
+        _institutional_holdings_provider = InstitutionalHoldingsProvider()
+    return _institutional_holdings_provider

@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ def _safe_datetime(value: Any) -> Optional[datetime]:
     if pd.isna(parsed):
         return None
     try:
-        return parsed.to_pydatetime()
+        return cast(Optional[datetime], parsed.to_pydatetime())
     except Exception:
         return None
 

@@ -10,7 +10,7 @@ P3: Integrated with SupplyChainAgent and ValueAgent for LLM-driven analysis.
 import json
 import logging
 import os
-from typing import Dict, Any, Optional, List
+from typing import cast, Dict, Any, Optional, List
 
 from src.scoring import (
     aggregate_framework,
@@ -29,6 +29,7 @@ from src.scoring.indicators import (
 )
 from src.repositories import PositionLedgerRepo, ScoreLedgerRepo
 from src.storage import DatabaseManager
+import json_repair  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +37,13 @@ logger = logging.getLogger(__name__)
 class ResearchScoringService:
     """Service for orchestrating research scoring pipeline"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.db_manager = DatabaseManager.get_instance()
         self._data_providers_initialized = False
         self._llm_service = None
         self._agents_initialized = False
 
-    def _init_data_providers(self):
+    def _init_data_providers(self) -> None:
         """Lazy initialize P2 data providers"""
         if self._data_providers_initialized:
             return
@@ -232,8 +233,11 @@ class ResearchScoringService:
         report_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Persist scores to ledger"""
+        session_local = self.db_manager._SessionLocal
+        if session_local is None:
+            return None
         try:
-            db = self.db_manager._SessionLocal()
+            db = session_local()
             try:
                 score_repo = ScoreLedgerRepo(db)
 
@@ -476,7 +480,7 @@ class ResearchScoringService:
             "p2_enriched": enrich_with_providers,
         }
 
-    def _init_agents(self):
+    def _init_agents(self) -> None:
         """Lazy initialize P3 agents"""
         if self._agents_initialized:
             return
@@ -781,7 +785,9 @@ class ResearchScoringService:
                 max_tokens=500,
             )
 
-            content = response.choices[0].message.content
+            response_obj: Any = response
+            content_raw: Any = response_obj.choices[0].message.content
+            content: str = content_raw if content_raw is not None else ""
             import json
             import json_repair
 
@@ -789,7 +795,7 @@ class ResearchScoringService:
             logger.info(
                 f"[ResearchScoringService] LLM extracted supply chain for {stock_code}"
             )
-            return result
+            return cast(Dict[str, Any], result)
 
         except Exception as e:
             logger.warning(f"[ResearchScoringService] LLM extraction failed: {e}")
@@ -863,7 +869,9 @@ class ResearchScoringService:
                 max_tokens=500,
             )
 
-            content = response.choices[0].message.content
+            response_obj: Any = response
+            content_raw: Any = response_obj.choices[0].message.content
+            content: str = content_raw if content_raw is not None else ""
 
             try:
                 import json
@@ -877,7 +885,7 @@ class ResearchScoringService:
                     r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", content, re.DOTALL
                 )
                 if json_match:
-                    result = json_repair.loads(json_match.group(0))
+                    result = json_repair.loads(json_match.group(0))  # type: ignore[union-attr]
                 else:
                     logger.warning(
                         f"[ResearchScoringService] Failed to parse LLM response for {stock_code}"
@@ -887,7 +895,7 @@ class ResearchScoringService:
             logger.info(
                 f"[ResearchScoringService] LLM supply chain extraction for {stock_code}"
             )
-            return result
+            return cast(Dict[str, Any], result)
 
         except Exception as e:
             logger.warning(f"[ResearchScoringService] LLM extraction failed: {e}")

@@ -2878,8 +2878,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             if rec is None:
                 return None
             paths = {
-                "md_path": cast(str, rec.md_path),
-                "pdf_path": cast(Optional[str], rec.pdf_path),
+                "md_path": rec.md_path,
+                "pdf_path": rec.pdf_path,
             }
             session.delete(rec)
             return paths
@@ -2929,8 +2929,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             )
             result_paths = [
                 {
-                    "md_path": cast(str, r.md_path),
-                    "pdf_path": cast(Optional[str], r.pdf_path),
+                    "md_path": r.md_path,
+                    "pdf_path": r.pdf_path,
                 }
                 for r in old_recs
             ]
@@ -3073,8 +3073,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             if rec is None:
                 return None
             paths: Dict[str, Optional[str]] = {
-                "md_path": cast(str, rec.md_path),
-                "pdf_path": cast(Optional[str], rec.pdf_path),
+                "md_path": rec.md_path,
+                "pdf_path": rec.pdf_path,
             }
             session.delete(rec)
             return paths
@@ -3126,8 +3126,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             )
             result_paths: List[Dict[str, Optional[str]]] = [
                 {
-                    "md_path": cast(str, r.md_path),
-                    "pdf_path": cast(Optional[str], r.pdf_path),
+                    "md_path": r.md_path,
+                    "pdf_path": r.pdf_path,
                 }
                 for r in old_recs
             ]

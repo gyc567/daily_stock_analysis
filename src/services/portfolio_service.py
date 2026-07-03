@@ -8,7 +8,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, cast
 
 from data_provider.base import canonical_stock_code, normalize_stock_code
 from src.config import get_config
@@ -188,15 +188,19 @@ class PortfolioService:
         dedup_hash_norm = (dedup_hash or "").strip() or None
         try:
             with self.repo.portfolio_write_session() as session:
-                account = self._require_active_account_in_session(session=session, account_id=account_id)
+                account = self._require_active_account_in_session(
+                    session=session, account_id=account_id
+                )
                 market_norm = self._normalize_market(market or account.market)
-                currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+                currency_norm = self._normalize_currency(
+                    currency or self._default_currency_for_market(market_norm)
+                )
                 self._validate_trade_identity(
                     account_id=account_id,
                     trade_uid=trade_uid_norm,
                     dedup_hash=dedup_hash_norm,
                     session=session,
-                    )
+                )
                 if side_norm == "sell":
                     self._validate_sell_quantity(
                         account_id=account_id,
@@ -223,7 +227,7 @@ class PortfolioService:
                     note=(note or "").strip() or None,
                     dedup_hash=dedup_hash_norm,
                 )
-                return {"id": int(row.id)}
+                return {"id": int(cast(Any, row).id)}
         except (DuplicateTradeUidError, DuplicateTradeDedupHashError) as exc:
             raise PortfolioConflictError(str(exc)) from exc
 
@@ -243,7 +247,9 @@ class PortfolioService:
         if amount <= 0:
             raise ValueError("amount must be > 0")
         with self.repo.portfolio_write_session() as session:
-            account = self._require_active_account_in_session(session=session, account_id=account_id)
+            account = self._require_active_account_in_session(
+                session=session, account_id=account_id
+            )
             currency_norm = self._normalize_currency(currency or account.base_currency)
             row = self.repo.add_cash_ledger_in_session(
                 session=session,
@@ -254,7 +260,7 @@ class PortfolioService:
                 currency=currency_norm,
                 note=(note or "").strip() or None,
             )
-            return {"id": int(row.id)}
+            return {"id": int(cast(Any, row).id)}
 
     def record_corporate_action(
         self,
@@ -275,14 +281,20 @@ class PortfolioService:
 
         if action_type_norm == "cash_dividend":
             if cash_dividend_per_share is None or cash_dividend_per_share < 0:
-                raise ValueError("cash_dividend_per_share must be >= 0 for cash_dividend")
+                raise ValueError(
+                    "cash_dividend_per_share must be >= 0 for cash_dividend"
+                )
         if action_type_norm == "split_adjustment":
             if split_ratio is None or split_ratio <= 0:
                 raise ValueError("split_ratio must be > 0 for split_adjustment")
         with self.repo.portfolio_write_session() as session:
-            account = self._require_active_account_in_session(session=session, account_id=account_id)
+            account = self._require_active_account_in_session(
+                session=session, account_id=account_id
+            )
             market_norm = self._normalize_market(market or account.market)
-            currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+            currency_norm = self._normalize_currency(
+                currency or self._default_currency_for_market(market_norm)
+            )
             symbol_norm = self._normalize_symbol_for_storage(symbol)
             if not symbol_norm:
                 raise ValueError("symbol is required")
@@ -298,7 +310,7 @@ class PortfolioService:
                 split_ratio=split_ratio,
                 note=(note or "").strip() or None,
             )
-            return {"id": int(row.id)}
+            return {"id": int(cast(Any, row).id)}
 
     def delete_trade_event(self, trade_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
@@ -306,11 +318,15 @@ class PortfolioService:
 
     def delete_cash_ledger_event(self, entry_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
-            return self.repo.delete_cash_ledger_in_session(session=session, entry_id=entry_id)
+            return self.repo.delete_cash_ledger_in_session(
+                session=session, entry_id=entry_id
+            )
 
     def delete_corporate_action_event(self, action_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
-            return self.repo.delete_corporate_action_in_session(session=session, action_id=action_id)
+            return self.repo.delete_corporate_action_in_session(
+                session=session, action_id=action_id
+            )
 
     def list_trade_events(
         self,
@@ -421,7 +437,9 @@ class PortfolioService:
         if action_type is not None and action_type.strip():
             action_norm = action_type.strip().lower()
             if action_norm not in VALID_CORPORATE_ACTIONS:
-                raise ValueError("action_type must be cash_dividend or split_adjustment")
+                raise ValueError(
+                    "action_type must be cash_dividend or split_adjustment"
+                )
 
         rows, total = self.repo.query_corporate_actions(
             account_id=account_id,
@@ -471,8 +489,11 @@ class PortfolioService:
             "fx_stale": False,
         }
 
-        for account in account_rows:
-            account_snapshot = self._replay_account(account=account, as_of_date=as_of_date, cost_method=method)
+        for raw_account in account_rows:
+            account = cast(Any, raw_account)
+            account_snapshot = self._replay_account(
+                account=account, as_of_date=as_of_date, cost_method=method
+            )
 
             self.repo.replace_positions_lots_and_snapshot(
                 account_id=account.id,
@@ -584,26 +605,29 @@ class PortfolioService:
         config = get_config()
         refresh_enabled = bool(getattr(config, "portfolio_fx_update_enabled", True))
         if account_id is not None:
-            account_rows = [self._require_active_account(account_id)]
+            account_rows: List[Any] = [self._require_active_account(account_id)]
         else:
             account_rows = self.repo.list_accounts(include_inactive=False)
 
-        summary = {
+        summary: Dict[str, Any] = {
             "as_of": as_of_date.isoformat(),
             "account_count": len(account_rows),
             "refresh_enabled": refresh_enabled,
-            "disabled_reason": None if refresh_enabled else PORTFOLIO_FX_REFRESH_DISABLED_REASON,
+            "disabled_reason": None
+            if refresh_enabled
+            else PORTFOLIO_FX_REFRESH_DISABLED_REASON,
             "pair_count": 0,
             "updated_count": 0,
             "stale_count": 0,
             "error_count": 0,
         }
         for account in account_rows:
-            item = self._refresh_account_fx_rates(
+            item_raw = self._refresh_account_fx_rates(
                 account=account,
                 as_of_date=as_of_date,
                 refresh_enabled=refresh_enabled,
             )
+            item: Dict[str, int] = item_raw
             summary["pair_count"] += item["pair_count"]
             summary["updated_count"] += item["updated_count"]
             summary["stale_count"] += item["stale_count"]
@@ -621,10 +645,18 @@ class PortfolioService:
         dedup_hash: Optional[str],
         session: Optional[Any] = None,
     ) -> None:
-        if trade_uid and self._has_trade_uid(account_id=account_id, trade_uid=trade_uid, session=session):
-            raise PortfolioConflictError(f"Duplicate trade_uid for account_id={account_id}: {trade_uid}")
-        if dedup_hash and self._has_trade_dedup_hash(account_id=account_id, dedup_hash=dedup_hash, session=session):
-            raise PortfolioConflictError(f"Duplicate dedup_hash for account_id={account_id}: {dedup_hash}")
+        if trade_uid and self._has_trade_uid(
+            account_id=account_id, trade_uid=trade_uid, session=session
+        ):
+            raise PortfolioConflictError(
+                f"Duplicate trade_uid for account_id={account_id}: {trade_uid}"
+            )
+        if dedup_hash and self._has_trade_dedup_hash(
+            account_id=account_id, dedup_hash=dedup_hash, session=session
+        ):
+            raise PortfolioConflictError(
+                f"Duplicate dedup_hash for account_id={account_id}: {dedup_hash}"
+            )
 
     def _validate_sell_quantity(
         self,
@@ -666,32 +698,38 @@ class PortfolioService:
     ) -> float:
         if session is None:
             trades = self.repo.list_trades(account_id, as_of=as_of_date)
-            corporate_actions = self.repo.list_corporate_actions(account_id, as_of=as_of_date)
+            corporate_actions = self.repo.list_corporate_actions(
+                account_id, as_of=as_of_date
+            )
         else:
-            trades = self.repo.list_trades_in_session(session=session, account_id=account_id, as_of=as_of_date)
+            trades = self.repo.list_trades_in_session(
+                session=session, account_id=account_id, as_of=as_of_date
+            )
             corporate_actions = self.repo.list_corporate_actions_in_session(
                 session=session,
                 account_id=account_id,
                 as_of=as_of_date,
             )
 
-        events = []
-        for row in corporate_actions:
+        events: List[Tuple[str, Any, Any, Any]] = []
+        for corp_row in corporate_actions:
+            row_corp: Any = corp_row
             event_key = (
-                self._normalize_symbol_for_position(row.symbol),
-                self._normalize_market(row.market),
-                self._normalize_currency(row.currency),
+                self._normalize_symbol_for_position(row_corp.symbol),
+                self._normalize_market(row_corp.market),
+                self._normalize_currency(row_corp.currency),
             )
             if event_key == key:
-                events.append(("corp", row.effective_date, row.id, row))
-        for row in trades:
+                events.append(("corp", row_corp.effective_date, row_corp.id, corp_row))
+        for trade_row in trades:
+            row_trade: Any = trade_row
             event_key = (
-                self._normalize_symbol_for_position(row.symbol),
-                self._normalize_market(row.market),
-                self._normalize_currency(row.currency),
+                self._normalize_symbol_for_position(row_trade.symbol),
+                self._normalize_market(row_trade.market),
+                self._normalize_currency(row_trade.currency),
             )
             if event_key == key:
-                events.append(("trade", row.trade_date, row.id, row))
+                events.append(("trade", row_trade.trade_date, row_trade.id, trade_row))
 
         # Quantity validation only depends on position-changing events for one symbol.
         # Cash ledger entries do not affect shares held, so we keep the same corp->trade
@@ -701,11 +739,12 @@ class PortfolioService:
 
         quantity_held = 0.0
         for event_type, event_date, _, event in events:
+            event_any = cast(Any, event)
             if event_type == "corp":
-                action_type = (event.action_type or "").strip().lower()
+                action_type = (event_any.action_type or "").strip().lower()
                 if action_type != "split_adjustment":
                     continue
-                split_ratio = float(event.split_ratio or 0.0)
+                split_ratio = float(event_any.split_ratio or 0.0)
                 if split_ratio <= 0:
                     raise ValueError(f"Invalid split_ratio for {key[0]}")
                 if abs(split_ratio - 1.0) <= EPS:
@@ -713,15 +752,15 @@ class PortfolioService:
                 quantity_held *= split_ratio
                 continue
 
-            qty = float(event.quantity or 0.0)
+            qty = float(event_any.quantity or 0.0)
             if qty <= 0:
                 raise ValueError(f"Invalid trade quantity for {key[0]}")
-            side = (event.side or "").strip().lower()
+            side = (event_any.side or "").strip().lower()
             if side == "buy":
                 quantity_held += qty
                 continue
             if side != "sell":
-                raise ValueError(f"Unsupported trade side: {event.side}")
+                raise ValueError(f"Unsupported trade side: {event_any.side}")
             if quantity_held + EPS < qty:
                 raise PortfolioOversellError(
                     symbol=key[0],
@@ -735,18 +774,25 @@ class PortfolioService:
 
         return quantity_held
 
-    def _replay_account(self, *, account: Any, as_of_date: date, cost_method: str) -> Dict[str, Any]:
+    def _replay_account(
+        self, *, account: Any, as_of_date: date, cost_method: str
+    ) -> Dict[str, Any]:
         trades = self.repo.list_trades(account.id, as_of=as_of_date)
         cash_ledger = self.repo.list_cash_ledger(account.id, as_of=as_of_date)
-        corporate_actions = self.repo.list_corporate_actions(account.id, as_of=as_of_date)
+        corporate_actions = self.repo.list_corporate_actions(
+            account.id, as_of=as_of_date
+        )
 
-        events = []
-        for row in cash_ledger:
-            events.append(("cash", row.event_date, row.id, row))
-        for row in trades:
-            events.append(("trade", row.trade_date, row.id, row))
-        for row in corporate_actions:
-            events.append(("corp", row.effective_date, row.id, row))
+        events: List[Tuple[str, Any, Any, Any]] = []
+        for cash_row in cash_ledger:
+            row_cash: Any = cash_row
+            events.append(("cash", row_cash.event_date, row_cash.id, cash_row))
+        for trade_row in trades:
+            row_trade: Any = trade_row
+            events.append(("trade", row_trade.trade_date, row_trade.id, trade_row))
+        for corp_row in corporate_actions:
+            row_corp: Any = corp_row
+            events.append(("corp", row_corp.effective_date, row_corp.id, corp_row))
 
         # Same-day deterministic ordering: cash -> corporate action -> trade.
         event_priority = {"cash": 0, "corp": 1, "trade": 2}
@@ -762,34 +808,39 @@ class PortfolioService:
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
 
         for event_type, event_date, _, event in events:
+            event_any = cast(Any, event)
             if event_type == "cash":
-                currency = self._normalize_currency(event.currency)
-                amount = float(event.amount or 0.0)
-                if event.direction == "in":
+                currency = self._normalize_currency(event_any.currency)
+                amount = float(event_any.amount or 0.0)
+                if event_any.direction == "in":
                     cash_balances[currency] += amount
-                elif event.direction == "out":
+                elif event_any.direction == "out":
                     cash_balances[currency] -= amount
                 else:
-                    raise ValueError(f"Unsupported cash direction: {event.direction}")
+                    raise ValueError(
+                        f"Unsupported cash direction: {event_any.direction}"
+                    )
                 continue
 
             if event_type == "trade":
                 key = (
-                    self._normalize_symbol_for_position(event.symbol),
-                    self._normalize_market(event.market),
-                    self._normalize_currency(event.currency),
+                    self._normalize_symbol_for_position(event_any.symbol),
+                    self._normalize_market(event_any.market),
+                    self._normalize_currency(event_any.currency),
                 )
-                qty = float(event.quantity or 0.0)
-                price = float(event.price or 0.0)
-                fee = float(event.fee or 0.0)
-                tax = float(event.tax or 0.0)
+                qty = float(event_any.quantity or 0.0)
+                price = float(event_any.price or 0.0)
+                fee = float(event_any.fee or 0.0)
+                tax = float(event_any.tax or 0.0)
                 if qty <= 0 or price <= 0:
-                    raise ValueError(f"Invalid trade quantity or price for {event.symbol}")
+                    raise ValueError(
+                        f"Invalid trade quantity or price for {event_any.symbol}"
+                    )
 
                 gross = qty * price
-                side = (event.side or "").lower().strip()
+                side = (event_any.side or "").lower().strip()
                 if side == "buy":
-                    cash_balances[key[2]] -= (gross + fee + tax)
+                    cash_balances[key[2]] -= gross + fee + tax
                     if cost_method == "fifo":
                         unit_cost = (gross + fee + tax) / qty
                         fifo_lots[key].append(
@@ -800,15 +851,15 @@ class PortfolioService:
                                 "open_date": event_date,
                                 "remaining_quantity": qty,
                                 "unit_cost": unit_cost,
-                                "source_trade_id": event.id,
+                                "source_trade_id": event_any.id,
                             }
                         )
                     else:
                         state = avg_state[key]
                         state.quantity += qty
-                        state.total_cost += (gross + fee + tax)
+                        state.total_cost += gross + fee + tax
                 elif side == "sell":
-                    cash_balances[key[2]] += (gross - fee - tax)
+                    cash_balances[key[2]] += gross - fee - tax
                     proceeds_net = gross - fee - tax
                     if cost_method == "fifo":
                         cost_basis = self._consume_fifo_lots(
@@ -834,7 +885,7 @@ class PortfolioService:
                     realized_pnl_base += realized_base
                     fx_stale = fx_stale or stale_realized
                 else:
-                    raise ValueError(f"Unsupported trade side: {event.side}")
+                    raise ValueError(f"Unsupported trade side: {event_any.side}")
 
                 fee_base, stale_fee, _ = self._convert_amount(
                     amount=fee,
@@ -855,13 +906,13 @@ class PortfolioService:
 
             if event_type == "corp":
                 key = (
-                    self._normalize_symbol_for_position(event.symbol),
-                    self._normalize_market(event.market),
-                    self._normalize_currency(event.currency),
+                    self._normalize_symbol_for_position(event_any.symbol),
+                    self._normalize_market(event_any.market),
+                    self._normalize_currency(event_any.currency),
                 )
-                action_type = (event.action_type or "").strip().lower()
+                action_type = (event_any.action_type or "").strip().lower()
                 if action_type == "cash_dividend":
-                    per_share = float(event.cash_dividend_per_share or 0.0)
+                    per_share = float(event_any.cash_dividend_per_share or 0.0)
                     if per_share <= 0:
                         continue
                     qty_held = self._held_quantity(
@@ -873,9 +924,9 @@ class PortfolioService:
                     if qty_held > EPS:
                         cash_balances[key[2]] += qty_held * per_share
                 elif action_type == "split_adjustment":
-                    split_ratio = float(event.split_ratio or 0.0)
+                    split_ratio = float(event_any.split_ratio or 0.0)
                     if split_ratio <= 0:
-                        raise ValueError(f"Invalid split_ratio for {event.symbol}")
+                        raise ValueError(f"Invalid split_ratio for {event_any.symbol}")
                     if abs(split_ratio - 1.0) <= EPS:
                         continue
                     if cost_method == "fifo":
@@ -886,14 +937,18 @@ class PortfolioService:
                         state = avg_state[key]
                         state.quantity *= split_ratio
                 else:
-                    raise ValueError(f"Unsupported corporate action type: {event.action_type}")
+                    raise ValueError(
+                        f"Unsupported corporate action type: {event_any.action_type}"
+                    )
 
-        position_rows, lot_rows, market_value_base, total_cost_base, stale_pos = self._build_positions(
-            account=account,
-            as_of_date=as_of_date,
-            cost_method=cost_method,
-            fifo_lots=fifo_lots,
-            avg_state=avg_state,
+        position_rows, lot_rows, market_value_base, total_cost_base, stale_pos = (
+            self._build_positions(
+                account=account,
+                as_of_date=as_of_date,
+                cost_method=cost_method,
+                fifo_lots=fifo_lots,
+                avg_state=avg_state,
+            )
         )
         fx_stale = fx_stale or stale_pos
 
@@ -971,11 +1026,16 @@ class PortfolioService:
             symbol, market, currency = key
 
             if cost_method == "fifo":
-                active_lots = [lot for lot in fifo_lots[key] if lot["remaining_quantity"] > EPS]
+                active_lots = [
+                    lot for lot in fifo_lots[key] if lot["remaining_quantity"] > EPS
+                ]
                 qty = sum(float(lot["remaining_quantity"]) for lot in active_lots)
                 if qty <= EPS:
                     continue
-                total_cost = sum(float(lot["remaining_quantity"]) * float(lot["unit_cost"]) for lot in active_lots)
+                total_cost = sum(
+                    float(lot["remaining_quantity"]) * float(lot["unit_cost"])
+                    for lot in active_lots
+                )
                 avg_cost = total_cost / qty
                 lot_rows.extend(active_lots)
             else:
@@ -997,7 +1057,9 @@ class PortfolioService:
                     }
                 )
 
-            price_info = self._resolve_position_price(symbol=symbol, as_of_date=as_of_date)
+            price_info = self._resolve_position_price(
+                symbol=symbol, as_of_date=as_of_date
+            )
             last_price = price_info.price
 
             if price_info.is_available:
@@ -1036,11 +1098,15 @@ class PortfolioService:
                     "last_price": round(float(last_price), 8),
                     "market_value_base": round(market_base, 8),
                     "unrealized_pnl_base": round(unrealized_base, 8),
-                    "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
+                    "unrealized_pnl_pct": round(unrealized_pct, 8)
+                    if unrealized_pct is not None
+                    else None,
                     "valuation_currency": account.base_currency,
                     "price_source": price_info.source,
                     "price_provider": price_info.provider,
-                    "price_date": price_info.price_date.isoformat() if price_info.price_date else None,
+                    "price_date": price_info.price_date.isoformat()
+                    if price_info.price_date
+                    else None,
                     "price_stale": price_info.is_stale,
                     "price_available": price_info.is_available,
                 }
@@ -1051,7 +1117,9 @@ class PortfolioService:
 
         return position_rows, lot_rows, market_value_base, total_cost_base, fx_stale
 
-    def _resolve_position_price(self, *, symbol: str, as_of_date: date) -> _ResolvedPositionPrice:
+    def _resolve_position_price(
+        self, *, symbol: str, as_of_date: date
+    ) -> _ResolvedPositionPrice:
         today = date.today()
 
         if as_of_date == today:
@@ -1087,19 +1155,25 @@ class PortfolioService:
         )
 
     @staticmethod
-    def _fetch_realtime_position_price(symbol: str) -> Tuple[Optional[float], Optional[str]]:
+    def _fetch_realtime_position_price(
+        symbol: str,
+    ) -> Tuple[Optional[float], Optional[str]]:
         try:
             from data_provider.base import DataFetcherManager
 
-            quote = DataFetcherManager().get_realtime_quote(symbol, log_final_failure=False)
+            quote = DataFetcherManager().get_realtime_quote(
+                symbol, log_final_failure=False
+            )
         except Exception as exc:
-            logger.warning("Failed to fetch realtime portfolio price for %s: %s", symbol, exc)
+            logger.warning(
+                "Failed to fetch realtime portfolio price for %s: %s", symbol, exc
+            )
             return None, None
 
         if quote is None:
             return None, None
 
-        price = getattr(quote, "price", None)
+        price = cast(Any, getattr(quote, "price", None))
         try:
             numeric_price = float(price)
         except (TypeError, ValueError):
@@ -1109,7 +1183,9 @@ class PortfolioService:
             return None, None
 
         source = getattr(quote, "source", None)
-        provider = getattr(source, "value", None) or (str(source) if source is not None else None)
+        provider = getattr(source, "value", None) or (
+            str(source) if source is not None else None
+        )
         return numeric_price, provider
 
     @staticmethod
@@ -1186,7 +1262,11 @@ class PortfolioService:
             return values
 
         explicit_exchange: Optional[str] = None
-        if len(original) >= 8 and original[:2] in {"SH", "SZ", "BJ"} and original[2:].isdigit():
+        if (
+            len(original) >= 8
+            and original[:2] in {"SH", "SZ", "BJ"}
+            and original[2:].isdigit()
+        ):
             explicit_exchange = original[:2]
             explicit_code = original[2:]
         elif "." in original:
@@ -1201,7 +1281,9 @@ class PortfolioService:
 
         if normalized.isdigit():
             if len(normalized) == 6:
-                exchanges = [explicit_exchange] if explicit_exchange else ["SH", "SZ", "BJ"]
+                exchanges = (
+                    [explicit_exchange] if explicit_exchange else ["SH", "SZ", "BJ"]
+                )
                 for exchange in exchanges:
                     if exchange is None:
                         continue
@@ -1211,10 +1293,16 @@ class PortfolioService:
                         _add(f"{normalized}.SH")
             return values
 
-        if explicit_exchange is not None and explicit_code is not None and explicit_code.isdigit():
+        if (
+            explicit_exchange is not None
+            and explicit_code is not None
+            and explicit_code.isdigit()
+        ):
             if len(explicit_code) == 6:
                 _add(f"{explicit_exchange}{explicit_code}")
-                _add(f"{explicit_code}.{'SS' if explicit_exchange == 'SH' else explicit_exchange}")
+                _add(
+                    f"{explicit_code}.{'SS' if explicit_exchange == 'SH' else explicit_exchange}"
+                )
                 if explicit_exchange == "SH":
                     _add(f"{explicit_code}.SH")
             elif len(normalized) == 5:
@@ -1288,7 +1376,9 @@ class PortfolioService:
         avg_state: Dict[Tuple[str, str, str], _AvgState],
     ) -> float:
         if cost_method == "fifo":
-            return sum(float(lot["remaining_quantity"]) for lot in fifo_lots.get(key, []))
+            return sum(
+                float(lot["remaining_quantity"]) for lot in fifo_lots.get(key, [])
+            )
         return float(avg_state.get(key, _AvgState()).quantity)
 
     def _convert_amount(
@@ -1311,16 +1401,24 @@ class PortfolioService:
             to_currency=to_norm,
             as_of=as_of_date,
         )
-        if direct is not None and direct.rate > 0:
-            return float(amount) * float(direct.rate), bool(direct.is_stale), "direct_rate"
+        if direct is not None and float(cast(Any, direct).rate) > 0:
+            return (
+                float(amount) * float(cast(Any, direct).rate),
+                bool(cast(Any, direct).is_stale),
+                "direct_rate",
+            )
 
         inverse = self.repo.get_latest_fx_rate(
             from_currency=to_norm,
             to_currency=from_norm,
             as_of=as_of_date,
         )
-        if inverse is not None and inverse.rate > 0:
-            return float(amount) / float(inverse.rate), bool(inverse.is_stale), "inverse_rate"
+        if inverse is not None and float(cast(Any, inverse).rate) > 0:
+            return (
+                float(amount) / float(cast(Any, inverse).rate),
+                bool(cast(Any, inverse).is_stale),
+                "inverse_rate",
+            )
 
         # P0 fallback: keep pipeline available even when FX cache is missing.
         return float(amount), True, "fallback_1_to_1"
@@ -1349,13 +1447,17 @@ class PortfolioService:
         strict: bool = True,
     ) -> List[str]:
         """Return distinct non-base currencies participating in refresh for one account."""
-        base_currency = self._normalize_currency(account.base_currency)
+        base_currency = self._normalize_currency(cast(Any, account).base_currency)
         currencies: Set[str] = set()
-        rows = list(self.repo.list_trades(account.id, as_of=as_of_date))
-        rows.extend(self.repo.list_cash_ledger(account.id, as_of=as_of_date))
+        rows = list(self.repo.list_trades(cast(Any, account).id, as_of=as_of_date))
+        rows.extend(
+            cast(
+                Any, self.repo.list_cash_ledger(cast(Any, account).id, as_of=as_of_date)
+            )
+        )
         for row in rows:
             try:
-                currency = self._normalize_currency(row.currency)
+                currency = self._normalize_currency(cast(Any, row).currency)
             except ValueError:
                 if strict:
                     raise
@@ -1430,13 +1532,13 @@ class PortfolioService:
                 to_currency=base_currency,
                 as_of=as_of_date,
             )
-            if fallback is not None and float(fallback.rate or 0.0) > 0:
+            if fallback is not None and float(cast(Any, fallback).rate or 0.0) > 0:
                 self.repo.save_fx_rate(
                     from_currency=from_currency,
                     to_currency=base_currency,
                     rate_date=as_of_date,
-                    rate=float(fallback.rate),
-                    source=(fallback.source or "cache_fallback"),
+                    rate=float(cast(Any, fallback).rate),
+                    source=(cast(Any, fallback).source or "cache_fallback"),
                     is_stale=True,
                 )
                 summary["stale_count"] += 1
@@ -1478,7 +1580,9 @@ class PortfolioService:
             raise ValueError(f"Active account not found: {account_id}")
         return account
 
-    def _require_active_account_in_session(self, *, session: Any, account_id: int) -> Any:
+    def _require_active_account_in_session(
+        self, *, session: Any, account_id: int
+    ) -> Any:
         account = self.repo.get_account_in_session(
             session=session,
             account_id=account_id,
@@ -1488,10 +1592,14 @@ class PortfolioService:
             raise ValueError(f"Active account not found: {account_id}")
         return account
 
-    def _has_trade_uid(self, *, account_id: int, trade_uid: str, session: Optional[Any] = None) -> bool:
+    def _has_trade_uid(
+        self, *, account_id: int, trade_uid: str, session: Optional[Any] = None
+    ) -> bool:
         if session is None:
             return self.repo.has_trade_uid(account_id, trade_uid)
-        return self.repo.has_trade_uid_in_session(session=session, account_id=account_id, trade_uid=trade_uid)
+        return self.repo.has_trade_uid_in_session(
+            session=session, account_id=account_id, trade_uid=trade_uid
+        )
 
     def _has_trade_dedup_hash(
         self,
@@ -1562,12 +1670,18 @@ class PortfolioService:
             "symbol": row.symbol,
             "market": row.market,
             "currency": row.currency,
-            "effective_date": row.effective_date.isoformat() if row.effective_date else "",
+            "effective_date": row.effective_date.isoformat()
+            if row.effective_date
+            else "",
             "action_type": row.action_type,
             "cash_dividend_per_share": (
-                float(row.cash_dividend_per_share) if row.cash_dividend_per_share is not None else None
+                float(row.cash_dividend_per_share)
+                if row.cash_dividend_per_share is not None
+                else None
             ),
-            "split_ratio": float(row.split_ratio) if row.split_ratio is not None else None,
+            "split_ratio": float(row.split_ratio)
+            if row.split_ratio is not None
+            else None,
             "note": row.note,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }

@@ -13,7 +13,7 @@ import re
 import threading
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Type, Callable
+from typing import Any, Dict, List, Optional, Type, Callable, cast
 
 from bot.models import BotMessage, BotResponse
 from bot.commands.base import BotCommand
@@ -756,7 +756,7 @@ def get_dispatcher() -> CommandDispatcher:
         # 自动注册所有命令
         from bot.commands import ALL_COMMANDS
         for command_class in ALL_COMMANDS:
-            _dispatcher.register_class(command_class)
+            _dispatcher.register_class(command_class)  # type: ignore[type-abstract]
 
         logger.info(f"[Dispatcher] 初始化完成，已注册 {len(_dispatcher._commands)} 个命令")
 

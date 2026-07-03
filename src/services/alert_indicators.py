@@ -6,18 +6,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from math import isfinite
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple, cast
 
 import pandas as pd
 
 
-TECHNICAL_ALERT_TYPES = frozenset({
-    "ma_price_cross",
-    "rsi_threshold",
-    "macd_cross",
-    "kdj_cross",
-    "cci_threshold",
-})
+TECHNICAL_ALERT_TYPES = frozenset(
+    {
+        "ma_price_cross",
+        "rsi_threshold",
+        "macd_cross",
+        "kdj_cross",
+        "cci_threshold",
+    }
+)
 
 ABOVE_BELOW_DIRECTIONS = frozenset({"above", "below"})
 CROSS_DIRECTIONS = frozenset({"bullish_cross", "bearish_cross"})
@@ -41,46 +43,70 @@ class IndicatorEvaluation:
     data_timestamp: Optional[datetime] = None
 
 
-def normalize_indicator_parameters(alert_type: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_indicator_parameters(
+    alert_type: str, parameters: Dict[str, Any]
+) -> Dict[str, Any]:
     if not isinstance(parameters, dict):
         raise ValueError("parameters must be an object")
 
     if alert_type == "ma_price_cross":
         normalized = {
-            "direction": _direction(parameters.get("direction"), ABOVE_BELOW_DIRECTIONS, default="above"),
+            "direction": _direction(
+                parameters.get("direction"), ABOVE_BELOW_DIRECTIONS, default="above"
+            ),
             "window": _int_in_range(parameters.get("window"), "window", default=20),
         }
         return _ensure_required_bars_fetchable(alert_type, normalized)
     if alert_type == "rsi_threshold":
         normalized = {
-            "direction": _direction(parameters.get("direction"), ABOVE_BELOW_DIRECTIONS, default="above"),
+            "direction": _direction(
+                parameters.get("direction"), ABOVE_BELOW_DIRECTIONS, default="above"
+            ),
             "period": _int_in_range(parameters.get("period"), "period", default=12),
-            "threshold": _float_in_range(parameters.get("threshold"), "threshold", minimum=0.0, maximum=100.0),
+            "threshold": _float_in_range(
+                parameters.get("threshold"), "threshold", minimum=0.0, maximum=100.0
+            ),
         }
         return _ensure_required_bars_fetchable(alert_type, normalized)
     if alert_type == "macd_cross":
-        fast_period = _int_in_range(parameters.get("fast_period"), "fast_period", default=12)
-        slow_period = _int_in_range(parameters.get("slow_period"), "slow_period", default=26)
+        fast_period = _int_in_range(
+            parameters.get("fast_period"), "fast_period", default=12
+        )
+        slow_period = _int_in_range(
+            parameters.get("slow_period"), "slow_period", default=26
+        )
         if fast_period >= slow_period:
             raise ValueError("fast_period must be < slow_period")
         normalized = {
-            "direction": _direction(parameters.get("direction"), CROSS_DIRECTIONS, default="bullish_cross"),
+            "direction": _direction(
+                parameters.get("direction"), CROSS_DIRECTIONS, default="bullish_cross"
+            ),
             "fast_period": fast_period,
             "slow_period": slow_period,
-            "signal_period": _int_in_range(parameters.get("signal_period"), "signal_period", default=9),
+            "signal_period": _int_in_range(
+                parameters.get("signal_period"), "signal_period", default=9
+            ),
         }
         return _ensure_required_bars_fetchable(alert_type, normalized)
     if alert_type == "kdj_cross":
         normalized = {
-            "direction": _direction(parameters.get("direction"), CROSS_DIRECTIONS, default="bullish_cross"),
+            "direction": _direction(
+                parameters.get("direction"), CROSS_DIRECTIONS, default="bullish_cross"
+            ),
             "period": _int_in_range(parameters.get("period"), "period", default=9),
-            "k_period": _int_in_range(parameters.get("k_period"), "k_period", default=3),
-            "d_period": _int_in_range(parameters.get("d_period"), "d_period", default=3),
+            "k_period": _int_in_range(
+                parameters.get("k_period"), "k_period", default=3
+            ),
+            "d_period": _int_in_range(
+                parameters.get("d_period"), "d_period", default=3
+            ),
         }
         return _ensure_required_bars_fetchable(alert_type, normalized)
     if alert_type == "cci_threshold":
         normalized = {
-            "direction": _direction(parameters.get("direction"), ABOVE_BELOW_DIRECTIONS, default="above"),
+            "direction": _direction(
+                parameters.get("direction"), ABOVE_BELOW_DIRECTIONS, default="above"
+            ),
             "period": _int_in_range(parameters.get("period"), "period", default=14),
             "threshold": _finite_float(parameters.get("threshold"), "threshold"),
         }
@@ -96,7 +122,12 @@ def compute_required_bars(alert_type: str, params: Dict[str, Any]) -> int:
     if alert_type == "macd_cross":
         return int(params["slow_period"]) + int(params["signal_period"]) + 1
     if alert_type == "kdj_cross":
-        return int(params["period"]) + int(params["k_period"]) + int(params["d_period"]) + 1
+        return (
+            int(params["period"])
+            + int(params["k_period"])
+            + int(params["d_period"])
+            + 1
+        )
     if alert_type == "cci_threshold":
         return int(params["period"]) + 1
     raise ValueError(f"unsupported technical alert_type: {alert_type}")
@@ -123,7 +154,7 @@ def evaluate_indicator_alert(
     *,
     now: Optional[datetime] = None,
 ) -> IndicatorEvaluation:
-    columns = ("close",)
+    columns: Tuple[str, ...] = ("close",)
     if alert_type in {"kdj_cross", "cci_threshold"}:
         columns = ("high", "low", "close")
 
@@ -206,11 +237,15 @@ def normalize_ohlcv(
     output = _drop_partial_today(output, now=now)
     if output.empty:
         return output.reset_index(drop=True)
-    output = output.sort_values(by="date", kind="stable", na_position="first").reset_index(drop=True)
+    output = output.sort_values(
+        by="date", kind="stable", na_position="first"
+    ).reset_index(drop=True)
     return output
 
 
-def _evaluate_ma(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> IndicatorEvaluation:
+def _evaluate_ma(
+    stock_code: str, params: Dict[str, Any], df: pd.DataFrame
+) -> IndicatorEvaluation:
     window = int(params["window"])
     direction = str(params["direction"])
     series = df["close"].rolling(window=window).mean()
@@ -237,7 +272,9 @@ def _evaluate_ma(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> I
     )
 
 
-def _evaluate_rsi(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> IndicatorEvaluation:
+def _evaluate_rsi(
+    stock_code: str, params: Dict[str, Any], df: pd.DataFrame
+) -> IndicatorEvaluation:
     period = int(params["period"])
     threshold = float(params["threshold"])
     direction = str(params["direction"])
@@ -262,7 +299,9 @@ def _evaluate_rsi(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> 
     )
 
 
-def _evaluate_macd(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> IndicatorEvaluation:
+def _evaluate_macd(
+    stock_code: str, params: Dict[str, Any], df: pd.DataFrame
+) -> IndicatorEvaluation:
     fast_period = int(params["fast_period"])
     slow_period = int(params["slow_period"])
     signal_period = int(params["signal_period"])
@@ -292,7 +331,9 @@ def _evaluate_macd(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) ->
     )
 
 
-def _evaluate_kdj(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> IndicatorEvaluation:
+def _evaluate_kdj(
+    stock_code: str, params: Dict[str, Any], df: pd.DataFrame
+) -> IndicatorEvaluation:
     period = int(params["period"])
     k_period = int(params["k_period"])
     d_period = int(params["d_period"])
@@ -300,7 +341,9 @@ def _evaluate_kdj(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> 
     lowest_low = df["low"].rolling(window=period).min()
     highest_high = df["high"].rolling(window=period).max()
     denominator = highest_high - lowest_low
-    rsv = ((df["close"] - lowest_low) / denominator.mask(denominator == 0) * 100).fillna(50)
+    rsv = (
+        (df["close"] - lowest_low) / denominator.mask(denominator == 0) * 100
+    ).fillna(50)
     k_value = rsv.ewm(alpha=1 / k_period, adjust=False).mean()
     d_value = k_value.ewm(alpha=1 / d_period, adjust=False).mean()
     delta = k_value - d_value
@@ -324,7 +367,9 @@ def _evaluate_kdj(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> 
     )
 
 
-def _evaluate_cci(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> IndicatorEvaluation:
+def _evaluate_cci(
+    stock_code: str, params: Dict[str, Any], df: pd.DataFrame
+) -> IndicatorEvaluation:
     period = int(params["period"])
     threshold = float(params["threshold"])
     direction = str(params["direction"])
@@ -355,7 +400,9 @@ def _evaluate_cci(stock_code: str, params: Dict[str, Any], df: pd.DataFrame) -> 
     )
 
 
-def _ensure_required_bars_fetchable(alert_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def _ensure_required_bars_fetchable(
+    alert_type: str, params: Dict[str, Any]
+) -> Dict[str, Any]:
     required_bars = compute_required_bars(alert_type, params)
     if required_bars > MAX_REQUESTED_DAYS:
         raise ValueError(
@@ -372,7 +419,9 @@ def _direction(value: Any, allowed: frozenset[str], *, default: str) -> str:
     return direction
 
 
-def _int_in_range(value: Any, field_name: str, *, default: int, minimum: int = 2, maximum: int = 250) -> int:
+def _int_in_range(
+    value: Any, field_name: str, *, default: int, minimum: int = 2, maximum: int = 250
+) -> int:
     raw_value = default if value is None or value == "" else value
     try:
         number = int(raw_value)
@@ -419,7 +468,9 @@ def _calculate_rsi(close: pd.Series, period: int) -> pd.Series:
     return (100 - (100 / (1 + rs))).fillna(50)
 
 
-def _crossed_threshold(prev_value: float, curr_value: float, threshold: float, direction: str) -> bool:
+def _crossed_threshold(
+    prev_value: float, curr_value: float, threshold: float, direction: str
+) -> bool:
     if direction == "above":
         return prev_value <= threshold < curr_value
     if direction == "below":
@@ -435,7 +486,9 @@ def _crossed_zero(prev_delta: float, curr_delta: float, direction: str) -> bool:
     return False
 
 
-def _crossed_cross_direction(prev_delta: float, curr_delta: float, direction: str) -> bool:
+def _crossed_cross_direction(
+    prev_delta: float, curr_delta: float, direction: str
+) -> bool:
     if direction == "bullish_cross":
         return prev_delta <= 0 < curr_delta
     if direction == "bearish_cross":
@@ -478,14 +531,16 @@ def _find_column(df: pd.DataFrame, canonical: str) -> Optional[Any]:
 def _date_series(df: pd.DataFrame) -> pd.Series:
     date_column = _find_column(df, "date")
     if date_column is not None:
-        return pd.to_datetime(df[date_column], errors="coerce")
+        return cast(pd.Series, pd.to_datetime(df[date_column], errors="coerce"))
     index = df.index
     if isinstance(index, pd.DatetimeIndex):
         return pd.Series(index.to_pydatetime(), index=df.index)
     return pd.Series([pd.NaT] * len(df), index=df.index)
 
 
-def _drop_partial_today(df: pd.DataFrame, *, now: Optional[datetime] = None) -> pd.DataFrame:
+def _drop_partial_today(
+    df: pd.DataFrame, *, now: Optional[datetime] = None
+) -> pd.DataFrame:
     current = now or datetime.now()
     if current.time() >= time(16, 0):
         return df
@@ -509,6 +564,6 @@ def _latest_timestamp(df: pd.DataFrame) -> Optional[datetime]:
         parsed = pd.to_datetime(raw_value, errors="coerce")
         if pd.isna(parsed):
             return None
-        return parsed.to_pydatetime().replace(tzinfo=None)
+        return cast(Optional[datetime], parsed.to_pydatetime().replace(tzinfo=None))
     except Exception:
         return None

@@ -2,20 +2,23 @@
 """Shared execution lock for market review runs."""
 
 import logging
+import ctypes
 import errno
 import os
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Optional
 
 from src.config import Config
+from typing import cast  # added by mypy_codemod
 
 try:
     import fcntl
 except ImportError:  # pragma: no cover - Windows fallback
-    fcntl = None
+    fcntl = None  # type: ignore[assignment]
 
 
 _market_review_lock = threading.Lock()
@@ -61,12 +64,7 @@ def _is_process_alive(pid: int) -> bool:
 
 def _is_windows_process_alive(pid: int) -> bool:
     try:
-        import ctypes
-    except ImportError:  # pragma: no cover - ctypes is part of stdlib
-        return True
-
-    try:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32 = cast(Any, ctypes).WinDLL("kernel32", use_last_error=True)
         process_query_limited_information = 0x1000
         handle = kernel32.OpenProcess(
             process_query_limited_information,
@@ -74,7 +72,7 @@ def _is_windows_process_alive(pid: int) -> bool:
             pid,
         )
         if not handle:
-            return ctypes.get_last_error() != 87
+            return cast(bool, cast(Any, ctypes).get_last_error() != 87)
 
         try:
             exit_code = ctypes.c_ulong()

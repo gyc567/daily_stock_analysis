@@ -25,6 +25,7 @@ This adapter intentionally treats every yfinance call as best-effort and never
 raises to caller. Partial data is allowed; downstream `_infer_block_status` will
 mark the block as ``partial`` when only some fields are populated.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +78,7 @@ def _pick_row(df: pd.DataFrame, keys) -> Optional[pd.Series]:
     for key in keys:
         if key in df.index:
             try:
-                return df.loc[key]
+                return cast(Optional[pd.Series], df.loc[key])
             except KeyError:
                 continue
     return None
@@ -103,7 +105,7 @@ def _yoy_from_row(row: Optional[pd.Series]) -> Optional[float]:
         return None
     latest = _safe_float(row.iloc[0])
     prev_year = _safe_float(row.iloc[4])
-    if latest is None or prev_year in (None, 0):
+    if latest is None or prev_year is None or prev_year == 0:
         return None
     return round((latest - prev_year) / abs(prev_year) * 100.0, 4)
 
@@ -169,7 +171,11 @@ class YfinanceFundamentalAdapter:
         ticker = yf.Ticker(symbol)
         info: Dict[str, Any] = {}
         try:
-            info = ticker.get_info() if hasattr(ticker, "get_info") else (ticker.info or {})
+            info = (
+                ticker.get_info()
+                if hasattr(ticker, "get_info")
+                else (ticker.info or {})
+            )
             if not isinstance(info, dict):
                 info = {}
         except Exception as exc:
@@ -180,8 +186,14 @@ class YfinanceFundamentalAdapter:
         # for HK ADRs that is often CNY even when the stock trades in HKD. Dividends
         # and live price are paid/quoted in `currency` — keep them separate so the
         # renderer can suffix per-block currency tags correctly.
-        financial_currency = str(info.get("financialCurrency") or info.get("currency") or "").upper() or None
-        dividend_currency = str(info.get("currency") or info.get("financialCurrency") or "").upper() or None
+        financial_currency = (
+            str(info.get("financialCurrency") or info.get("currency") or "").upper()
+            or None
+        )
+        dividend_currency = (
+            str(info.get("currency") or info.get("financialCurrency") or "").upper()
+            or None
+        )
 
         # ---------------- growth block ----------------
         growth_payload: Dict[str, Any] = {
@@ -209,8 +221,14 @@ class YfinanceFundamentalAdapter:
             income_df = None
         if income_df is not None and not income_df.empty:
             try:
-                if all(hasattr(col, "to_pydatetime") or isinstance(col, (datetime, pd.Timestamp)) for col in income_df.columns):
-                    income_df = income_df.reindex(columns=sorted(income_df.columns, reverse=True))
+                if all(
+                    hasattr(col, "to_pydatetime")
+                    or isinstance(col, (datetime, pd.Timestamp))
+                    for col in income_df.columns
+                ):
+                    income_df = income_df.reindex(
+                        columns=sorted(income_df.columns, reverse=True)
+                    )
                 first_col = income_df.columns[0]
                 ts = pd.to_datetime(first_col, errors="coerce")
                 if pd.notna(ts):
@@ -228,7 +246,9 @@ class YfinanceFundamentalAdapter:
             result["errors"].append(f"quarterly_cashflow:{type(exc).__name__}")
             cashflow_df = None
         if cashflow_df is not None and not cashflow_df.empty:
-            operating_cash_flow_latest = _latest_value(_pick_row(cashflow_df, _CASHFLOW_OP_KEYS))
+            operating_cash_flow_latest = _latest_value(
+                _pick_row(cashflow_df, _CASHFLOW_OP_KEYS)
+            )
 
         # Fallback to TTM aggregates from .info when quarterly statements are
         # unavailable — still produces a non-empty row.
@@ -276,27 +296,30 @@ class YfinanceFundamentalAdapter:
         if div_series is not None and not div_series.empty:
             try:
                 # Index is timezone-aware (ex-dividend date)
-                cutoff = pd.Timestamp.now(tz=div_series.index.tz) - pd.Timedelta(days=365)
+                div_tz = getattr(div_series.index, "tz", None)
+                cutoff = pd.Timestamp.now(tz=div_tz) - pd.Timedelta(days=365)
                 for ts, value in div_series.items():
                     per_share = _safe_float(value)
                     if per_share is None or per_share <= 0:
                         continue
                     try:
-                        event_date = pd.Timestamp(ts).date().isoformat()
+                        event_date = pd.Timestamp(str(ts)).date().isoformat()
                     except Exception:
                         continue
-                    events.append({
-                        "event_date": event_date,
-                        "ex_dividend_date": event_date,
-                        "record_date": None,
-                        "announcement_date": None,
-                        "cash_dividend_per_share": per_share,
-                        "is_pre_tax": True,
-                    })
+                    events.append(
+                        {
+                            "event_date": event_date,
+                            "ex_dividend_date": event_date,
+                            "record_date": None,
+                            "announcement_date": None,
+                            "cash_dividend_per_share": per_share,
+                            "is_pre_tax": True,
+                        }
+                    )
                 ttm_events = []
                 for item in events:
                     try:
-                        event_ts = pd.Timestamp(item["event_date"]).tz_localize(div_series.index.tz)
+                        event_ts = pd.Timestamp(item["event_date"]).tz_localize(div_tz)
                     except Exception:
                         continue
                     if event_ts >= cutoff:
@@ -307,7 +330,11 @@ class YfinanceFundamentalAdapter:
         else:
             ttm_events = []
 
-        ttm_cash = sum(item["cash_dividend_per_share"] for item in ttm_events) if ttm_events else None
+        ttm_cash = (
+            sum(item["cash_dividend_per_share"] for item in ttm_events)
+            if ttm_events
+            else None
+        )
         if ttm_cash is None:
             ttm_cash = _safe_float(info.get("trailingAnnualDividendRate"))
 
@@ -316,7 +343,9 @@ class YfinanceFundamentalAdapter:
             dividend_payload: Dict[str, Any] = {
                 "events": events[:5],
                 "ttm_event_count": len(ttm_events),
-                "ttm_cash_dividend_per_share": round(ttm_cash, 6) if ttm_cash is not None else None,
+                "ttm_cash_dividend_per_share": round(ttm_cash, 6)
+                if ttm_cash is not None
+                else None,
                 "coverage": "cash_dividend_pre_tax",
                 "currency": dividend_currency,
                 "as_of": datetime.now(timezone.utc).date().isoformat(),
@@ -333,7 +362,7 @@ class YfinanceFundamentalAdapter:
                 or _safe_float(info.get("previousClose"))
             )
             yield_pct: Optional[float] = None
-            if ttm_cash is not None and latest_price not in (None, 0):
+            if ttm_cash is not None and latest_price is not None and latest_price != 0:
                 yield_pct = round(float(ttm_cash) / float(latest_price) * 100.0, 4)
             elif _safe_float(info.get("trailingAnnualDividendYield")) is not None:
                 yield_pct = _ratio_to_pct(info.get("trailingAnnualDividendYield"))
@@ -352,7 +381,9 @@ class YfinanceFundamentalAdapter:
         sector_name = str(info.get("sector") or info.get("sectorDisp") or "").strip()
         if sector_name:
             belong_boards.append({"name": sector_name, "type": "行业"})
-        industry_name = str(info.get("industry") or info.get("industryDisp") or "").strip()
+        industry_name = str(
+            info.get("industry") or info.get("industryDisp") or ""
+        ).strip()
         if industry_name and industry_name != sector_name:
             belong_boards.append({"name": industry_name, "type": "概念"})
         if belong_boards:

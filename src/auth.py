@@ -18,7 +18,7 @@ import secrets
 import sys
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 from dotenv import dotenv_values
 
@@ -45,6 +45,7 @@ def _get_lock():
     global _rate_limit_lock
     if _rate_limit_lock is None:
         import threading
+
         _rate_limit_lock = threading.Lock()
     return _rate_limit_lock
 
@@ -52,6 +53,7 @@ def _get_lock():
 def _ensure_env_loaded() -> None:
     """Ensure .env is loaded before reading config."""
     from src.config import setup_env
+
     setup_env()
 
 
@@ -70,7 +72,9 @@ def _is_auth_enabled_from_env() -> bool:
     """Read ADMIN_AUTH_ENABLED from .env file."""
     _ensure_env_loaded()
     env_file = os.getenv("ENV_FILE")
-    env_path = Path(env_file) if env_file else Path(__file__).resolve().parent.parent / ".env"
+    env_path = (
+        Path(env_file) if env_file else Path(__file__).resolve().parent.parent / ".env"
+    )
     if not env_path.exists():
         return False
     values = dotenv_values(env_path)
@@ -212,7 +216,7 @@ def verify_stored_password(password: str) -> bool:
     """Verify password against stored credential even when auth is disabled."""
     if not has_stored_password():
         return False
-    return _verify_password_hash(password, _password_hash_salt, _password_hash_stored)
+    return _verify_password_hash(password, _password_hash_salt, _password_hash_stored)  # type: ignore[arg-type]
 
 
 def is_password_set() -> bool:
@@ -297,7 +301,7 @@ def change_password(current: str, new: str) -> Optional[str]:
 
     if not current or not current.strip():
         return "请输入当前密码"
-    if not _verify_password_hash(current, _password_hash_salt, _password_hash_stored):
+    if not _verify_password_hash(current, _password_hash_salt, _password_hash_stored):  # type: ignore[arg-type]
         return "当前密码错误"
 
     err = _validate_password(new)
@@ -359,7 +363,9 @@ def verify_session(value: str) -> bool:
     except ValueError:
         return False
     try:
-        max_age_hours = int(os.getenv("ADMIN_SESSION_MAX_AGE_HOURS", str(SESSION_MAX_AGE_HOURS_DEFAULT)))
+        max_age_hours = int(
+            os.getenv("ADMIN_SESSION_MAX_AGE_HOURS", str(SESSION_MAX_AGE_HOURS_DEFAULT))
+        )
     except ValueError:
         max_age_hours = SESSION_MAX_AGE_HOURS_DEFAULT
     if time.time() - ts > max_age_hours * 3600:
@@ -378,9 +384,9 @@ def get_client_ip(request) -> str:
     if os.getenv("TRUST_X_FORWARDED_FOR", "false").lower() == "true":
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            return forwarded.split(",")[-1].strip()
+            return cast(str, forwarded.split(",")[-1].strip())
     if request.client:
-        return request.client.host or "127.0.0.1"
+        return cast(str, request.client.host or "127.0.0.1")
     return "127.0.0.1"
 
 
@@ -389,7 +395,9 @@ def check_rate_limit(ip: str) -> bool:
     lock = _get_lock()
     now = time.time()
     with lock:
-        expired_keys = [k for k, (_, ts) in _rate_limit.items() if now - ts > RATE_LIMIT_WINDOW_SEC]
+        expired_keys = [
+            k for k, (_, ts) in _rate_limit.items() if now - ts > RATE_LIMIT_WINDOW_SEC
+        ]
         for k in expired_keys:
             del _rate_limit[k]
         if ip in _rate_limit:
@@ -463,7 +471,10 @@ def reset_password_cli() -> int:
     """Interactive CLI to reset password. Returns exit code."""
     _ensure_env_loaded()
     if not _is_auth_enabled_from_env():
-        print("Error: Auth is not enabled. Set ADMIN_AUTH_ENABLED=true in .env", file=sys.stderr)
+        print(
+            "Error: Auth is not enabled. Set ADMIN_AUTH_ENABLED=true in .env",
+            file=sys.stderr,
+        )
         return 1
 
     print("Enter new admin password (will not echo):", end=" ")

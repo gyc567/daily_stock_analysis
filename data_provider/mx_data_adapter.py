@@ -22,6 +22,7 @@ from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .cross_source_validator import AnchorReading
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +175,7 @@ def _post(
                     break
                 time.sleep(1.0 * (i + 1))
                 continue
-            return r.json()
+            return cast(Dict[str, Any], r.json())
         except Exception as exc:  # noqa: BLE001 — 网络/解析错误统一捕获
             last_err = f"{type(exc).__name__}: {str(exc)[:200]}"
             time.sleep(1.0 * (i + 1))
@@ -247,7 +248,7 @@ class MXClient:
         with self._cache_lock:
             hit = self._cache.get(tool_query)
             if hit and now - hit[0] < self._ttl:
-                return hit[1]
+                return cast(Dict[str, Any], hit[1])
         # 锁外执行 HTTP（不阻塞其他 query 的缓存读）
         result = _post(QUERY_URL, {"toolQuery": tool_query}, self.api_key, self.timeout)
         with self._cache_lock:

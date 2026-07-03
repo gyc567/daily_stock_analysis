@@ -11,12 +11,14 @@
 2. Stream 模式：无需公网 IP，通过 WebSocket 长连接（钉钉、飞书支持）
 """
 
+from typing import cast
+
 from bot.platforms.base import BotPlatform
 from bot.platforms.dingtalk import DingtalkPlatform
 
 # 所有可用平台（Webhook 模式）
 ALL_PLATFORMS = {
-    'dingtalk': DingtalkPlatform,
+    "dingtalk": DingtalkPlatform,
 }
 
 # 钉钉 Stream 模式（可选）
@@ -30,8 +32,8 @@ try:
     )
 except ImportError:
     DINGTALK_STREAM_AVAILABLE = False
-    DingtalkStreamClient = None
-    DingtalkStreamHandler = None
+    DingtalkStreamClient = None  # type: ignore[misc,assignment]
+    DingtalkStreamHandler = None  # type: ignore[misc,assignment]
     get_dingtalk_stream_client = lambda: None
     start_dingtalk_stream_background = lambda: False
 
@@ -47,27 +49,27 @@ try:
     )
 except ImportError:
     FEISHU_SDK_AVAILABLE = False
-    FeishuStreamClient = None
-    FeishuStreamHandler = None
-    FeishuReplyClient = None
+    FeishuStreamClient = None  # type: ignore[misc,assignment]
+    FeishuStreamHandler = None  # type: ignore[misc,assignment]
+    FeishuReplyClient = None  # type: ignore[misc,assignment]
     get_feishu_stream_client = lambda: None
     start_feishu_stream_background = lambda: False
 
 __all__ = [
-    'BotPlatform',
-    'DingtalkPlatform',
-    'ALL_PLATFORMS',
+    "BotPlatform",
+    "DingtalkPlatform",
+    "ALL_PLATFORMS",
     # 钉钉 Stream 模式
-    'DingtalkStreamClient',
-    'DingtalkStreamHandler',
-    'get_dingtalk_stream_client',
-    'start_dingtalk_stream_background',
-    'DINGTALK_STREAM_AVAILABLE',
+    "DingtalkStreamClient",
+    "DingtalkStreamHandler",
+    "get_dingtalk_stream_client",
+    "start_dingtalk_stream_background",
+    "DINGTALK_STREAM_AVAILABLE",
     # 飞书 Stream 模式
-    'FeishuStreamClient',
-    'FeishuStreamHandler',
-    'FeishuReplyClient',
-    'get_feishu_stream_client',
-    'start_feishu_stream_background',
-    'FEISHU_SDK_AVAILABLE',
+    "FeishuStreamClient",
+    "FeishuStreamHandler",
+    "FeishuReplyClient",
+    "get_feishu_stream_client",
+    "start_feishu_stream_background",
+    "FEISHU_SDK_AVAILABLE",
 ]

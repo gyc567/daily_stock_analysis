@@ -15,7 +15,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 from urllib.parse import unquote, urlparse
 from dotenv import load_dotenv, dotenv_values
 from dataclasses import dataclass, field
@@ -1154,8 +1154,8 @@ class Config:
         }
     )
     _BOOTSTRAP_RUNTIME_ENV_OVERRIDES_CAPTURED = False
-    _BOOTSTRAP_RUNTIME_ENV_OVERRIDES = frozenset()
-    _BOOTSTRAP_RUNTIME_ENV_PRESENT_KEYS = frozenset()
+    _BOOTSTRAP_RUNTIME_ENV_OVERRIDES: frozenset[str] = frozenset()
+    _BOOTSTRAP_RUNTIME_ENV_PRESENT_KEYS: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         _log = logging.getLogger(__name__)
@@ -1284,7 +1284,7 @@ class Config:
         )
         stock_list = [
             (c or "").strip().upper()
-            for c in stock_list_str.split(",")
+            for c in (stock_list_str or "").split(",")
             if (c or "").strip()
         ]
 
@@ -1773,15 +1773,17 @@ class Config:
                 field_name="AGENT_DEEP_RESEARCH_TIMEOUT",
                 minimum=30,
             ),
-            agent_memory_enabled=os.getenv("AGENT_MEMORY_ENABLED", "false").lower()
+            agent_memory_enabled=cast(
+                str, os.getenv("AGENT_MEMORY_ENABLED", "false")
+            ).lower()
             == "true",
             agent_skill_autoweight=(
-                os.getenv("AGENT_SKILL_AUTOWEIGHT")
+                cast(str, os.getenv("AGENT_SKILL_AUTOWEIGHT"))
                 or os.getenv("AGENT_STRATEGY_AUTOWEIGHT", "true")
             ).lower()
             == "true",
             agent_skill_routing=(
-                os.getenv("AGENT_SKILL_ROUTING")
+                cast(str, os.getenv("AGENT_SKILL_ROUTING"))
                 or os.getenv("AGENT_STRATEGY_ROUTING", "auto")
             ).lower(),
             agent_context_compression_enabled=parse_env_bool(
@@ -2008,10 +2010,13 @@ class Config:
             config_validate_mode=os.getenv("CONFIG_VALIDATE_MODE", "warn").lower(),
             http_proxy=os.getenv("HTTP_PROXY"),
             https_proxy=os.getenv("HTTPS_PROXY"),
-            schedule_enabled=cls._resolve_env_value(
-                "SCHEDULE_ENABLED",
-                default="false",
-                prefer_env_file=True,
+            schedule_enabled=(
+                cls._resolve_env_value(
+                    "SCHEDULE_ENABLED",
+                    default="false",
+                    prefer_env_file=True,
+                )
+                or "false"
             ).lower()
             == "true",
             schedule_time=(schedule_time_value or "18:00").strip() or "18:00",
@@ -2034,15 +2039,21 @@ class Config:
             ).lower()
             != "false",
             # 多任务调度配置
-            watchlist_analysis_time=cls._resolve_env_value(
-                "WATCHLIST_ANALYSIS_TIME",
-                default="",
-                prefer_env_file=True,
+            watchlist_analysis_time=(
+                cls._resolve_env_value(
+                    "WATCHLIST_ANALYSIS_TIME",
+                    default="",
+                    prefer_env_file=True,
+                )
+                or ""
             ).strip(),
-            market_review_time=cls._resolve_env_value(
-                "MARKET_REVIEW_TIME",
-                default="",
-                prefer_env_file=True,
+            market_review_time=(
+                cls._resolve_env_value(
+                    "MARKET_REVIEW_TIME",
+                    default="",
+                    prefer_env_file=True,
+                )
+                or ""
             ).strip(),
             webui_enabled=os.getenv("WEBUI_ENABLED", "false").lower() == "true",
             webui_host=os.getenv("WEBUI_HOST", "127.0.0.1"),
@@ -2876,7 +2887,7 @@ class Config:
 
         stock_list = [
             (c or "").strip().upper()
-            for c in stock_list_str.split(",")
+            for c in (stock_list_str or "").split(",")
             if (c or "").strip()
         ]
 

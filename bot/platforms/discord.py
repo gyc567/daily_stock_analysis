@@ -203,7 +203,7 @@ class DiscordPlatform(BotPlatform):
         """
         content = response.text if hasattr(response, "text") else str(response)
 
-        message_data = {
+        message_data: Dict[str, Any] = {
             "content": content,
             "tts": False,
             "embeds": [],

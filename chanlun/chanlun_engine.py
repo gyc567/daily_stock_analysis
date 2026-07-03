@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -45,7 +45,7 @@ DEFAULT_PARAMS = {
 def load_params(params_path: str | None = None) -> dict:
     """从 params.json 加载参数。"""
     if params_path is None:
-        params_path = Path(__file__).parent / "params.json"
+        params_path = str(Path(__file__).parent / "params.json")
     try:
         with open(params_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -83,7 +83,7 @@ class ChanLunEngine:
             raise ValueError(f"DataFrame must have columns: {required}")
 
         self.df = df.sort_index().copy().reset_index(drop=True)
-        self.p = params or DEFAULT_PARAMS
+        self.p: Dict[str, Any] = params or DEFAULT_PARAMS
 
         self._calculate_indicators()
         self.fractals: List[Dict] = []
@@ -106,11 +106,13 @@ class ChanLunEngine:
         slow = cfg.get("slow", 26)
         signal = cfg.get("signal", 9)
 
-        close = self.df["close"].values
+        close = cast(np.ndarray, self.df["close"].values)
         self.df["ema_fast"] = self._ema(close, fast)
         self.df["ema_slow"] = self._ema(close, slow)
         self.df["macd_dif"] = self.df["ema_fast"] - self.df["ema_slow"]
-        self.df["macd_dea"] = self._ema(self.df["macd_dif"].values, signal)
+        self.df["macd_dea"] = self._ema(
+            cast(np.ndarray, self.df["macd_dif"].values), signal
+        )
         self.df["macd"] = 2 * (self.df["macd_dif"] - self.df["macd_dea"])
 
     @staticmethod
@@ -243,8 +245,8 @@ class ChanLunEngine:
         if len(self.pivots) < 2:
             return []
 
-        strokes = []
-        stroke_macd_list = []
+        strokes: List[Dict[str, Any]] = []
+        stroke_macd_list: List[Dict[str, Any]] = []
         prev_idx = None
         prev_price = None
         prev_type = None
@@ -417,8 +419,8 @@ class ChanLunEngine:
         if len(self.strokes) < 5:
             return []
 
-        zhongshus = []
-        used = set()
+        zhongshus: List[Dict[str, Any]] = []
+        used: set[Any] = set()
 
         for i in range(len(self.strokes) - 2):
             s1 = self.strokes[i]

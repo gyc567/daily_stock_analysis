@@ -68,6 +68,63 @@ disallow_incomplete_defs = false
 disallow_any_generics = false
 check_untyped_defs = true
 
+# 渐进类型治理：先在已具备完整类型注解的基础设施模块启用 ``ignore-without-code``，
+# 强制 ``# type: ignore`` 必须带错误码。这能阻止历史 ``# type: ignore`` 继续掩盖
+# 真实问题，同时不影响其他模块。
+#
+# CI 中请用 ``mypy --follow-imports=silent -p <module>`` 形式跑这些模块，
+# 避免对被 import 的 legacy 模块一并严格检查。
+[[tool.mypy.overrides]]
+module = [
+    "src.utils.type_guards",
+    "src.core.pipeline_context",
+    "src.services.system_config_service",
+    "src.md2pdf",
+    "src.agent.skills.router",
+    "src.agent.skills.aggregator",
+    "src.services.knowledge_base_parser",
+    "src.services.knowledge_base_service",
+    "src.services.image_stock_extractor",
+    "src.services.backtest_service",
+    "src.services.social_sentiment_service",
+    "src.services.market_light_alerts",
+    "src.services.alert_service",
+    "src.repositories.portfolio_repo",
+    "src.agent.tools.supply_chain_tools",
+    "src.agent.tools.data_tools",
+    "src.agent.tools.analysis_tools",
+    "src.notification",
+    "src.agent.runner",
+    "src.services.supply_chain_report_service",
+    "src.core.scheduled_task_lock",
+    "src.market_analyzer",
+    "src.agent.research",
+    "src.agent.tools.backtest_tools",
+    "src.notification_sender.feishu_sender",
+    "src.notification_sender.telegram_sender",
+    "src.notification_sender.custom_webhook_sender",
+    "src.services.decision_signal_service",
+    "src.services.research_scoring_service",
+    "src.services.analysis_service",
+    "src.services.supply_chain.scorecard",
+    "src.services.zhengxi.fund_data",
+    "src.services.alert_indicators",
+    "src.schemas.analysis_context_pack",
+    "src.scheduler",
+    "src.notification_sender.wechat_sender",
+    "src.notification_sender.serverchan3_sender",
+    "src.notification_sender.ntfy_sender",
+    "src.notification_sender.gotify_sender",
+    "src.agent.tools.registry",
+]
+enable_error_code = ["ignore-without-code"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_any_generics = true
+# check_untyped_defs 故意不开：这些模块里还残留历史 untyped def，开
+# check_untyped_defs 会把它们的参数 / 返回类型当错报，反而把信号淹没。
+# 等后续 batch 把残留 untyped def 补完后再逐个打开。
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional, cast
 from urllib.parse import urlparse, urlunparse
 
 import requests
@@ -52,7 +52,9 @@ class GotifySender:
         self._webhook_verify_ssl = getattr(config, "webhook_verify_ssl", True)
 
     def _is_gotify_configured(self) -> bool:
-        return bool((self._gotify_url or "").strip() and (self._gotify_token or "").strip())
+        return bool(
+            (self._gotify_url or "").strip() and (self._gotify_token or "").strip()
+        )
 
     def _resolve_gotify_endpoint(self) -> Optional[str]:
         return resolve_gotify_message_endpoint(self._gotify_url)
@@ -96,7 +98,7 @@ class GotifySender:
         try:
             response = requests.post(
                 endpoint,
-                json=payload,
+                json=cast(Dict[str, Any], payload),
                 headers=headers,
                 timeout=timeout_seconds or 10,
                 verify=self._webhook_verify_ssl,

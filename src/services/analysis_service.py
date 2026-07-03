@@ -42,7 +42,7 @@ class AnalysisService:
     封装股票分析相关的业务逻辑
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化分析服务"""
         self.repo = AnalysisRepository()
         self.last_error: Optional[str] = None
@@ -172,7 +172,7 @@ class AnalysisService:
             格式化的响应字典
         """
         # 获取狙击点位
-        sniper_points = {}
+        sniper_points: Dict[str, str] = {}
         if hasattr(result, "get_sniper_points"):
             sniper_points = result.get_sniper_points() or {}
 

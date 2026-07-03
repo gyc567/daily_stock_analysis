@@ -12,7 +12,7 @@ import json
 import inspect
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +21,11 @@ logger = logging.getLogger(__name__)
 # Data classes
 # ============================================================
 
+
 @dataclass
 class ToolParameter:
     """Schema for a single tool parameter."""
+
     name: str
     type: str  # "string" | "number" | "integer" | "boolean" | "array" | "object"
     description: str
@@ -35,6 +37,7 @@ class ToolParameter:
 @dataclass
 class ToolDefinition:
     """Complete definition of an agent-callable tool."""
+
     name: str
     description: str
     parameters: List[ToolParameter]
@@ -78,6 +81,7 @@ class ToolDefinition:
 # Tool Registry
 # ============================================================
 
+
 class ToolRegistry:
     """Central registry for all agent-callable tools.
 
@@ -88,7 +92,7 @@ class ToolRegistry:
         registry.execute("get_realtime_quote", stock_code="600519")
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._tools: Dict[str, ToolDefinition] = {}
 
     # ----- Registration -----
@@ -139,7 +143,7 @@ class ToolRegistry:
 
     # ----- Execution -----
 
-    def execute(self, name: str, **kwargs) -> Any:
+    def execute(self, name: str, **kwargs: Any) -> Any:
         """Execute a registered tool by name.
 
         Returns the result as a JSON-serializable value.
@@ -150,7 +154,9 @@ class ToolRegistry:
         """
         tool_def = self.resolve(name)
         if tool_def is None:
-            raise KeyError(f"Tool '{name}' not found in registry. Available: {self.list_names()}")
+            raise KeyError(
+                f"Tool '{name}' not found in registry. Available: {self.list_names()}"
+            )
 
         return tool_def.handler(**kwargs)
 
@@ -177,7 +183,7 @@ def tool(
     category: str = "data",
     parameters: Optional[List[ToolParameter]] = None,
     registry: Optional[ToolRegistry] = None,
-):
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to register a function as an agent tool.
 
     Parameters can be specified explicitly or inferred from type hints.
@@ -189,6 +195,7 @@ def tool(
         def get_realtime_quote(stock_code: str) -> dict:
             ...
     """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         # Infer parameters from type hints if not provided
         params = parameters
@@ -207,7 +214,7 @@ def tool(
         target_registry.register(tool_def)
 
         # Attach metadata to function for introspection
-        func._tool_definition = tool_def
+        cast(Any, func)._tool_definition = tool_def
         return func
 
     return decorator
@@ -216,7 +223,7 @@ def tool(
 def _infer_parameters(func: Callable[..., Any]) -> List[ToolParameter]:
     """Infer ToolParameter list from function signature and type hints."""
     sig = inspect.signature(func)
-    hints = getattr(func, '__annotations__', {})
+    hints = getattr(func, "__annotations__", {})
     params: List[ToolParameter] = []
 
     type_map = {
@@ -234,11 +241,13 @@ def _infer_parameters(func: Callable[..., Any]) -> List[ToolParameter]:
         # Skip return annotation
         hint = hints.get(param_name, str)
         # Handle Optional and other typing constructs
-        origin = getattr(hint, '__origin__', None)
+        origin = getattr(hint, "__origin__", None)
         if origin is not None:
             # Optional[X] -> X, List[X] -> array, etc.
-            args = getattr(hint, '__args__', ())
-            if origin is list or (hasattr(origin, '__name__') and origin.__name__ == 'List'):
+            args = getattr(hint, "__args__", ())
+            if origin is list or (
+                hasattr(origin, "__name__") and origin.__name__ == "List"
+            ):
                 param_type = "array"
             elif origin is dict:
                 param_type = "object"
