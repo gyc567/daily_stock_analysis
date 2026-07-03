@@ -733,10 +733,13 @@ def _load_history_run_flow_by_query_id(
         from src.services.history_service import HistoryService
 
         service = HistoryService(DatabaseManager.get_instance())
-        return service.resolve_and_get_run_flow(
-            query_id,
-            code=code,
-            report_type=report_type,
+        return cast(
+            Optional[RunFlowSnapshot],
+            service.resolve_and_get_run_flow(
+                query_id,
+                code=code,
+                report_type=report_type,
+            ),
         )
     except Exception as e:
         if fail_open:
