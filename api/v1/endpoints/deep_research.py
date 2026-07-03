@@ -301,11 +301,19 @@ async def download_pdf(report_id: str):
 
     # 业务文件名（按 docs/pdf-download-filename-plan.md）：
     # 科瑞技术（002957）深度投研报告20260630.pdf
+    #
+    # created_at 兜底：从 report_id（格式 ``{code}_{YYYYMMDDHHmm}[_seq]``）推断日期，
+    # 防止 record 字段缺失时（如测试 mock / 历史数据迁移）回退到今天导致文件名漂移。
+    _record_created_at = record.get("created_at")
+    if not _record_created_at:
+        _id_date = report_id.split("_", 1)[1][:8] if "_" in report_id else ""
+        if len(_id_date) == 8 and _id_date.isdigit():
+            _record_created_at = f"{_id_date[:4]}-{_id_date[4:6]}-{_id_date[6:8]}"
     download_filename = format_stock_report_pdf_filename(
         stock_name=record.get("stock_name"),
         stock_code=record.get("stock_code") or report_id.split("_", 1)[0],
         report_type="deep_research",
-        created_at=record.get("created_at"),
+        created_at=_record_created_at,
     )
 
     return FileResponse(

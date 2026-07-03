@@ -18,6 +18,8 @@ CRYPTO_SYMBOLS = {"BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "DOT"}
 class ChanlunDataFetcher:
     """缠论分析专用数据获取器，使用 DataFetcherManager 多源切换。"""
 
+    CRYPTO_SYMBOLS = CRYPTO_SYMBOLS  # 类属性别名（fetcher.CRYPTO_SYMBOLS 可访问）
+
     _manager = None
 
     def __init__(self):
@@ -170,3 +172,30 @@ class ChanlunDataFetcher:
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date")
         return df.reset_index(drop=True)
+
+    def _normalize_yfinance_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """标准化 yfinance 风格的 DataFrame（Open/High/Low/Close/Volume 大写列名）。
+
+        按 ``tests/test_chanlun/test_data_fetcher.py`` 契约：返回列含
+        ``open / high / low / close / volume / date``（小写），date 由索引推断。
+        """
+        rename_map = {
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume",
+            "Adj Close": "adj_close",
+        }
+        out = df.rename(columns=rename_map).copy()
+        if "date" not in out.columns:
+            # yfinance 默认把 Date 放 DatetimeIndex；显式抽出
+            out["date"] = out.index
+        if "date" in out.columns:
+            out["date"] = pd.to_datetime(out["date"])
+        keep = [
+            c
+            for c in ("date", "open", "high", "low", "close", "volume")
+            if c in out.columns
+        ]
+        return out[keep].reset_index(drop=True)
