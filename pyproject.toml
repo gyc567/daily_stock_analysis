@@ -71,10 +71,14 @@ check_untyped_defs = true
 # 渐进类型治理：先在已具备完整类型注解的基础设施模块启用 ``ignore-without-code``，
 # 强制 ``# type: ignore`` 必须带错误码。这能阻止历史 ``# type: ignore`` 继续掩盖
 # 真实问题，同时不影响其他模块。
+#
+# CI 中请用 ``mypy --follow-imports=silent -p <module>`` 形式跑这些模块，
+# 避免对被 import 的 legacy 模块一并严格检查。
 [[tool.mypy.overrides]]
 module = [
     "src.utils.type_guards",
     "src.core.pipeline_context",
+    "src.services.system_config_service",
 ]
 enable_error_code = ["ignore-without-code"]
 disallow_untyped_defs = true

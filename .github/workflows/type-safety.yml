@@ -31,11 +31,15 @@ jobs:
       - name: Mypy governed-modules check
         # 渐进治理：以下模块已在 ``pyproject.toml`` 中启用 ``ignore-without-code``，
         # 必须保持 0 错误，否则视为 PR 引入回归。
+        # ``--follow-imports=silent`` 让 mypy 只严格查目标模块，被 import 的
+        # legacy 模块按其各自配置处理，不会被牵连。
         # 新模块在治理前应先在 ``pyproject.toml`` 注册。
         run: |
           mypy \
+            --follow-imports=silent \
             -p src.utils.type_guards \
-            -p src.core.pipeline_context
+            -p src.core.pipeline_context \
+            -p src.services.system_config_service
 
       - name: Contract smoke test
         env:
