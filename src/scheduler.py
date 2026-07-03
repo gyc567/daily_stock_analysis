@@ -34,7 +34,7 @@ class GracefulShutdown:
     捕获 SIGTERM/SIGINT 信号，确保任务完成后再退出
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.shutdown_requested: bool = False
         self._lock = threading.Lock()
 
@@ -42,7 +42,7 @@ class GracefulShutdown:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum: Any, frame: Any) -> None:
         """信号处理函数"""
         with self._lock:
             if not self.shutdown_requested:
@@ -99,7 +99,9 @@ class Scheduler:
         self._background_tasks: List[Dict[str, Any]] = []
         self._running = False
 
-    def set_daily_task(self, task: Callable[..., Any], run_immediately: bool = True):
+    def set_daily_task(
+        self, task: Callable[..., Any], run_immediately: bool = True
+    ) -> None:
         """
         设置每日定时任务
 
@@ -184,7 +186,7 @@ class Scheduler:
         if self._configure_daily_task(latest_schedule_time):
             logger.info("更新后的下次执行时间: %s", self._get_next_run_time())
 
-    def _safe_run_task(self):
+    def _safe_run_task(self) -> None:
         """安全执行任务（带异常捕获）"""
         if self._task_callback is None:
             return
@@ -263,7 +265,7 @@ class Scheduler:
         self._daily_task_callbacks.pop(name, None)
         logger.info("已取消每日定时任务 [%s]", name)
 
-    def _safe_run_named_task(self, name: str):
+    def _safe_run_named_task(self, name: str) -> None:
         """安全执行指定名称的任务（带异常捕获）"""
         callback = self._daily_task_callbacks.get(name)
         if callback is None:
@@ -371,7 +373,7 @@ class Scheduler:
                 continue
             self._start_background_task(entry)
 
-    def run(self):
+    def run(self) -> None:
         """
         运行调度器主循环
 
@@ -424,7 +426,7 @@ class Scheduler:
             return next_run.strftime("%Y-%m-%d %H:%M:%S")
         return "未设置"
 
-    def stop(self):
+    def stop(self) -> None:
         """停止调度器"""
         self._running = False
 
@@ -437,7 +439,7 @@ def run_with_schedule(
     schedule_time_provider: Optional[Callable[[], str]] = None,
     daily_tasks: Optional[List[Dict[str, Any]]] = None,
     heartbeat_path: Optional[Path] = None,
-):
+) -> None:
     """
     便捷函数：使用定时调度运行任务
 
@@ -493,7 +495,7 @@ if __name__ == "__main__":
         format="%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s",
     )
 
-    def test_task():
+    def test_task() -> None:
         print(f"任务执行中... {datetime.now()}")
         time.sleep(2)
         print("任务完成!")

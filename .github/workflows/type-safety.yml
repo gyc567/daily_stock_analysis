@@ -70,7 +70,8 @@ jobs:
             -p src.services.supply_chain.scorecard \
             -p src.services.zhengxi.fund_data \
             -p src.services.alert_indicators \
-            -p src.schemas.analysis_context_pack
+            -p src.schemas.analysis_context_pack \
+            -p src.scheduler
 
       - name: Contract smoke test
         env:

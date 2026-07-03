@@ -110,6 +110,7 @@ module = [
     "src.services.zhengxi.fund_data",
     "src.services.alert_indicators",
     "src.schemas.analysis_context_pack",
+    "src.scheduler",
 ]
 enable_error_code = ["ignore-without-code"]
 disallow_untyped_defs = true
