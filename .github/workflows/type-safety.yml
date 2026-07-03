@@ -28,6 +28,56 @@ jobs:
       - name: Mypy type audit
         run: mypy src data_provider api bot
 
+      - name: Mypy governed-modules check
+        # 渐进治理：以下模块已在 ``pyproject.toml`` 中启用 ``ignore-without-code``，
+        # 必须保持 0 错误，否则视为 PR 引入回归。
+        # ``--follow-imports=silent`` 让 mypy 只严格查目标模块，被 import 的
+        # legacy 模块按其各自配置处理，不会被牵连。
+        # 新模块在治理前应先在 ``pyproject.toml`` 注册。
+        run: |
+          mypy \
+            --follow-imports=silent \
+            -p src.utils.type_guards \
+            -p src.core.pipeline_context \
+            -p src.services.system_config_service \
+            -p src.md2pdf \
+            -p src.agent.skills.router \
+            -p src.agent.skills.aggregator \
+            -p src.services.knowledge_base_parser \
+            -p src.services.knowledge_base_service \
+            -p src.services.image_stock_extractor \
+            -p src.services.backtest_service \
+            -p src.services.social_sentiment_service \
+            -p src.services.market_light_alerts \
+            -p src.services.alert_service \
+            -p src.repositories.portfolio_repo \
+            -p src.agent.tools.supply_chain_tools \
+            -p src.agent.tools.data_tools \
+            -p src.agent.tools.analysis_tools \
+            -p src.notification \
+            -p src.agent.runner \
+            -p src.services.supply_chain_report_service \
+            -p src.core.scheduled_task_lock \
+            -p src.market_analyzer \
+            -p src.agent.research \
+            -p src.agent.tools.backtest_tools \
+            -p src.notification_sender.feishu_sender \
+            -p src.notification_sender.telegram_sender \
+            -p src.notification_sender.custom_webhook_sender \
+            -p src.services.decision_signal_service \
+            -p src.services.research_scoring_service \
+            -p src.services.analysis_service \
+            -p src.services.supply_chain.scorecard \
+            -p src.services.zhengxi.fund_data \
+            -p src.services.alert_indicators \
+            -p src.schemas.analysis_context_pack \
+            -p src.scheduler \
+            -p src.notification_sender.wechat_sender \
+            -p src.notification_sender.serverchan3_sender \
+            -p src.notification_sender.ntfy_sender \
+            -p src.notification_sender.gotify_sender \
+            -p src.agent.tools.registry
+
       - name: Contract smoke test
         env:
           ICONTRACT_SLOW: "true"

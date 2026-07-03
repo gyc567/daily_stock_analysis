@@ -49,7 +49,7 @@ class SupplyChainDataService:
         Returns:
             Dict with supply chain data from all sources
         """
-        result = {
+        result: Dict[str, Any] = {
             "data_sources": [],
             "company_position": "",
             "upstream": [],
@@ -137,8 +137,8 @@ class SupplyChainDataService:
                 result["serenity_factors"] = serenity_data.get("factors")
                 result["serenity_penalties"] = serenity_data.get("penalties")
 
-        upstream_raw: Any = result.get('upstream') or []
-        downstream_raw: Any = result.get('downstream') or []
+        upstream_raw: Any = result.get("upstream") or []
+        downstream_raw: Any = result.get("downstream") or []
         logger.info(
             f"[SupplyChainDataService] {stock_code} supply chain: sources={result.get('data_sources')}, "
             f"upstream={len(upstream_raw)}, downstream={len(downstream_raw)}"
@@ -228,7 +228,7 @@ class SupplyChainDataService:
 
     def _normalize_llm_output(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """标准化 LLM 输出"""
-        result = {}
+        result: Dict[str, Any] = {}
 
         if raw.get("company_position") or raw.get("chain_position"):
             result["company_position"] = str(
@@ -395,7 +395,7 @@ class SupplyChainDataService:
 
     def _infer_from_industry(self, name_lower: str) -> Dict[str, Any]:
         """基于行业推断供应链信息"""
-        result = {
+        result: Dict[str, Any] = {
             "company_position": "",
             "upstream": [],
             "downstream": [],

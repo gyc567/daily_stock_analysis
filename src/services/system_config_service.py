@@ -1879,7 +1879,7 @@ class SystemConfigService:
 
         if data_type == "integer":
             try:
-                numeric = int(value)
+                numeric: float = int(value)
             except ValueError:
                 return [
                     {

@@ -18,7 +18,7 @@ import logging
 import re
 import ipaddress
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 import requests
@@ -48,21 +48,25 @@ BLOCKED_IP_RANGES = [
 
 class KnowledgeBaseParserError(Exception):
     """Base exception for parser errors."""
+
     pass
 
 
 class FileSizeLimitError(KnowledgeBaseParserError):
     """Raised when file exceeds size limit."""
+
     pass
 
 
 class ContentLengthLimitError(KnowledgeBaseParserError):
     """Raised when content exceeds length limit."""
+
     pass
 
 
 class SSRFDetectedError(KnowledgeBaseParserError):
     """Raised when SSRF attack is detected."""
+
     pass
 
 
@@ -78,6 +82,7 @@ def _is_blocked_host(host: str) -> bool:
 
         # Try to resolve and check IP
         import socket
+
         try:
             addrs = socket.getaddrinfo(host, None)
             for family, _, _, _, sockaddr in addrs:
@@ -273,6 +278,7 @@ def _extract_pdf_text(path: Path) -> str:
     try:
         # Try PyPDF2 first
         from PyPDF2 import PdfReader  # type: ignore[import]
+
         reader = PdfReader(str(path))
         text_parts = []
         for page in reader.pages:
@@ -292,15 +298,17 @@ def _extract_pdf_text(path: Path) -> str:
     try:
         # Try pdfminer.six
         from pdfminer.high_level import extract_text  # type: ignore[import]
+
         content = extract_text(str(path))
         if content.strip():
-            return content
+            return cast(str, content)
     except ImportError:
         pass
 
     try:
         # Try pymupdf (fitz)
         import fitz  # type: ignore[import]
+
         doc = fitz.open(str(path))
         text_parts = []
         for page in doc:
@@ -377,6 +385,7 @@ def _extract_main_content(html: str, url: str) -> str:
     """Extract main text content from HTML."""
     try:
         from bs4 import BeautifulSoup
+
         soup = BeautifulSoup(html, "html.parser")
 
         # Remove scripts, styles, nav, footer
@@ -384,7 +393,11 @@ def _extract_main_content(html: str, url: str) -> str:
             tag.decompose()
 
         # Try to find main content
-        main = soup.find("main") or soup.find("article") or soup.find("div", class_=re.compile(r"content|article|post|main"))
+        main = (
+            soup.find("main")
+            or soup.find("article")
+            or soup.find("div", class_=re.compile(r"content|article|post|main"))
+        )
         if main:
             text = main.get_text(separator="\n", strip=True)
         else:

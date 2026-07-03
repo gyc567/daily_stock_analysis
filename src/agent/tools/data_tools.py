@@ -27,7 +27,7 @@ _DAILY_HISTORY_DEFAULT_DAYS = 60
 _DAILY_HISTORY_MAX_DAYS = 365
 
 
-def _get_fetcher_manager():
+def _get_fetcher_manager() -> Any:
     """Return a module-level singleton DataFetcherManager.
 
     Re-creating the manager on every tool call causes Tushare re-init overhead
@@ -51,7 +51,7 @@ def reset_fetcher_manager() -> None:
         _fetcher_manager_singleton = None
 
 
-def _get_db():
+def _get_db() -> Any:
     """Lazy import for DatabaseManager."""
     from src.storage import get_db
 
@@ -628,7 +628,7 @@ def _handle_get_analysis_context(stock_code: str) -> dict[str, Any]:
         return {"error": f"No analysis context in DB for {stock_code}"}
 
     # Return safely serializable version (remove raw_data to save tokens)
-    safe_context = {}
+    safe_context: Dict[str, Any] = {}
     for k, v in context.items():
         if k == "raw_data":
             safe_context["has_raw_data"] = True

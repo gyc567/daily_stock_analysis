@@ -220,7 +220,7 @@ class AlertService:
 
     async def _evaluate_rule(
         self,
-        rule,
+        rule: Any,
         monitor: EventMonitor,
         daily_cache: Optional[Dict[Any, Any]] = None,
     ) -> Dict[str, Any]:
@@ -466,7 +466,7 @@ class AlertService:
         )
 
     async def _evaluate_volume(self, rule: VolumeAlert) -> Dict[str, Any]:
-        def _fetch_daily_data():
+        def _fetch_daily_data() -> Any:
             from data_provider import DataFetcherManager
 
             return DataFetcherManager().get_daily_data(rule.stock_code, days=20)
@@ -561,7 +561,7 @@ class AlertService:
         requested_days = compute_requested_days(rule.alert_type, rule.indicator_params)
         cache_key = (rule.stock_code, requested_days)
 
-        def _fetch_daily_data():
+        def _fetch_daily_data() -> Any:
             from data_provider import DataFetcherManager
 
             return DataFetcherManager().get_daily_data(
@@ -650,7 +650,7 @@ class AlertService:
 
     def _triggered(
         self,
-        rule,
+        rule: Any,
         observed_value: Any,
         message: str,
         *,
@@ -674,7 +674,7 @@ class AlertService:
 
     def _not_triggered(
         self,
-        rule,
+        rule: Any,
         observed_value: Any,
         message: str,
         *,
@@ -699,7 +699,7 @@ class AlertService:
 
     def _evaluation_error(
         self,
-        rule,
+        rule: Any,
         exc: Any,
         *,
         threshold: Optional[float] = None,
@@ -725,11 +725,11 @@ class AlertService:
         }
 
     @staticmethod
-    def _runtime_rule_id(rule) -> int:
+    def _runtime_rule_id(rule: Any) -> int:
         return int(rule.metadata.get("persisted_rule_id", 0) or 0)
 
     @staticmethod
-    def _threshold_for_rule(rule) -> Optional[float]:
+    def _threshold_for_rule(rule: Any) -> Optional[float]:
         if isinstance(rule, PriceAlert):
             return float(rule.price)
         if isinstance(rule, PriceChangeAlert):
@@ -745,7 +745,7 @@ class AlertService:
         return None
 
     @staticmethod
-    def _data_source_for_rule(rule) -> Optional[str]:
+    def _data_source_for_rule(rule: Any) -> Optional[str]:
         if isinstance(rule, (PriceAlert, PriceChangeAlert)):
             return "realtime_quote"
         if isinstance(rule, VolumeAlert):
@@ -825,8 +825,11 @@ class AlertService:
         if hasattr(value, "to_pydatetime"):
             try:
                 parsed = value.to_pydatetime()
-                return (
-                    parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+                return cast(
+                    Optional[datetime],
+                    parsed.replace(tzinfo=None)
+                    if parsed.tzinfo is not None
+                    else parsed,
                 )
             except Exception:
                 return None
@@ -1197,7 +1200,7 @@ class AlertService:
 
     def _to_runtime_rule(
         self, row: AlertRuleRecord, data: Optional[Dict[str, Any]] = None
-    ):
+    ) -> Any:
         data = data or self._serialize_rule_base(row)
         parameters = data["parameters"]
         metadata = {

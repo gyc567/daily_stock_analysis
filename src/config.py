@@ -1154,8 +1154,8 @@ class Config:
         }
     )
     _BOOTSTRAP_RUNTIME_ENV_OVERRIDES_CAPTURED = False
-    _BOOTSTRAP_RUNTIME_ENV_OVERRIDES = frozenset()
-    _BOOTSTRAP_RUNTIME_ENV_PRESENT_KEYS = frozenset()
+    _BOOTSTRAP_RUNTIME_ENV_OVERRIDES: frozenset[str] = frozenset()
+    _BOOTSTRAP_RUNTIME_ENV_PRESENT_KEYS: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         _log = logging.getLogger(__name__)

@@ -51,7 +51,7 @@ import os
 import platform
 import re
 import threading
-from typing import Optional
+from typing import Optional, cast
 
 logger = logging.getLogger(__name__)
 
@@ -177,9 +177,17 @@ def _strip_emoji_then_render_body(markdown_text: str) -> str:
     import markdown2  # lazy import：仅在 PDF 渲染路径才需要
 
     cleaned = strip_emoji_for_pdf(markdown_text)
-    return markdown2.markdown(
-        cleaned,
-        extras=["tables", "fenced-code-blocks", "break-on-newline", "cuddled-lists"],
+    return cast(
+        str,
+        markdown2.markdown(
+            cleaned,
+            extras=[
+                "tables",
+                "fenced-code-blocks",
+                "break-on-newline",
+                "cuddled-lists",
+            ],
+        ),
     )
 
 

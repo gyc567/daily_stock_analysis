@@ -16,7 +16,7 @@ import math
 import re
 import time
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, List, Tuple, Callable
+from typing import Optional, Dict, Any, List, Tuple, Callable, cast
 
 import litellm
 from json_repair import repair_json
@@ -1579,11 +1579,11 @@ def get_stock_name_multi_source(
         if context.get("stock_name"):
             name = context["stock_name"]
             if name and not name.startswith("股票"):
-                return name
+                return cast(str, name)
 
         # 其次从 realtime 数据获取
         if "realtime" in context and context["realtime"].get("name"):
-            return context["realtime"]["name"]
+            return cast(str, context["realtime"]["name"])
 
     # 2. 从静态映射表获取
     if stock_code in STOCK_NAME_MAP:
@@ -1604,7 +1604,7 @@ def get_stock_name_multi_source(
             if name:
                 # 更新缓存
                 STOCK_NAME_MAP[stock_code] = name
-                return name
+                return cast(str, name)
         except Exception as e:
             logger.debug(f"从数据源获取股票名称失败: {e}")
 
@@ -1752,8 +1752,11 @@ class AnalysisResult:
     def get_core_conclusion(self) -> str:
         """获取核心结论（一句话）"""
         if self.dashboard and "core_conclusion" in self.dashboard:
-            return self.dashboard["core_conclusion"].get(
-                "one_sentence", self.analysis_summary
+            return cast(
+                str,
+                self.dashboard["core_conclusion"].get(
+                    "one_sentence", self.analysis_summary
+                ),
             )
         return self.analysis_summary
 
@@ -1762,26 +1765,36 @@ class AnalysisResult:
         if self.dashboard and "core_conclusion" in self.dashboard:
             pos_advice = self.dashboard["core_conclusion"].get("position_advice", {})
             if has_position:
-                return pos_advice.get("has_position", self.operation_advice)
-            return pos_advice.get("no_position", self.operation_advice)
+                return cast(str, pos_advice.get("has_position", self.operation_advice))
+            return cast(str, pos_advice.get("no_position", self.operation_advice))
         return self.operation_advice
 
     def get_sniper_points(self) -> Dict[str, str]:
         """获取狙击点位"""
+
         if self.dashboard and "battle_plan" in self.dashboard:
-            return self.dashboard["battle_plan"].get("sniper_points", {})
+            return cast(
+                Dict[str, str],
+                self.dashboard["battle_plan"].get("sniper_points", {}),
+            )
         return {}
 
     def get_checklist(self) -> List[str]:
         """获取检查清单"""
         if self.dashboard and "battle_plan" in self.dashboard:
-            return self.dashboard["battle_plan"].get("action_checklist", [])
+            return cast(
+                List[str],
+                self.dashboard["battle_plan"].get("action_checklist", []),
+            )
         return []
 
     def get_risk_alerts(self) -> List[str]:
         """获取风险警报"""
         if self.dashboard and "intelligence" in self.dashboard:
-            return self.dashboard["intelligence"].get("risk_alerts", [])
+            return cast(
+                List[str],
+                self.dashboard["intelligence"].get("risk_alerts", []),
+            )
         return []
 
     def get_emoji(self) -> str:
@@ -2219,7 +2232,7 @@ class GeminiAnalyzer:
         self._default_skill_policy_override = default_skill_policy
         self._use_legacy_default_prompt_override = use_legacy_default_prompt
         self._resolved_prompt_state: Optional[Dict[str, Any]] = None
-        self._router = None
+        self._router: Optional[Router] = None
         self._legacy_router_model_list: List[Dict[str, Any]] = []
         self._litellm_available = False
         self._init_litellm()
@@ -2719,7 +2732,7 @@ class GeminiAnalyzer:
 
         use_channel_router = self._has_channel_config(config)
 
-        last_error = None
+        last_error: Optional[Exception] = None
         last_response_text: Optional[str] = None
         last_model: Optional[str] = None
         last_usage: Dict[str, Any] = {}
@@ -3056,7 +3069,7 @@ class GeminiAnalyzer:
                             code,
                         )
                         response_text = exc.last_response_text
-                        model_used = exc.last_model
+                        model_used = cast(str, exc.last_model)
                         llm_usage = exc.last_usage
                     else:
                         raise
@@ -3692,7 +3705,11 @@ class GeminiAnalyzer:
         change_amount = None
         if prev_close not in (None, 0) and high is not None and low is not None:
             try:
-                amplitude = (float(high) - float(low)) / float(prev_close) * 100
+                amplitude = (
+                    (float(cast(float, high)) - float(cast(float, low)))
+                    / float(cast(float, prev_close))
+                    * 100
+                )
             except (TypeError, ValueError, ZeroDivisionError):
                 amplitude = None
         if prev_close is not None and close is not None:

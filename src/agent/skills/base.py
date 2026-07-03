@@ -15,7 +15,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, SupportsInt, Union, cast
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def _coerce_int(value: object, default: int = 100) -> int:
     try:
         if isinstance(value, bool):
             return default
-        return int(value)  # type: ignore[arg-type]
+        return int(cast(SupportsInt, value))
     except (TypeError, ValueError):
         return default
 

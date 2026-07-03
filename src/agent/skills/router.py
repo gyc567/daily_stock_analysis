@@ -11,7 +11,7 @@ Selects which trading skills to apply based on:
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, List, Optional, cast
 
 from src.agent.protocols import AgentContext
 from src.agent.skills.defaults import (
@@ -30,10 +30,12 @@ class SkillRouter:
         ctx: AgentContext,
         max_count: int = 3,
     ) -> List[str]:
-        requested_skills = ctx.meta.get("skills_requested") or ctx.meta.get("strategies_requested", [])
+        requested_skills = ctx.meta.get("skills_requested") or ctx.meta.get(
+            "strategies_requested", []
+        )
         if requested_skills:
             logger.info("[SkillRouter] user-requested skills: %s", requested_skills)
-            return requested_skills[:max_count]
+            return cast(List[str], requested_skills[:max_count])
 
         routing_mode = self._get_routing_mode()
         if routing_mode == "manual":
@@ -106,7 +108,9 @@ class SkillRouter:
             config = get_config()
             return getattr(config, "agent_skill_routing", "auto")
         except Exception:
-            logger.warning("Failed to get routing mode, falling back to auto", exc_info=True)
+            logger.warning(
+                "Failed to get routing mode, falling back to auto", exc_info=True
+            )
             return "auto"
 
     @staticmethod
@@ -148,7 +152,9 @@ class SkillRouter:
         available_skills = cls._get_available_skills()
         skill_catalog = available_skills or None
         available = {skill.name for skill in available_skills}
-        selected = [skill_id for skill_id in configured if skill_id in available][:max_count]
+        selected = [skill_id for skill_id in configured if skill_id in available][
+            :max_count
+        ]
         if selected:
             return selected
 

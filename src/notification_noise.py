@@ -277,13 +277,27 @@ def _evaluate_notification_noise(
 
     effective_now = _resolve_now(timezone_name, now)
     now_ts = _timestamp(effective_now)
-    decision_base = {
-        "route_type": route,
-        "severity": resolved_severity,
-        "dedup_ttl_seconds": dedup_ttl,
-        "cooldown_seconds": cooldown,
-        "evaluated_at": effective_now,
-    }
+
+    def _decision(
+        should_send: bool,
+        reason_code: str,
+        message: str,
+        *,
+        dedup_key: Optional[str] = None,
+        cooldown_key: Optional[str] = None,
+    ) -> NotificationNoiseDecision:
+        return NotificationNoiseDecision(
+            should_send=should_send,
+            reason_code=reason_code,
+            message=message,
+            route_type=route,
+            severity=resolved_severity,
+            dedup_ttl_seconds=dedup_ttl,
+            cooldown_seconds=cooldown,
+            evaluated_at=effective_now,
+            dedup_key=dedup_key,
+            cooldown_key=cooldown_key,
+        )
 
     if min_severity_raw:
         if min_severity_raw not in NOTIFICATION_SEVERITY_RANK:
@@ -295,23 +309,21 @@ def _evaluate_notification_noise(
             NOTIFICATION_SEVERITY_RANK[resolved_severity]
             < NOTIFICATION_SEVERITY_RANK[min_severity_raw]
         ):
-            return NotificationNoiseDecision(
+            return _decision(
                 should_send=False,
                 reason_code="min_severity",
                 message=(
                     f"通知级别 {resolved_severity} 低于最低级别 {min_severity_raw}，"
                     "已跳过静态通知渠道。"
                 ),
-                **decision_base,
             )
 
     quiet_hours = parse_notification_quiet_hours(quiet_hours_raw)
     if quiet_hours and is_time_in_quiet_hours(effective_now, quiet_hours):
-        return NotificationNoiseDecision(
+        return _decision(
             should_send=False,
             reason_code="quiet_hours",
             message=f"当前时间处于静默时段 {quiet_hours_raw}，已跳过静态通知渠道。",
-            **decision_base,
         )
 
     dedup_state_key, cooldown_state_key = _build_keys(
@@ -324,42 +336,38 @@ def _evaluate_notification_noise(
     with _state_lock:
         _cleanup_expired(now_ts)
         if dedup_ttl > 0 and _dedup_expires_at.get(dedup_state_key, 0) > now_ts:
-            return NotificationNoiseDecision(
+            return _decision(
                 should_send=False,
                 reason_code="dedup",
                 message="通知内容在去重 TTL 内已发送，已跳过静态通知渠道。",
                 dedup_key=dedup_state_key,
                 cooldown_key=cooldown_state_key,
-                **decision_base,
             )
         dedup_inflight = _dedup_inflight_until.get(dedup_state_key)
         if dedup_ttl > 0 and dedup_inflight and dedup_inflight[0] > now_ts:
-            return NotificationNoiseDecision(
+            return _decision(
                 should_send=False,
                 reason_code="dedup_inflight",
                 message="同一通知正在发送中，已跳过静态通知渠道。",
                 dedup_key=dedup_state_key,
                 cooldown_key=cooldown_state_key,
-                **decision_base,
             )
         if cooldown > 0 and _cooldown_expires_at.get(cooldown_state_key, 0) > now_ts:
-            return NotificationNoiseDecision(
+            return _decision(
                 should_send=False,
                 reason_code="cooldown",
                 message="通知冷却时间尚未结束，已跳过静态通知渠道。",
                 dedup_key=dedup_state_key,
                 cooldown_key=cooldown_state_key,
-                **decision_base,
             )
         cooldown_inflight = _cooldown_inflight_until.get(cooldown_state_key)
         if cooldown > 0 and cooldown_inflight and cooldown_inflight[0] > now_ts:
-            return NotificationNoiseDecision(
+            return _decision(
                 should_send=False,
                 reason_code="cooldown_inflight",
                 message="同一通知正在发送中，已跳过静态通知渠道。",
                 dedup_key=dedup_state_key,
                 cooldown_key=cooldown_state_key,
-                **decision_base,
             )
 
         reservation_until = now_ts + _INFLIGHT_RESERVATION_SECONDS
@@ -381,12 +389,16 @@ def _evaluate_notification_noise(
 
     return NotificationNoiseDecision(
         should_send=True,
+        route_type=route,
+        severity=resolved_severity,
+        dedup_ttl_seconds=dedup_ttl,
+        cooldown_seconds=cooldown,
+        evaluated_at=effective_now,
         dedup_key=dedup_state_key,
         cooldown_key=cooldown_state_key,
         dedup_reserved=dedup_reserved,
         cooldown_reserved=cooldown_reserved,
         reservation_token=reservation_token,
-        **decision_base,
     )
 
 

@@ -29,7 +29,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, SupportsInt, cast
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ def _to_int(value: object) -> Optional[int]:
     if value is None:
         return None
     try:
-        return int(value)  # type: ignore[arg-type]
+        return int(cast(SupportsInt, value))
     except (TypeError, ValueError):
         return None
 
@@ -212,7 +212,9 @@ class AgentReachService:
     def _ensure_channels(self) -> None:
         """懒加载实例化两个渠道；未安装时抛 AgentReachUnavailableError。"""
         if not _AVAILABLE:
-            raise AgentReachUnavailableError(_UNAVAILABLE_REASON or "agent_reach 不可用")
+            raise AgentReachUnavailableError(
+                _UNAVAILABLE_REASON or "agent_reach 不可用"
+            )
         if self._web is None:
             self._web = WebChannel()  # type: ignore[misc]
         if self._xueqiu is None:
@@ -305,7 +307,9 @@ class AgentReachService:
             }
         return {
             "web": self._probe("web", self._web, "Jina Reader"),
-            "xueqiu": self._probe("xueqiu", self._xueqiu, "Xueqiu API (需要登录 Cookie)"),
+            "xueqiu": self._probe(
+                "xueqiu", self._xueqiu, "Xueqiu API (需要登录 Cookie)"
+            ),
         }
 
     @staticmethod

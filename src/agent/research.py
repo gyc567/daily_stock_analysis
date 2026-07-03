@@ -21,7 +21,7 @@ import math
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 from src.agent.llm_adapter import LLMToolAdapter
 from src.agent.runner import RunLoopResult, run_agent_loop
@@ -254,12 +254,12 @@ class ResearchAgent:
 
         return ResearchResult(
             success=not report.get("error"),
-            report=report.get("content", ""),
+            report=cast(str, report.get("content", "")),
             sub_questions=questions,
             findings_count=len(all_findings),
             total_tokens=tokens_used,
             duration_s=duration,
-            error=report.get("error"),
+            error=cast(Optional[str], report.get("error")),
         )
 
     @staticmethod

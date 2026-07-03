@@ -1258,7 +1258,7 @@ class EfinanceFetcher(BaseFetcher):
                 logger.info(
                     f"[API返回] ef.stock.get_belong_board 成功: 返回 {len(df)} 个板块, 耗时 {api_elapsed:.2f}s"
                 )
-                return df
+                return cast(Optional[pd.DataFrame], df)
             else:
                 logger.warning(f"[API返回] 未获取到 {stock_code} 的板块信息")
                 return None

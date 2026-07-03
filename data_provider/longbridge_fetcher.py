@@ -152,12 +152,12 @@ def _longbridge_config_kwargs() -> Dict[str, Any]:
     """Optional kwargs for ``Config.from_apikey`` (Longbridge OpenAPI SDK)."""
     try:
         import inspect
-        from longbridge.openapi import Config, Language, PushCandlestickMode  # type: ignore[reportAttributeAccessIssue]
+        from longbridge.openapi import Config, Language, PushCandlestickMode  # type: ignore[attr-defined]
     except Exception:
         return {}
 
     try:
-        params = inspect.signature(Config.from_apikey).parameters  # type: ignore[reportAttributeAccessIssue]
+        params = inspect.signature(Config.from_apikey).parameters  # type: ignore[attr-defined]
     except Exception:
         return {}
 
@@ -494,7 +494,7 @@ class LongbridgeFetcher(BaseFetcher):
     def _is_available(self) -> bool:
         """Check if Longbridge credentials are configured (OAuth or Legacy)."""
         if self._available is not None:
-            return self._available
+            return cast(bool, self._available)
         try:
             from src.config import get_config
 
@@ -504,7 +504,7 @@ class LongbridgeFetcher(BaseFetcher):
         self._available = _has_legacy_credentials(creds) or _has_oauth_credentials(
             creds
         )
-        return self._available
+        return cast(bool, self._available)
 
     @staticmethod
     def has_configured_credentials(config: Any = None) -> bool:
@@ -759,7 +759,7 @@ class LongbridgeFetcher(BaseFetcher):
             if avg_vol <= 0:
                 return None
 
-            return round(today_volume / avg_vol, 2)
+            return cast(Optional[float], round(today_volume / avg_vol, 2))
         except Exception as e:
             logger.debug(f"[Longbridge] 计算量比失败({symbol}): {e}")
             return None

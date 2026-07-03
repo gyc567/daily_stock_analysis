@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from src.config import AGENT_MAX_STEPS_DEFAULT
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ def _coerce_config_int(
     try:
         if isinstance(raw_value, bool):
             return int(default)
-        return int(raw_value)  # type: ignore[arg-type]
+        return cast(int, int(raw_value))  # type: ignore[arg-type]
     except (TypeError, ValueError, OverflowError):
         if field_name:
             logger.warning(

@@ -20,7 +20,7 @@ import time
 from threading import BoundedSemaphore, RLock, Thread
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Callable, Optional, List, Tuple, Dict, Any
+from typing import Callable, Optional, List, Tuple, Dict, Any, cast
 
 import pandas as pd
 import numpy as np
@@ -56,7 +56,7 @@ def unwrap_exception(exc: Exception) -> Exception:
     """
     Follow chained exceptions and return the deepest non-cyclic cause.
     """
-    current = exc
+    current: BaseException = exc
     visited = set()
 
     while current is not None and id(current) not in visited:
@@ -66,7 +66,9 @@ def unwrap_exception(exc: Exception) -> Exception:
             break
         current = next_exc
 
-    return current  # type: ignore[reportReturnType]
+    if isinstance(current, Exception):
+        return current
+    return cast(Exception, current)
 
 
 def summarize_exception(exc: Exception) -> Tuple[str, str]:
@@ -902,7 +904,7 @@ class DataFetcherManager:
                 return None
 
             if current_fetcher is not None and current_key == api_key:
-                return current  # type: ignore[reportReturnType]_fetcher
+                return current_fetcher
 
             if current_fetcher is not None and hasattr(current_fetcher, "close"):
                 try:
@@ -2338,7 +2340,7 @@ class DataFetcherManager:
                 and hasattr(quote, "name")
                 and is_meaningful_stock_name(getattr(quote, "name", ""), stock_code)
             ):
-                name = quote.name
+                name = cast(str, quote.name)
                 self._cache_stock_name(stock_code, name)
                 logger.info(f"[股票名称] 从实时行情获取: {stock_code} -> {name}")
                 return name
@@ -2361,7 +2363,10 @@ class DataFetcherManager:
             if not self._is_fetcher_available(fetcher, capability="stock_name"):
                 continue
             try:
-                name = self._call_fetcher_method(fetcher, "get_stock_name", stock_code)
+                name = cast(
+                    str,
+                    self._call_fetcher_method(fetcher, "get_stock_name", stock_code),
+                )
                 if is_meaningful_stock_name(name, stock_code):
                     self._cache_stock_name(stock_code, name)
                     logger.info(
@@ -2546,7 +2551,10 @@ class DataFetcherManager:
             tickflow_fetcher = self._get_tickflow_fetcher()
             if tickflow_fetcher is not None:
                 try:
-                    data = tickflow_fetcher.get_main_indices(region=region)
+                    data = cast(
+                        List[Dict[str, Any]],
+                        tickflow_fetcher.get_main_indices(region=region),
+                    )
                     if data:
                         logger.info("[TickFlowFetcher] 获取指数行情成功")
                         return data
@@ -2555,7 +2563,9 @@ class DataFetcherManager:
 
         for fetcher in self._fetchers:
             try:
-                data = fetcher.get_main_indices(region=region)
+                data = cast(
+                    List[Dict[str, Any]], fetcher.get_main_indices(region=region)
+                )
                 if data:
                     logger.info(f"[{fetcher.name}] 获取指数行情成功")
                     return data
@@ -2573,7 +2583,7 @@ class DataFetcherManager:
         if tickflow_fetcher is not None:
             started_at = time.monotonic()
             try:
-                data = tickflow_fetcher.get_market_stats()
+                data = cast(Dict[str, Any], tickflow_fetcher.get_market_stats())
                 elapsed = time.monotonic() - started_at
                 if data:
                     logger.info(
@@ -2602,7 +2612,7 @@ class DataFetcherManager:
         for fetcher in self._fetchers:
             started_at = time.monotonic()
             try:
-                data = fetcher.get_market_stats()
+                data = cast(Dict[str, Any], fetcher.get_market_stats())
                 elapsed = time.monotonic() - started_at
                 if data:
                     logger.info(
@@ -3008,7 +3018,7 @@ class DataFetcherManager:
                 if cache_item:
                     age = time.time() - float(cache_item.get("ts", 0))
                     if age <= cache_ttl:
-                        return cache_item.get("context", {})
+                        return cast(Dict[str, Any], cache_item.get("context", {}))
 
         result_ctx: Dict[str, Any] = {
             "market": market,
@@ -3090,15 +3100,19 @@ class DataFetcherManager:
             fetch_timeout, max(stage_timeout - (time.time() - start_ts), 0.0)
         )
         if bundle_timeout <= 0:
-            bundle_payload, bundle_err, bundle_ms = {}, "fundamental stage timeout", 0
+            bundle_payload: Dict[str, Any] = {}
+            bundle_err, bundle_ms = "fundamental stage timeout", 0
         else:
-            bundle_payload, bundle_err, bundle_ms = self._run_with_retry(
+            _payload, _err, _ms = self._run_with_retry(
                 lambda: self._yfinance_fundamental_adapter.get_fundamental_bundle(
                     stock_code
                 ),
                 bundle_timeout,
                 "fundamental_bundle_yfinance",
             )
+            bundle_payload = cast(Dict[str, Any], _payload) if _payload else {}
+            bundle_err = _err if _err else ""
+            bundle_ms = _ms
         if not isinstance(bundle_payload, dict):
             bundle_payload = {}
 
@@ -3303,7 +3317,7 @@ class DataFetcherManager:
                 if cache_item:
                     age = time.time() - float(cache_item.get("ts", 0))
                     if age <= cache_ttl:
-                        return cache_item.get("context", {})
+                        return cast(Dict[str, Any], cache_item.get("context", {}))
 
         remaining_seconds = stage_timeout
         result_ctx: Dict[str, Any] = {

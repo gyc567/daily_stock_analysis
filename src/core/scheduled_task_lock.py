@@ -13,14 +13,14 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional, cast
 
 from src.config import Config
 
 try:
     import fcntl
 except ImportError:  # pragma: no cover - Windows fallback
-    fcntl = None
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ def _write_lock_metadata(handle: Any, task_name: str) -> None:
 
 def _read_lock_metadata(lock_path: Path) -> dict[str, Any]:
     try:
-        return json.loads(lock_path.read_text(encoding="utf-8"))
+        return cast(Dict[str, Any], json.loads(lock_path.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError):
         return {}
 
@@ -156,16 +156,12 @@ def acquire_task_lock(
             fd: Optional[int] = None
             for _ in range(2):
                 try:
-                    fd = os.open(
-                        str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR
-                    )
+                    fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
                     break
                 except FileExistsError:
                     if not _is_stale_lock(lock_path, timeout_seconds):
                         return None
-                    logger.warning(
-                        "检测到过期的 %s.lock，尝试清理后重试。", task_name
-                    )
+                    logger.warning("检测到过期的 %s.lock，尝试清理后重试。", task_name)
                     try:
                         lock_path.unlink()
                     except OSError as exc:
@@ -228,9 +224,10 @@ def cleanup_stale_locks(
     timeout_seconds: int = _DEFAULT_LOCK_TIMEOUT_SECONDS,
 ) -> list[str]:
     """Remove stale lock files. Returns list of cleaned task names."""
-    locks_dir = Path(
-        getattr(config, "database_path", "./data/stock_analysis.db")
-    ).parent / "locks"
+    locks_dir = (
+        Path(getattr(config, "database_path", "./data/stock_analysis.db")).parent
+        / "locks"
+    )
     if not locks_dir.is_dir():
         return []
 

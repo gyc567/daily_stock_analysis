@@ -7,7 +7,7 @@ Email 发送提醒服务
 """
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, cast
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -22,6 +22,10 @@ from src.formatters import markdown_to_html_document
 
 
 logger = logging.getLogger(__name__)
+
+_EmailConfig = Dict[str, Any]
+_StockEmailGroups = List[Tuple[List[str], List[str]]]
+_SmtpConfig = Dict[str, Any]
 
 
 # SMTP 服务器配置（自动识别）
@@ -57,7 +61,7 @@ class EmailSender:
         Args:
             config: 配置对象
         """
-        self._email_config = {
+        self._email_config: _EmailConfig = {
             "sender": config.email_sender,
             "sender_name": getattr(
                 config, "email_sender_name", "daily_stock_analysis股票分析助手"
@@ -66,7 +70,9 @@ class EmailSender:
             "receivers": config.email_receivers
             or ([config.email_sender] if config.email_sender else []),
         }
-        self._stock_email_groups = getattr(config, "stock_email_groups", None) or []
+        self._stock_email_groups: _StockEmailGroups = (
+            getattr(config, "stock_email_groups", None) or []
+        )
 
     def _is_email_configured(self) -> bool:
         """检查邮件配置是否完整（只需邮箱和授权码）"""
@@ -80,7 +86,7 @@ class EmailSender:
         formats (e.g. SH600519 vs 600519) match correctly.
         """
         if not stock_codes or not self._stock_email_groups:
-            return self._email_config["receivers"]
+            return cast(List[str], self._email_config["receivers"])
         normalized_codes = [normalize_stock_code(c) for c in stock_codes]
         seen: set[Any] = set()
         result: List[str] = []
@@ -157,9 +163,9 @@ class EmailSender:
             logger.warning("邮件配置不完整，跳过推送")
             return False
 
-        sender = self._email_config["sender"]
-        password = self._email_config["password"]
-        receivers = receivers or self._email_config["receivers"]
+        sender = cast(str, self._email_config["sender"])
+        password = cast(str, self._email_config["password"])
+        receivers = receivers or cast(List[str], self._email_config["receivers"])
         server: Optional[smtplib.SMTP] = None
 
         try:
@@ -185,12 +191,12 @@ class EmailSender:
 
             # 自动识别 SMTP 配置
             domain = sender.split("@")[-1].lower()
-            smtp_config = SMTP_CONFIGS.get(domain)
+            smtp_config: Optional[_SmtpConfig] = SMTP_CONFIGS.get(domain)
 
             if smtp_config:
-                smtp_server = smtp_config["server"]
-                smtp_port = smtp_config["port"]
-                use_ssl = smtp_config["ssl"]
+                smtp_server = cast(str, smtp_config["server"])
+                smtp_port = cast(int, smtp_config["port"])
+                use_ssl = cast(bool, smtp_config["ssl"])
                 logger.info(f"自动识别邮箱类型: {domain} -> {smtp_server}:{smtp_port}")
             else:
                 # 未知邮箱，尝试通用配置
@@ -238,9 +244,9 @@ class EmailSender:
         """Send email with inline image attachment (Issue #289)."""
         if not self._is_email_configured():
             return False
-        sender = self._email_config["sender"]
-        password = self._email_config["password"]
-        receivers = receivers or self._email_config["receivers"]
+        sender = cast(str, self._email_config["sender"])
+        password = cast(str, self._email_config["password"])
+        receivers = receivers or cast(List[str], self._email_config["receivers"])
         server: Optional[smtplib.SMTP] = None
         try:
             date_str = datetime.now().strftime("%Y-%m-%d")
@@ -267,8 +273,9 @@ class EmailSender:
             domain = sender.split("@")[-1].lower()
             smtp_config = SMTP_CONFIGS.get(domain)
             if smtp_config:
-                smtp_server, smtp_port = smtp_config["server"], smtp_config["port"]
-                use_ssl = smtp_config["ssl"]
+                smtp_server = cast(str, smtp_config["server"])
+                smtp_port = cast(int, smtp_config["port"])
+                use_ssl = cast(bool, smtp_config["ssl"])
             else:
                 smtp_server, smtp_port = f"smtp.{domain}", 465
                 use_ssl = True

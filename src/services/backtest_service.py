@@ -631,12 +631,12 @@ class BacktestService:
             "raw_phase_counts": raw_phase_counts,
         }
 
-    def _resolve_analysis_date(self, analysis) -> Optional[date]:
+    def _resolve_analysis_date(self, analysis: Any) -> Optional[date]:
         parsed = self.repo.parse_analysis_date_from_snapshot(analysis.context_snapshot)
         if parsed:
             return parsed
         if getattr(analysis, "created_at", None):
-            return analysis.created_at.date()
+            return cast(date, analysis.created_at.date())
         logger.warning(
             f"无法确定分析日期，跳过记录: {analysis.code}#{getattr(analysis, 'id', '?')}"
         )

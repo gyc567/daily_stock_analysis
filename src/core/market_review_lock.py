@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.config import Config
+from typing import cast  # added by mypy_codemod
 
 try:
     import fcntl
@@ -74,7 +75,7 @@ def _is_windows_process_alive(pid: int) -> bool:
             pid,
         )
         if not handle:
-            return ctypes.get_last_error() != 87
+            return cast(bool, ctypes.get_last_error() != 87)
 
         try:
             exit_code = ctypes.c_ulong()

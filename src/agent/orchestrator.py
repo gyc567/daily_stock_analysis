@@ -30,7 +30,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 from src.agent.llm_adapter import LLMToolAdapter
 from src.agent.protocols import (
@@ -133,7 +133,9 @@ class AgentOrchestrator:
         dashboard = None
         content = ""
         if ctx is not None:
-            dashboard, content = self._resolve_final_output(ctx, parse_dashboard=parse_dashboard)
+            dashboard, content = self._resolve_final_output(
+                ctx, parse_dashboard=parse_dashboard
+            )
             if parse_dashboard and dashboard is not None:
                 dashboard = self._mark_partial_dashboard(
                     dashboard,
@@ -143,7 +145,9 @@ class AgentOrchestrator:
                 content = json.dumps(dashboard, ensure_ascii=False, indent=2)
 
         return OrchestratorResult(
-            success=bool(content) if (not parse_dashboard or dashboard is not None) else False,
+            success=bool(content)
+            if (not parse_dashboard or dashboard is not None)
+            else False,
             content=content,
             dashboard=dashboard,
             error=error,
@@ -174,7 +178,9 @@ class AgentOrchestrator:
         dashboard = None
         content = ""
         if ctx is not None:
-            dashboard, content = self._resolve_final_output(ctx, parse_dashboard=parse_dashboard)
+            dashboard, content = self._resolve_final_output(
+                ctx, parse_dashboard=parse_dashboard
+            )
             if parse_dashboard and dashboard is not None:
                 dashboard = self._mark_partial_dashboard(
                     dashboard,
@@ -184,7 +190,9 @@ class AgentOrchestrator:
                 content = json.dumps(dashboard, ensure_ascii=False, indent=2)
 
         return OrchestratorResult(
-            success=bool(content) if (not parse_dashboard or dashboard is not None) else False,
+            success=bool(content)
+            if (not parse_dashboard or dashboard is not None)
+            else False,
             content=content,
             dashboard=dashboard,
             error=(
@@ -198,7 +206,6 @@ class AgentOrchestrator:
             provider=stats.models_used[0] if stats.models_used else "",
             model=", ".join(stats.models_used),
         )
-
 
     def _prepare_agent(self, agent: Any) -> Any:
         """Apply orchestrator-level runtime settings to a child agent.
@@ -261,14 +268,14 @@ class AgentOrchestrator:
         timeout_seconds: Optional[float] = None,
     ) -> StageResult:
         """Run a stage agent while preserving compatibility with older call signatures."""
-        run_kwargs = {"progress_callback": progress_callback}
+        run_kwargs: Dict[str, Any] = {"progress_callback": progress_callback}
         if (
             timeout_seconds is not None
             and timeout_seconds > 0
             and self._agent_run_accepts_timeout(agent.run)
         ):
-            run_kwargs["timeout_seconds"] = timeout_seconds  # type: ignore[reportArgumentType]
-        return agent.run(ctx, **run_kwargs)
+            run_kwargs["timeout_seconds"] = timeout_seconds
+        return cast(StageResult, agent.run(ctx, **run_kwargs))
 
     # -----------------------------------------------------------------
     # Public interface (mirrors AgentExecutor)
@@ -321,7 +328,9 @@ class AgentOrchestrator:
             ctx.meta["stock_scope"] = scope_resolution.stock_scope
 
         conversation_manager.get_or_create(session_id)
-        config = self.config or getattr(self.llm_adapter, "_config", None) or get_config()
+        config = (
+            self.config or getattr(self.llm_adapter, "_config", None) or get_config()
+        )
         history = build_visible_chat_history(session_id, self.llm_adapter, config)
         if history:
             ctx.meta["conversation_history"] = history
@@ -337,10 +346,13 @@ class AgentOrchestrator:
 
         # Persist assistant response
         if orch_result.success:
-            conversation_manager.add_message(session_id, "assistant", orch_result.content)
+            conversation_manager.add_message(
+                session_id, "assistant", orch_result.content
+            )
         else:
             conversation_manager.add_message(
-                session_id, "assistant",
+                session_id,
+                "assistant",
                 f"[分析失败] {orch_result.error or '未知错误'}",
             )
 
@@ -388,13 +400,9 @@ class AgentOrchestrator:
             agent = agents[index]
             elapsed_s = time.time() - t0
             remaining_budget = timeout_s - elapsed_s if timeout_s else None
-            stage_min_budget_s = (
-                _MIN_STAGE_BUDGET_S
-            )
+            stage_min_budget_s = _MIN_STAGE_BUDGET_S
             timeout_exhausted = (
-                timeout_s
-                and remaining_budget is not None
-                and remaining_budget <= 0
+                timeout_s and remaining_budget is not None and remaining_budget <= 0
             )
             budget_guard_triggered = (
                 timeout_s
@@ -403,14 +411,19 @@ class AgentOrchestrator:
                 and remaining_budget < stage_min_budget_s
             )
             if timeout_exhausted:
-                logger.error("[Orchestrator] pipeline timed out before stage '%s'", agent.agent_name)
+                logger.error(
+                    "[Orchestrator] pipeline timed out before stage '%s'",
+                    agent.agent_name,
+                )
                 if progress_callback:
-                    progress_callback({
-                        "type": "pipeline_timeout",
-                        "stage": agent.agent_name,
-                        "elapsed": round(elapsed_s, 2),
-                        "timeout": timeout_s,
-                    })
+                    progress_callback(
+                        {
+                            "type": "pipeline_timeout",
+                            "stage": agent.agent_name,
+                            "elapsed": round(elapsed_s, 2),
+                            "timeout": timeout_s,
+                        }
+                    )
                 return self._build_timeout_result(
                     stats,
                     all_tool_calls,
@@ -429,12 +442,14 @@ class AgentOrchestrator:
                     stage_min_budget_s,
                 )
                 if progress_callback:
-                    progress_callback({
-                        "type": "pipeline_timeout",
-                        "stage": agent.agent_name,
-                        "elapsed": round(elapsed_s, 2),
-                        "timeout": timeout_s,
-                    })
+                    progress_callback(
+                        {
+                            "type": "pipeline_timeout",
+                            "stage": agent.agent_name,
+                            "elapsed": round(elapsed_s, 2),
+                            "timeout": timeout_s,
+                        }
+                    )
                 return self._build_budget_skip_result(
                     stats,
                     all_tool_calls,
@@ -461,21 +476,21 @@ class AgentOrchestrator:
                     continue
 
             # Aggregate skill opinions before the decision agent
-            if agent.agent_name == "decision" and getattr(self, "_skill_agent_names", None):
+            if agent.agent_name == "decision" and getattr(
+                self, "_skill_agent_names", None
+            ):
                 self._aggregate_skill_opinions(ctx)
 
             if progress_callback:
-                progress_callback({
-                    "type": "stage_start",
-                    "stage": agent.agent_name,
-                    "message": f"Starting {agent.agent_name} analysis...",
-                })
+                progress_callback(
+                    {
+                        "type": "stage_start",
+                        "stage": agent.agent_name,
+                        "message": f"Starting {agent.agent_name} analysis...",
+                    }
+                )
 
-            remaining_timeout_s = (
-                max(0.0, timeout_s - elapsed_s)
-                if timeout_s
-                else None
-            )
+            remaining_timeout_s = max(0.0, timeout_s - elapsed_s) if timeout_s else None
             result: StageResult = self._run_stage_agent(
                 agent,
                 ctx,
@@ -490,14 +505,19 @@ class AgentOrchestrator:
 
             elapsed_s = time.time() - t0
             if timeout_s and elapsed_s >= timeout_s:
-                logger.error("[Orchestrator] pipeline timed out after stage '%s'", agent.agent_name)
+                logger.error(
+                    "[Orchestrator] pipeline timed out after stage '%s'",
+                    agent.agent_name,
+                )
                 if progress_callback:
-                    progress_callback({
-                        "type": "pipeline_timeout",
-                        "stage": agent.agent_name,
-                        "elapsed": round(elapsed_s, 2),
-                        "timeout": timeout_s,
-                    })
+                    progress_callback(
+                        {
+                            "type": "pipeline_timeout",
+                            "stage": agent.agent_name,
+                            "elapsed": round(elapsed_s, 2),
+                            "timeout": timeout_s,
+                        }
+                    )
                 return self._build_timeout_result(
                     stats,
                     all_tool_calls,
@@ -509,14 +529,19 @@ class AgentOrchestrator:
                 )
 
             if progress_callback:
-                progress_callback({
-                    "type": "stage_done",
-                    "stage": agent.agent_name,
-                    "status": result.status.value,
-                    "duration": result.duration_s,
-                })
+                progress_callback(
+                    {
+                        "type": "stage_done",
+                        "stage": agent.agent_name,
+                        "status": result.status.value,
+                        "duration": result.duration_s,
+                    }
+                )
 
-            if ctx.meta.get("response_mode") == "chat" and agent.agent_name == "decision":
+            if (
+                ctx.meta.get("response_mode") == "chat"
+                and agent.agent_name == "decision"
+            ):
                 final_text = result.meta.get("raw_text")
                 if isinstance(final_text, str) and final_text.strip():
                     ctx.set_data("final_response_text", final_text.strip())
@@ -529,12 +554,16 @@ class AgentOrchestrator:
             #   - intel / risk (standard support stages)
             #   - skill agents (specialist evaluation, optional)
             if result.status == StageStatus.FAILED:
-                non_critical = (
-                    agent.agent_name in ("intel", "risk")
-                    or agent.agent_name in getattr(self, "_skill_agent_names", set())
-                )
+                non_critical = agent.agent_name in (
+                    "intel",
+                    "risk",
+                ) or agent.agent_name in getattr(self, "_skill_agent_names", set())
                 if not non_critical:
-                    logger.error("[Orchestrator] critical stage '%s' failed: %s", agent.agent_name, result.error)
+                    logger.error(
+                        "[Orchestrator] critical stage '%s' failed: %s",
+                        agent.agent_name,
+                        result.error,
+                    )
                     return OrchestratorResult(
                         success=False,
                         error=f"Stage '{agent.agent_name}' failed: {result.error}",
@@ -543,7 +572,11 @@ class AgentOrchestrator:
                         tool_calls_log=all_tool_calls,
                     )
                 else:
-                    logger.warning("[Orchestrator] stage '%s' failed (non-critical, degrading): %s", agent.agent_name, result.error)
+                    logger.warning(
+                        "[Orchestrator] stage '%s' failed (non-critical, degrading): %s",
+                        agent.agent_name,
+                        result.error,
+                    )
 
             index += 1
 
@@ -552,7 +585,9 @@ class AgentOrchestrator:
         stats.total_duration_s = total_duration
         stats.models_used = list(dict.fromkeys(models_used))
 
-        dashboard, content = self._resolve_final_output(ctx, parse_dashboard=parse_dashboard)
+        dashboard, content = self._resolve_final_output(
+            ctx, parse_dashboard=parse_dashboard
+        )
 
         model_str = ", ".join(dict.fromkeys(m for m in models_used if m))
         provider = stats.models_used[0] if stats.models_used else ""
@@ -629,6 +664,7 @@ class AgentOrchestrator:
         """
         try:
             from src.agent.skills.router import SkillRouter
+
             common_kwargs = dict(
                 tool_registry=self.tool_registry,
                 llm_adapter=self.llm_adapter,
@@ -641,12 +677,15 @@ class AgentOrchestrator:
                 return []
 
             from src.agent.skills.skill_agent import SkillAgent
+
             agents = []
             for skill_id in selected[:3]:  # cap at 3 concurrent skills
-                agent = self._prepare_agent(SkillAgent(
-                    skill_id=skill_id,
-                    **common_kwargs,  # type: ignore[reportArgumentType]
-                ))
+                agent = self._prepare_agent(
+                    SkillAgent(
+                        skill_id=skill_id,
+                        **common_kwargs,  # type: ignore[arg-type]
+                    )
+                )
                 agents.append(agent)
             return agents
         except Exception as exc:
@@ -673,18 +712,23 @@ class AgentOrchestrator:
         """
         try:
             from src.agent.skills.aggregator import SkillAggregator
+
             aggregator = SkillAggregator()
             consensus = aggregator.aggregate(ctx)
             if consensus:
                 ctx.opinions.append(consensus)
-                ctx.set_data("skill_consensus", {
-                    "signal": consensus.signal,
-                    "confidence": consensus.confidence,
-                    "reasoning": consensus.reasoning,
-                })
+                ctx.set_data(
+                    "skill_consensus",
+                    {
+                        "signal": consensus.signal,
+                        "confidence": consensus.confidence,
+                        "reasoning": consensus.reasoning,
+                    },
+                )
                 logger.info(
                     "[Orchestrator] skill consensus: signal=%s confidence=%.2f",
-                    consensus.signal, consensus.confidence,
+                    consensus.signal,
+                    consensus.confidence,
                 )
             else:
                 logger.info("[Orchestrator] no skill opinions to aggregate")
@@ -699,7 +743,9 @@ class AgentOrchestrator:
     # Helpers
     # -----------------------------------------------------------------
 
-    def _build_context(self, task: str, context: Optional[Dict[str, Any]] = None) -> AgentContext:
+    def _build_context(
+        self, task: str, context: Optional[Dict[str, Any]] = None
+    ) -> AgentContext:
         """Seed an ``AgentContext`` from the user request."""
         ctx = AgentContext(query=task)
 
@@ -711,19 +757,31 @@ class AgentOrchestrator:
                 requested_skills = context.get("strategies", [])
             ctx.meta["skills_requested"] = requested_skills or []
             ctx.meta["strategies_requested"] = requested_skills or []
-            ctx.meta["report_language"] = normalize_report_language(context.get("report_language", "zh"))
+            ctx.meta["report_language"] = normalize_report_language(
+                context.get("report_language", "zh")
+            )
             if context.get("market_phase_context"):
                 ctx.meta["market_phase_context"] = context["market_phase_context"]
             daily_market_context = context.get("daily_market_context")
             if isinstance(daily_market_context, dict) and daily_market_context:
                 ctx.meta["daily_market_context"] = dict(daily_market_context)
             analysis_context_pack_summary = context.get("analysis_context_pack_summary")
-            if isinstance(analysis_context_pack_summary, str) and analysis_context_pack_summary:
-                ctx.meta["analysis_context_pack_summary"] = analysis_context_pack_summary
+            if (
+                isinstance(analysis_context_pack_summary, str)
+                and analysis_context_pack_summary
+            ):
+                ctx.meta["analysis_context_pack_summary"] = (
+                    analysis_context_pack_summary
+                )
 
             # Pre-populate data fields that the caller already has
-            for data_key in ("realtime_quote", "daily_history", "chip_distribution",
-                             "trend_result", "news_context"):
+            for data_key in (
+                "realtime_quote",
+                "daily_history",
+                "chip_distribution",
+                "trend_result",
+                "news_context",
+            ):
                 if context.get(data_key):
                     ctx.set_data(data_key, context[data_key])
 
@@ -837,18 +895,21 @@ class AgentOrchestrator:
             "intel_opinion",
             "fundamental_context",
         )
-        has_meaningful_context = any(ctx.get_data(key) is not None for key in meaningful_data_keys)
+        has_meaningful_context = any(
+            ctx.get_data(key) is not None for key in meaningful_data_keys
+        )
         if not payload and not ctx.opinions and not has_meaningful_context:
             return None
 
         base_opinion = self._select_base_opinion(ctx)
         decision_type = normalize_decision_signal(
-            payload.get("decision_type") or (base_opinion.signal if base_opinion else "hold")
+            payload.get("decision_type")
+            or (base_opinion.signal if base_opinion else "hold")
         )
         confidence = float(base_opinion.confidence if base_opinion is not None else 0.5)
         sentiment_score = payload.get("sentiment_score")
         try:
-            sentiment_score = int(sentiment_score)  # type: ignore[reportArgumentType]
+            sentiment_score = int(sentiment_score)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             sentiment_score = _estimate_sentiment_score(decision_type, confidence)
 
@@ -888,11 +949,16 @@ class AgentOrchestrator:
         trend_prediction = _first_non_empty_text(
             payload.get("trend_prediction"),
             (getattr(base_opinion, "raw_data", {}) or {}).get("trend_summary")
-            if base_opinion is not None else "",
+            if base_opinion is not None
+            else "",
         )
         if not trend_prediction:
             technical = self._latest_opinion(ctx, {"technical"})
-            tech_raw = technical.raw_data if technical and isinstance(technical.raw_data, dict) else {}
+            tech_raw = (
+                technical.raw_data
+                if technical and isinstance(technical.raw_data, dict)
+                else {}
+            )
             ma_alignment = tech_raw.get("ma_alignment")
             trend_score = tech_raw.get("trend_score")
             if ma_alignment or trend_score is not None:
@@ -901,10 +967,14 @@ class AgentOrchestrator:
                 trend_prediction = "待结合更多阶段结果确认"
 
         operation_advice_raw = payload.get("operation_advice")
-        operation_advice = _normalize_operation_advice_value(operation_advice_raw, decision_type)
+        operation_advice = _normalize_operation_advice_value(
+            operation_advice_raw, decision_type
+        )
 
         existing_position = core.get("position_advice")
-        position_advice = dict(existing_position) if isinstance(existing_position, dict) else {}
+        position_advice = (
+            dict(existing_position) if isinstance(existing_position, dict) else {}
+        )
         if isinstance(operation_advice_raw, dict):
             no_position = _first_non_empty_text(
                 operation_advice_raw.get("no_position"),
@@ -1023,7 +1093,9 @@ class AgentOrchestrator:
         if not risk_warning:
             risk_warning = "暂无额外风险提示"
 
-        payload["stock_name"] = _first_non_empty_text(payload.get("stock_name"), ctx.stock_name, ctx.stock_code)
+        payload["stock_name"] = _first_non_empty_text(
+            payload.get("stock_name"), ctx.stock_name, ctx.stock_code
+        )
         payload["sentiment_score"] = sentiment_score
         payload["trend_prediction"] = trend_prediction
         payload["operation_advice"] = operation_advice
@@ -1070,7 +1142,11 @@ class AgentOrchestrator:
         chip = ctx.get_data("chip_distribution")
         trend = ctx.get_data("trend_result")
         technical = self._latest_opinion(ctx, {"technical"})
-        tech_raw = technical.raw_data if technical and isinstance(technical.raw_data, dict) else {}
+        tech_raw = (
+            technical.raw_data
+            if technical and isinstance(technical.raw_data, dict)
+            else {}
+        )
         trend_dict = trend if isinstance(trend, dict) else {}
 
         data_perspective: Dict[str, Any] = {}
@@ -1100,7 +1176,9 @@ class AgentOrchestrator:
             """Round numeric values for display."""
             return round(val, n) if isinstance(val, (int, float)) else val
 
-        def _pick(primary_dict, primary_key, fallback_dict, fallback_key, default="N/A"):
+        def _pick(
+            primary_dict, primary_key, fallback_dict, fallback_key, default="N/A"
+        ):
             """Pick first non-None value, avoiding falsy-zero trap."""
             v = primary_dict.get(primary_key)
             if v is not None:
@@ -1110,19 +1188,27 @@ class AgentOrchestrator:
 
         if isinstance(realtime, dict) or trend_dict:
             data_perspective["price_position"] = {
-                "current_price": _r(_pick(trend_dict, "current_price", realtime or {}, "price")),
+                "current_price": _r(
+                    _pick(trend_dict, "current_price", realtime or {}, "price")
+                ),
                 "ma5": _r(_pick(trend_dict, "ma5", tech_raw, "ma5")),
                 "ma10": _r(_pick(trend_dict, "ma10", tech_raw, "ma10")),
                 "ma20": _r(_pick(trend_dict, "ma20", tech_raw, "ma20")),
                 "bias_ma5": _r(_pick(trend_dict, "bias_ma5", tech_raw, "bias_ma5")),
-                "bias_status": _bias_label(trend_dict.get("bias_ma5")) or tech_raw.get("bias_status", "N/A"),
-                "support_level": key_levels.get("support") or key_levels.get("immediate_support") or "N/A",
-                "resistance_level": key_levels.get("resistance") or key_levels.get("current_resistance") or "N/A",
+                "bias_status": _bias_label(trend_dict.get("bias_ma5"))
+                or tech_raw.get("bias_status", "N/A"),
+                "support_level": key_levels.get("support")
+                or key_levels.get("immediate_support")
+                or "N/A",
+                "resistance_level": key_levels.get("resistance")
+                or key_levels.get("current_resistance")
+                or "N/A",
             }
             data_perspective["volume_analysis"] = {
                 "volume_ratio": (realtime or {}).get("volume_ratio", "N/A"),
                 "turnover_rate": (realtime or {}).get("turnover_rate", "N/A"),
-                "volume_status": trend_dict.get("volume_status") or tech_raw.get("volume_status", "N/A"),
+                "volume_status": trend_dict.get("volume_status")
+                or tech_raw.get("volume_status", "N/A"),
                 "volume_meaning": tech_raw.get("reasoning", "") if tech_raw else "",
             }
 
@@ -1154,7 +1240,9 @@ class AgentOrchestrator:
                 if isinstance(item, str):
                     text = item.strip()
                 elif isinstance(item, dict):
-                    text = str(item.get("description") or item.get("title") or "").strip()
+                    text = str(
+                        item.get("description") or item.get("title") or ""
+                    ).strip()
                 if text and text not in alerts:
                     alerts.append(text)
 
@@ -1238,7 +1326,9 @@ class AgentOrchestrator:
             core = nested.get("core_conclusion")
             if isinstance(core, dict):
                 core = dict(core)
-                one_sentence = _first_non_empty_text(core.get("one_sentence"), tagged.get("analysis_summary"))
+                one_sentence = _first_non_empty_text(
+                    core.get("one_sentence"), tagged.get("analysis_summary")
+                )
                 if one_sentence and not str(one_sentence).startswith(prefix):
                     core["one_sentence"] = prefix + str(one_sentence)
                 nested["core_conclusion"] = core
@@ -1260,14 +1350,26 @@ class AgentOrchestrator:
         if not isinstance(dashboard, dict):
             return
 
-        risk_opinion = next((op for op in reversed(ctx.opinions) if op.agent_name == "risk"), None)
-        risk_raw = risk_opinion.raw_data if risk_opinion and isinstance(risk_opinion.raw_data, dict) else {}
+        risk_opinion = next(
+            (op for op in reversed(ctx.opinions) if op.agent_name == "risk"), None
+        )
+        risk_raw = (
+            risk_opinion.raw_data
+            if risk_opinion and isinstance(risk_opinion.raw_data, dict)
+            else {}
+        )
 
         adjustment = str(risk_raw.get("signal_adjustment") or "").lower()
-        has_high_flag = any(str(flag.get("severity", "")).lower() == "high" for flag in ctx.risk_flags)
-        veto_buy = bool(risk_raw.get("veto_buy")) or adjustment == "veto" or has_high_flag
+        has_high_flag = any(
+            str(flag.get("severity", "")).lower() == "high" for flag in ctx.risk_flags
+        )
+        veto_buy = (
+            bool(risk_raw.get("veto_buy")) or adjustment == "veto" or has_high_flag
+        )
 
-        current_signal = normalize_decision_signal(dashboard.get("decision_type", "hold"))
+        current_signal = normalize_decision_signal(
+            dashboard.get("decision_type", "hold")
+        )
         new_signal = current_signal
         if veto_buy and current_signal == "buy":
             new_signal = "hold"
@@ -1289,18 +1391,22 @@ class AgentOrchestrator:
 
         sentiment_score = dashboard.get("sentiment_score")
         try:
-            score = int(sentiment_score)  # type: ignore[reportArgumentType]
+            score = int(sentiment_score)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             score = 50
         dashboard["sentiment_score"] = _adjust_sentiment_score(score, new_signal)
 
         operation_advice = dashboard.get("operation_advice")
         if isinstance(operation_advice, str):
-            dashboard["operation_advice"] = _adjust_operation_advice(operation_advice, new_signal)
+            dashboard["operation_advice"] = _adjust_operation_advice(
+                operation_advice, new_signal
+            )
 
         summary = dashboard.get("analysis_summary")
         if isinstance(summary, str) and summary:
-            dashboard["analysis_summary"] = f"[风控下调: {current_signal} -> {new_signal}] {summary}"
+            dashboard["analysis_summary"] = (
+                f"[风控下调: {current_signal} -> {new_signal}] {summary}"
+            )
 
         dashboard_block = dashboard.get("dashboard")
         if isinstance(dashboard_block, dict):
@@ -1318,18 +1424,27 @@ class AgentOrchestrator:
                 position = core.get("position_advice")
                 if isinstance(position, dict):
                     if new_signal == "hold":
-                        position["no_position"] = "风险未解除前先观望，等待更清晰的入场条件。"
-                        position["has_position"] = "谨慎持有并收紧止损，待风险缓解后再考虑加仓。"
+                        position["no_position"] = (
+                            "风险未解除前先观望，等待更清晰的入场条件。"
+                        )
+                        position["has_position"] = (
+                            "谨慎持有并收紧止损，待风险缓解后再考虑加仓。"
+                        )
                     elif new_signal == "sell":
                         position["no_position"] = "风险明显偏高，暂不新开仓。"
-                        position["has_position"] = "优先控制回撤，建议减仓或退出高风险仓位。"
+                        position["has_position"] = (
+                            "优先控制回撤，建议减仓或退出高风险仓位。"
+                        )
 
         ctx.set_data("final_dashboard", dashboard)
-        ctx.set_data("risk_override_applied", {
-            "from": current_signal,
-            "to": new_signal,
-            "adjustment": adjustment or ("veto" if veto_buy else "none"),
-        })
+        ctx.set_data(
+            "risk_override_applied",
+            {
+                "from": current_signal,
+                "to": new_signal,
+                "adjustment": adjustment or ("veto" if veto_buy else "none"),
+            },
+        )
 
         for opinion in reversed(ctx.opinions):
             if opinion.agent_name == "decision":
@@ -1375,35 +1490,177 @@ class AgentOrchestrator:
 # be kept at module level to avoid re-creating it on every call.
 _COMMON_WORDS: set[str] = {
     # Pronouns / articles / prepositions / conjunctions
-    "AM", "AS", "AT", "BE", "BY", "DO", "GO", "HE", "IF", "IN",
-    "IS", "IT", "ME", "MY", "NO", "OF", "ON", "OR", "SO", "TO",
-    "UP", "US", "WE",
-    "THE", "AND", "FOR", "ARE", "BUT", "NOT", "YOU", "ALL",
-    "CAN", "HAD", "HER", "WAS", "ONE", "OUR", "OUT", "HAS",
-    "HIS", "HOW", "ITS", "LET", "MAY", "NEW", "NOW", "OLD",
-    "SEE", "WAY", "WHO", "DID", "GET", "HIM", "USE", "SAY",
-    "SHE", "TOO", "ANY", "WITH", "FROM", "THAT", "THAN",
-    "THIS", "WHAT", "WHEN", "WILL", "JUST", "ALSO",
-    "BEEN", "EACH", "HAVE", "MUCH", "ONLY", "OVER",
-    "SOME", "SUCH", "THEM", "THEN", "THEY", "VERY",
-    "WERE", "YOUR", "ABOUT", "AFTER", "COULD", "EVERY",
-    "OTHER", "THEIR", "THERE", "THESE", "THOSE", "WHICH",
-    "WOULD", "BEING", "STILL", "WHERE",
+    "AM",
+    "AS",
+    "AT",
+    "BE",
+    "BY",
+    "DO",
+    "GO",
+    "HE",
+    "IF",
+    "IN",
+    "IS",
+    "IT",
+    "ME",
+    "MY",
+    "NO",
+    "OF",
+    "ON",
+    "OR",
+    "SO",
+    "TO",
+    "UP",
+    "US",
+    "WE",
+    "THE",
+    "AND",
+    "FOR",
+    "ARE",
+    "BUT",
+    "NOT",
+    "YOU",
+    "ALL",
+    "CAN",
+    "HAD",
+    "HER",
+    "WAS",
+    "ONE",
+    "OUR",
+    "OUT",
+    "HAS",
+    "HIS",
+    "HOW",
+    "ITS",
+    "LET",
+    "MAY",
+    "NEW",
+    "NOW",
+    "OLD",
+    "SEE",
+    "WAY",
+    "WHO",
+    "DID",
+    "GET",
+    "HIM",
+    "USE",
+    "SAY",
+    "SHE",
+    "TOO",
+    "ANY",
+    "WITH",
+    "FROM",
+    "THAT",
+    "THAN",
+    "THIS",
+    "WHAT",
+    "WHEN",
+    "WILL",
+    "JUST",
+    "ALSO",
+    "BEEN",
+    "EACH",
+    "HAVE",
+    "MUCH",
+    "ONLY",
+    "OVER",
+    "SOME",
+    "SUCH",
+    "THEM",
+    "THEN",
+    "THEY",
+    "VERY",
+    "WERE",
+    "YOUR",
+    "ABOUT",
+    "AFTER",
+    "COULD",
+    "EVERY",
+    "OTHER",
+    "THEIR",
+    "THERE",
+    "THESE",
+    "THOSE",
+    "WHICH",
+    "WOULD",
+    "BEING",
+    "STILL",
+    "WHERE",
     # Finance/analysis jargon that looks like tickers
-    "BUY", "SELL", "HOLD", "LONG", "PUT", "CALL",
-    "ETF", "IPO", "RSI", "EPS", "PEG", "ROE", "ROA",
-    "USA", "USD", "CNY", "HKD", "EUR", "GBP",
-    "STOCK", "TRADE", "PRICE", "INDEX", "FUND",
-    "HIGH", "LOW", "OPEN", "CLOSE", "STOP", "LOSS",
-    "TREND", "BULL", "BEAR", "RISK", "CASH", "BOND",
-    "MACD", "VWAP", "BOLL", "KDJ",
-    "TTM", "LTM", "NTM", "FWD", "YOY", "QOQ", "YTD",
-    "EBIT", "EBITDA", "DCF", "CAGR", "FCF", "NAV", "AUM",
-    "PE", "PB",
+    "BUY",
+    "SELL",
+    "HOLD",
+    "LONG",
+    "PUT",
+    "CALL",
+    "ETF",
+    "IPO",
+    "RSI",
+    "EPS",
+    "PEG",
+    "ROE",
+    "ROA",
+    "USA",
+    "USD",
+    "CNY",
+    "HKD",
+    "EUR",
+    "GBP",
+    "STOCK",
+    "TRADE",
+    "PRICE",
+    "INDEX",
+    "FUND",
+    "HIGH",
+    "LOW",
+    "OPEN",
+    "CLOSE",
+    "STOP",
+    "LOSS",
+    "TREND",
+    "BULL",
+    "BEAR",
+    "RISK",
+    "CASH",
+    "BOND",
+    "MACD",
+    "VWAP",
+    "BOLL",
+    "KDJ",
+    "TTM",
+    "LTM",
+    "NTM",
+    "FWD",
+    "YOY",
+    "QOQ",
+    "YTD",
+    "EBIT",
+    "EBITDA",
+    "DCF",
+    "CAGR",
+    "FCF",
+    "NAV",
+    "AUM",
+    "PE",
+    "PB",
     # Greetings / filler words that often appear in chat messages
-    "HELLO", "PLEASE", "THANKS", "CHECK", "LOOK", "THINK",
-    "MAYBE", "GUESS", "TELL", "SHOW", "WHAT", "WHATS",
-    "WHY", "WHEN", "HOWDY", "HEY", "HI",
+    "HELLO",
+    "PLEASE",
+    "THANKS",
+    "CHECK",
+    "LOOK",
+    "THINK",
+    "MAYBE",
+    "GUESS",
+    "TELL",
+    "SHOW",
+    "WHAT",
+    "WHATS",
+    "WHY",
+    "WHEN",
+    "HOWDY",
+    "HEY",
+    "HI",
 }
 
 _LOWERCASE_TICKER_HINTS = re.compile(
@@ -1420,21 +1677,23 @@ def _extract_stock_code(text: str) -> str:
     """Best-effort stock code extraction from free text."""
     # A-share 6-digit — use lookarounds instead of \b because Python's \b
     # does not fire at Chinese-character / digit boundaries.
-    m = re.search(r'(?<!\d)((?:[03648]\d{5}|92\d{4}))(?!\d)', text)
+    m = re.search(r"(?<!\d)((?:[03648]\d{5}|92\d{4}))(?!\d)", text)
     if m:
         return m.group(1)
     # HK — same lookaround approach
-    m = re.search(r'(?<![a-zA-Z])(hk\d{5})(?!\d)', text, re.IGNORECASE)
+    m = re.search(r"(?<![a-zA-Z])(hk\d{5})(?!\d)", text, re.IGNORECASE)
     if m:
         return m.group(1).upper()
     # US ticker — require 2+ uppercase letters bounded by non-alpha chars.
-    for match in re.finditer(r'(?<![a-zA-Z])([A-Z]{2,5}(?:\.[A-Z]{1,2})?)(?![a-zA-Z])', text):
+    for match in re.finditer(
+        r"(?<![a-zA-Z])([A-Z]{2,5}(?:\.[A-Z]{1,2})?)(?![a-zA-Z])", text
+    ):
         candidate = match.group(1)
         if not _is_denied_ticker_candidate(candidate):
             return candidate
 
     stripped = (text or "").strip()
-    bare_match = re.fullmatch(r'([A-Za-z]{2,5}(?:\.[A-Za-z]{1,2})?)', stripped)
+    bare_match = re.fullmatch(r"([A-Za-z]{2,5}(?:\.[A-Za-z]{1,2})?)", stripped)
     if bare_match:
         candidate = bare_match.group(1).upper()
         if not _is_denied_ticker_candidate(candidate):
@@ -1443,7 +1702,9 @@ def _extract_stock_code(text: str) -> str:
     if not _LOWERCASE_TICKER_HINTS.search(stripped):
         return ""
 
-    for match in re.finditer(r'(?<![a-zA-Z])([A-Za-z]{2,5}(?:\.[A-Za-z]{1,2})?)(?![a-zA-Z])', text):
+    for match in re.finditer(
+        r"(?<![a-zA-Z])([A-Za-z]{2,5}(?:\.[A-Za-z]{1,2})?)(?![a-zA-Z])", text
+    ):
         raw_candidate = match.group(1)
         candidate = raw_candidate.upper()
         if _is_denied_ticker_candidate(candidate):

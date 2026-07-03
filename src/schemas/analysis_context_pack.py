@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Literal, Mapping, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
@@ -13,7 +13,7 @@ from src.utils.sanitize import redact_sensitive_mapping
 
 
 PACK_VERSION = "1.0"
-_PACK_VERSION_ADAPTER = TypeAdapter(Literal["1.0"])
+_PACK_VERSION_ADAPTER: TypeAdapter[Literal["1.0"]] = TypeAdapter(Literal["1.0"])
 
 
 class _AnalysisContextModel(BaseModel):
@@ -105,7 +105,7 @@ class AnalysisContextPack(_AnalysisContextModel):
     """Versioned internal analysis input envelope."""
 
     subject: AnalysisSubject
-    pack_version: Literal["1.0"] = PACK_VERSION
+    pack_version: Literal["1.0"] = cast(Literal["1.0"], PACK_VERSION)
     phase: Optional[Dict[str, Any]] = None
     blocks: Dict[str, AnalysisContextBlock] = Field(default_factory=dict)
     data_quality: DataQuality = Field(default_factory=lambda: DataQuality())  # type: ignore[call-arg]
@@ -114,7 +114,9 @@ class AnalysisContextPack(_AnalysisContextModel):
 
     def to_safe_dict(self) -> Dict[str, Any]:
         """Return a JSON-safe dict with sensitive mapping values redacted."""
-        return redact_sensitive_mapping(self.model_dump(mode="json"))
+        return cast(
+            Dict[str, Any], redact_sensitive_mapping(self.model_dump(mode="json"))
+        )
 
     def model_copy(
         self,

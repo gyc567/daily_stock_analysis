@@ -38,6 +38,7 @@ from .base import (
     _is_hk_market,
 )
 import os
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +315,7 @@ class BaostockFetcher(BaseFetcher):
         """
         # 检查缓存
         if hasattr(self, "_stock_name_cache") and stock_code in self._stock_name_cache:
-            return self._stock_name_cache[stock_code]
+            return cast(Optional[str], self._stock_name_cache[stock_code])
 
         # 初始化缓存
         if not hasattr(self, "_stock_name_cache"):
@@ -344,7 +345,7 @@ class BaostockFetcher(BaseFetcher):
                             logger.debug(
                                 f"Baostock 获取股票名称成功: {stock_code} -> {name}"
                             )
-                            return name
+                            return cast(Optional[str], name)
 
         except Exception as e:
             logger.warning(f"Baostock 获取股票名称失败 {stock_code}: {e}")

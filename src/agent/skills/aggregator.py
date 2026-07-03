@@ -6,7 +6,7 @@ SkillAggregator — weighted aggregation of skill opinions.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 
 from src.agent.memory import AgentMemory
 from src.agent.protocols import AgentContext, AgentOpinion
@@ -45,11 +45,15 @@ class SkillAggregator:
         ctx: AgentContext,
         min_samples: int = _MIN_BACKTEST_SAMPLES,
     ) -> Optional[AgentOpinion]:
-        skill_opinions = [op for op in ctx.opinions if is_skill_agent_name(op.agent_name)]
+        skill_opinions = [
+            op for op in ctx.opinions if is_skill_agent_name(op.agent_name)
+        ]
         if not skill_opinions:
             return None
 
-        skill_ids = [extract_skill_id(op.agent_name) or op.agent_name for op in skill_opinions]
+        skill_ids = [
+            extract_skill_id(op.agent_name) or op.agent_name for op in skill_opinions
+        ]
         memory = AgentMemory.from_config()
         perf_weights = (
             memory.compute_skill_weights(
@@ -71,14 +75,17 @@ class SkillAggregator:
             weights.append(weight)
 
         total_weight = sum(weights) or 1.0
-        weighted_score = sum(
-            _SIGNAL_SCORES.get(op.signal, 3.0) * weight
-            for op, weight in zip(skill_opinions, weights)
-        ) / total_weight
-        weighted_confidence = sum(
-            op.confidence * weight
-            for op, weight in zip(skill_opinions, weights)
-        ) / total_weight
+        weighted_score = (
+            sum(
+                _SIGNAL_SCORES.get(op.signal, 3.0) * weight
+                for op, weight in zip(skill_opinions, weights)
+            )
+            / total_weight
+        )
+        weighted_confidence = (
+            sum(op.confidence * weight for op, weight in zip(skill_opinions, weights))
+            / total_weight
+        )
         total_adjustment = sum(
             op.raw_data.get("score_adjustment", 0)
             for op in skill_opinions
@@ -91,14 +98,18 @@ class SkillAggregator:
                 final_signal = signal
                 break
 
-        skill_names = [extract_skill_id(op.agent_name) or op.agent_name for op in skill_opinions]
+        skill_names = [
+            extract_skill_id(op.agent_name) or op.agent_name for op in skill_opinions
+        ]
         reasoning_parts = [
             f"Skill consensus from {len(skill_opinions)} skills "
             f"({', '.join(skill_names)}): weighted score {weighted_score:.2f}/5.0"
         ]
         for op, weight in zip(skill_opinions, weights):
             name = extract_skill_id(op.agent_name) or op.agent_name
-            reasoning_parts.append(f"  - {name}: {op.signal} ({op.confidence:.0%}) weight={weight:.2f}")
+            reasoning_parts.append(
+                f"  - {name}: {op.signal} ({op.confidence:.0%}) weight={weight:.2f}"
+            )
 
         return AgentOpinion(
             agent_name=SKILL_CONSENSUS_AGENT_NAME,
@@ -140,9 +151,11 @@ class SkillAggregator:
             summary = service.get_skill_summary(skill_id)
             if summary and summary.get("total_evaluations", 0) >= min_samples:
                 win_rate = summary.get("win_rate", 0.5)
-                return 0.5 + win_rate
+                return cast(float, 0.5 + win_rate)
         except Exception:
-            logger.debug("Failed to compute backtest factor for %s", agent_name, exc_info=True)
+            logger.debug(
+                "Failed to compute backtest factor for %s", agent_name, exc_info=True
+            )
         return 1.0
 
     @staticmethod
@@ -153,7 +166,10 @@ class SkillAggregator:
             config = get_config()
             return getattr(config, "agent_skill_autoweight", True)
         except Exception:
-            logger.debug("Failed to get backtest autoweight config, defaulting to True", exc_info=True)
+            logger.debug(
+                "Failed to get backtest autoweight config, defaulting to True",
+                exc_info=True,
+            )
             return True
 
 

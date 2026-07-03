@@ -17,6 +17,7 @@ from typing import Any, Callable
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         """
         try:
             response = await call_next(request)
-            return response
+            return cast(Response, response)
 
         except Exception as e:
             # 记录错误日志

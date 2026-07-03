@@ -288,7 +288,7 @@ def _call_litellm_vision(
     response = cast(Any, litellm).completion(**call_kwargs)
     choices = getattr(response, "choices", None) if response is not None else None
     if choices and choices[0].message.content:
-        return choices[0].message.content
+        return cast(str, choices[0].message.content)
     raise ValueError("LiteLLM vision returned empty response")
 
 

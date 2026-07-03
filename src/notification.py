@@ -749,7 +749,7 @@ class NotificationService(
             return False
 
     def _send_feishu_stream_chunked(
-        self, reply_client, chat_id: str, content: str, max_bytes: int
+        self, reply_client: Any, chat_id: str, content: str, max_bytes: int
     ) -> bool:
         """
         分批发送长消息到飞书（Stream 模式）
@@ -781,8 +781,8 @@ class NotificationService(
             sections = content.split("\n")
             separator = "\n"
 
-        chunks = []
-        current_chunk = []
+        chunks: List[str] = []
+        current_chunk: List[str] = []
         current_bytes = 0
         separator_bytes = get_bytes(separator)
 

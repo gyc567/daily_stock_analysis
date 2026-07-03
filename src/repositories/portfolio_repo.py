@@ -106,9 +106,12 @@ class PortfolioRepository:
         conditions = [PortfolioAccount.id == account_id]
         if not include_inactive:
             conditions.append(PortfolioAccount.is_active.is_(True))
-        return session.execute(
-            select(PortfolioAccount).where(and_(*conditions)).limit(1)
-        ).scalar_one_or_none()
+        return cast(
+            Optional[PortfolioAccount],
+            session.execute(
+                select(PortfolioAccount).where(and_(*conditions)).limit(1)
+            ).scalar_one_or_none(),
+        )
 
     def update_account(
         self, account_id: int, fields: Dict[str, Any]
@@ -162,7 +165,7 @@ class PortfolioRepository:
     # Event writes
     # ------------------------------------------------------------------
     @contextmanager
-    def portfolio_write_session(self):
+    def portfolio_write_session(self) -> Any:
         session = self.db.get_session()
         try:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")

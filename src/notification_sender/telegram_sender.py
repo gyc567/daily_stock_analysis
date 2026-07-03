@@ -8,7 +8,7 @@ Telegram 发送提醒服务
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, cast
 import requests
 import time
 import re
@@ -146,7 +146,9 @@ class TelegramSender:
         for attempt in range(1, max_retries + 1):
             try:
                 response = requests.post(
-                    api_url, json=payload, timeout=timeout_seconds or 10
+                    api_url,
+                    json=cast(Dict[str, Any], payload),
+                    timeout=timeout_seconds or 10,
                 )
             except (
                 requests.exceptions.ConnectionError,
@@ -288,7 +290,7 @@ class TelegramSender:
         # 按段落分割
         sections = content.split("\n---\n")
 
-        current_chunk = []
+        current_chunk: List[str] = []
         current_length = 0
         all_success = True
         chunk_index = 1
@@ -380,7 +382,7 @@ class TelegramSender:
         _link_placeholder = f"__LINK_{_uuid.uuid4().hex[:8]}__"
         _links = []
 
-        def _save_link(m):
+        def _save_link(m: Any) -> Any:
             _links.append(m.group(0))
             return f"{_link_placeholder}{len(_links) - 1}"
 
