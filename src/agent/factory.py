@@ -525,9 +525,13 @@ def build_supply_chain_executor(config=None):
 
 
 # 深度投研所需的精确工具集（去掉 backtest_tools + 冗余分析工具，减少 LLM 决策噪音）。
-# 对应五层穿透：宏观(get_market_indices/search_comprehensive_intel) +
-# 产业(get_sector_rankings/search_comprehensive_intel) + 财务(get_stock_info) +
-# 博弈(analyze_trend/get_chip_distribution/get_capital_flow) + 通用(行情/K线/新闻)。
+# 对应「消息面+产业链主导」新八章（docs/deep-research-chain-news-logic-plan.md）：
+# 消息面(search_stock_news/search_comprehensive_intel + get_market_indices) +
+# 产业链(get_sector_rankings + search_comprehensive_intel) +
+# P1 板块归属双源校验(verify_supply_chain_evidence) +
+# 财务估值(get_stock_info) +
+# 技术面(analyze_trend/get_chip_distribution/get_capital_flow) +
+# 通用(行情/K线/新闻)。
 _DEEP_RESEARCH_TOOL_NAMES = {
     "get_realtime_quote",
     "get_daily_history",
@@ -539,17 +543,20 @@ _DEEP_RESEARCH_TOOL_NAMES = {
     "search_comprehensive_intel",
     "get_market_indices",
     "get_sector_rankings",
+    "verify_supply_chain_evidence",  # P1: A 股公司/板块归属的东财+同花顺双源校验
 }
 
 
 def build_deep_research_executor(config=None):
-    """构建深度投研报告专属 Executor（五层穿透框架）。
+    """构建深度投研报告专属 Executor（消息面+产业链主导框架）。
 
     与问股/供应链的差异：
-    - **工具集**：从问股 ``get_tool_registry()`` 精确筛选 10 个工具（去掉 backtest_tools
+    - **工具集**：从问股 ``get_tool_registry()`` 精确筛选 11 个工具（去掉 backtest_tools
       与冗余分析工具 calculate_ma/get_volume_analysis/analyze_pattern，降低 LLM 决策噪音），
       装入**独立 ToolRegistry 实例**（复制不污染问股单例）。
-    - **长任务**：``max_steps=30`` / ``wall_clock=1200s``（五层穿透 + 报告生成 2–5 分钟），
+      11 个工具对应新八章：消息面 / 产业链 / P1 板块归属双源校验
+      ``verify_supply_chain_evidence`` / 财务估值 / 技术面 + 通用行情。
+    - **长任务**：``max_steps=30`` / ``wall_clock=1200s``（八章穿透 + 报告生成 2–5 分钟），
       硬编码不读 ``config.agent_max_steps``，与问股(10)/供应链(40)互不影响。
     - 返回 :class:`src.agent.deep_research_executor.DeepResearchExecutor`。
     """
