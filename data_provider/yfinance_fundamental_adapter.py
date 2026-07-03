@@ -105,7 +105,7 @@ def _yoy_from_row(row: Optional[pd.Series]) -> Optional[float]:
         return None
     latest = _safe_float(row.iloc[0])
     prev_year = _safe_float(row.iloc[4])
-    if latest is None or prev_year in (None, 0):
+    if latest is None or prev_year is None or prev_year == 0:
         return None
     return round((latest - prev_year) / abs(prev_year) * 100.0, 4)
 
@@ -362,7 +362,7 @@ class YfinanceFundamentalAdapter:
                 or _safe_float(info.get("previousClose"))
             )
             yield_pct: Optional[float] = None
-            if ttm_cash is not None and latest_price not in (None, 0):
+            if ttm_cash is not None and latest_price is not None and latest_price != 0:
                 yield_pct = round(float(ttm_cash) / float(latest_price) * 100.0, 4)
             elif _safe_float(info.get("trailingAnnualDividendYield")) is not None:
                 yield_pct = _ratio_to_pct(info.get("trailingAnnualDividendYield"))
