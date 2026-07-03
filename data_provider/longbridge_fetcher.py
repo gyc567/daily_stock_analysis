@@ -29,7 +29,7 @@ import time
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, cast
 
 import pandas as pd
 
@@ -119,8 +119,10 @@ def _sanitize_longbridge_env() -> None:
             p = Path(log_dir).expanduser()
             p.mkdir(parents=True, exist_ok=True)
             os.environ["LONGBRIDGE_LOG_PATH"] = str(p / "longbridge_sdk.log")
-            logger.debug("[Longbridge] 设置 LONGBRIDGE_LOG_PATH=%s",
-                         os.environ["LONGBRIDGE_LOG_PATH"])
+            logger.debug(
+                "[Longbridge] 设置 LONGBRIDGE_LOG_PATH=%s",
+                os.environ["LONGBRIDGE_LOG_PATH"],
+            )
         except Exception:
             pass
 
@@ -138,8 +140,12 @@ def _sanitize_longbridge_env() -> None:
         ):
             if default_url and not os.environ.get(env_name):
                 os.environ[env_name] = default_url
-                logger.debug("[Longbridge] 根据 REGION=%s 设置 %s=%s",
-                             region, env_name, default_url)
+                logger.debug(
+                    "[Longbridge] 根据 REGION=%s 设置 %s=%s",
+                    region,
+                    env_name,
+                    default_url,
+                )
 
 
 def _longbridge_config_kwargs() -> Dict[str, Any]:
@@ -201,7 +207,8 @@ def _longbridge_config_kwargs() -> Dict[str, Any]:
             kw["push_candlestick_mode"] = PushCandlestickMode.Confirmed
         elif cm:
             logger.warning(
-                "Unknown LONGBRIDGE_PUSH_CANDLESTICK_MODE=%r; use realtime or confirmed", cm
+                "Unknown LONGBRIDGE_PUSH_CANDLESTICK_MODE=%r; use realtime or confirmed",
+                cm,
             )
 
     if "log_path" in params:
@@ -254,16 +261,24 @@ def _restore_oauth_token_cache_from_env(client_id: str) -> bool:
     if token_cache.exists():
         try:
             if token_cache.read_bytes() == payload:
-                logger.debug("[Longbridge] OAuth token 缓存已与 env secret 一致，跳过恢复: %s", token_cache)
+                logger.debug(
+                    "[Longbridge] OAuth token 缓存已与 env secret 一致，跳过恢复: %s",
+                    token_cache,
+                )
                 return False
         except OSError as exc:
-            logger.warning("[Longbridge] 读取现有 OAuth token 缓存失败，将尝试用 env secret 覆盖: %s", exc)
+            logger.warning(
+                "[Longbridge] 读取现有 OAuth token 缓存失败，将尝试用 env secret 覆盖: %s",
+                exc,
+            )
 
     try:
         token_cache.parent.mkdir(parents=True, exist_ok=True)
         token_cache.write_bytes(payload)
         token_cache.chmod(0o600)
-        logger.info("[Longbridge] 已从 LONGBRIDGE_OAUTH_TOKEN_CACHE_B64 恢复 OAuth token 缓存")
+        logger.info(
+            "[Longbridge] 已从 LONGBRIDGE_OAUTH_TOKEN_CACHE_B64 恢复 OAuth token 缓存"
+        )
         return True
     except Exception as exc:
         logger.warning("[Longbridge] 写入 OAuth token 缓存失败: %s", exc)
@@ -303,7 +318,9 @@ def _is_valid_oauth_cache_file(token_cache: Path) -> bool:
         return False
 
     if not isinstance(data, dict) or not data:
-        logger.warning("[Longbridge] OAuth token 缓存内容为空或格式不符合预期: %s", token_cache)
+        logger.warning(
+            "[Longbridge] OAuth token 缓存内容为空或格式不符合预期: %s", token_cache
+        )
         return False
 
     return True
@@ -327,12 +344,16 @@ def _longbridge_credentials(config: Any = None) -> Dict[str, Optional[str]]:
     app_key = _clean_optional(getattr(config, "longbridge_app_key", None))
     app_secret = _clean_optional(getattr(config, "longbridge_app_secret", None))
     access_token = _clean_optional(getattr(config, "longbridge_access_token", None))
-    oauth_client_id = _clean_optional(getattr(config, "longbridge_oauth_client_id", None))
+    oauth_client_id = _clean_optional(
+        getattr(config, "longbridge_oauth_client_id", None)
+    )
 
     app_key = app_key or _clean_optional(os.getenv("LONGBRIDGE_APP_KEY"))
     app_secret = app_secret or _clean_optional(os.getenv("LONGBRIDGE_APP_SECRET"))
     access_token = access_token or _clean_optional(os.getenv("LONGBRIDGE_ACCESS_TOKEN"))
-    oauth_client_id = oauth_client_id or _clean_optional(os.getenv("LONGBRIDGE_OAUTH_CLIENT_ID"))
+    oauth_client_id = oauth_client_id or _clean_optional(
+        os.getenv("LONGBRIDGE_OAUTH_CLIENT_ID")
+    )
 
     # Some Longbridge pages label the OAuth public client id as "App Key".
     # Use it as a compatibility alias only when no Legacy access token exists.
@@ -348,7 +369,9 @@ def _longbridge_credentials(config: Any = None) -> Dict[str, Optional[str]]:
 
 
 def _has_legacy_credentials(creds: Dict[str, Optional[str]]) -> bool:
-    return bool(creds.get("app_key") and creds.get("app_secret") and creds.get("access_token"))
+    return bool(
+        creds.get("app_key") and creds.get("app_secret") and creds.get("access_token")
+    )
 
 
 def _has_oauth_credentials(creds: Dict[str, Optional[str]]) -> bool:
@@ -474,10 +497,13 @@ class LongbridgeFetcher(BaseFetcher):
             return self._available
         try:
             from src.config import get_config
+
             creds = _longbridge_credentials(get_config())
         except Exception:
             creds = _longbridge_credentials()
-        self._available = _has_legacy_credentials(creds) or _has_oauth_credentials(creds)
+        self._available = _has_legacy_credentials(creds) or _has_oauth_credentials(
+            creds
+        )
         return self._available
 
     @staticmethod
@@ -504,6 +530,7 @@ class LongbridgeFetcher(BaseFetcher):
                 # ── 2. Collect credentials and mirror Legacy values to env ──
                 try:
                     from src.config import get_config
+
                     app_config = get_config()
                 except Exception:
                     app_config = None
@@ -548,7 +575,9 @@ class LongbridgeFetcher(BaseFetcher):
                             logger.info("[Longbridge] Config.from_oauth() 创建成功")
                         except (ImportError, AttributeError):
                             oauth_error = _oauth_sdk_unavailable_error()
-                            logger.warning("[Longbridge] OAuth SDK 不可用: %s", oauth_error)
+                            logger.warning(
+                                "[Longbridge] OAuth SDK 不可用: %s", oauth_error
+                            )
                         except Exception as exc:
                             oauth_error = exc
                             logger.warning("[Longbridge] OAuth 初始化失败: %s", exc)
@@ -584,13 +613,21 @@ class LongbridgeFetcher(BaseFetcher):
                             )
 
                 if lb_config is None and has_legacy:
-                    lb_config = Config.from_apikey(  # type: ignore[reportAttributeAccessIssue]
-                        app_key,
-                        app_secret,
-                        access_token,
-                        **extra_kw,
+                    if not (app_key and app_secret and access_token):
+                        reason = (
+                            "OAuth 已配置但遗留 app_key/app_secret/access_token 不完整"
+                        )
+                        logger.warning("[Longbridge] %s", reason)
+                    else:
+                        lb_config = Config.from_apikey(  # type: ignore[reportAttributeAccessIssue]
+                            app_key,
+                            app_secret,
+                            access_token,
+                            **extra_kw,
+                        )
+                    logger.info(
+                        "[Longbridge] Config.from_apikey(  # type: ignore[reportAttributeAccessIssue]) 创建成功"
                     )
-                    logger.info("[Longbridge] Config.from_apikey(  # type: ignore[reportAttributeAccessIssue]) 创建成功")
                 elif lb_config is None:
                     reason = (
                         f"OAuth 初始化失败: {oauth_error}"
@@ -602,7 +639,11 @@ class LongbridgeFetcher(BaseFetcher):
                     return None
 
                 # Diagnostic logging
-                region = os.getenv("LONGBRIDGE_REGION") or os.getenv("LONGPORT_REGION") or "(auto)"
+                region = (
+                    os.getenv("LONGBRIDGE_REGION")
+                    or os.getenv("LONGPORT_REGION")
+                    or "(auto)"
+                )
                 logger.info(
                     "[Longbridge] 配置: region=%s, http=%s, quote_ws=%s",
                     region,
@@ -611,7 +652,7 @@ class LongbridgeFetcher(BaseFetcher):
                 )
 
                 self._config = lb_config
-                self._ctx = QuoteContext(lb_config)
+                self._ctx = QuoteContext(cast("Config", lb_config))
                 logger.info("[Longbridge] QuoteContext 初始化成功")
                 return self._ctx
             except Exception as e:
@@ -694,12 +735,12 @@ class LongbridgeFetcher(BaseFetcher):
             from longbridge.openapi import Period, AdjustType
 
             candles = ctx.history_candlesticks_by_offset(
-                symbol,
-                Period.Day,
-                AdjustType.NoAdjust,
-                False,
-                datetime.now(),
-                6,
+                symbol=symbol,
+                period=Period.Day,
+                adjust_type=AdjustType.NoAdjust,
+                forward=False,
+                count=6,
+                time=datetime.now(),
             )
             if not candles or len(candles) < 2:
                 return None
@@ -783,7 +824,9 @@ class LongbridgeFetcher(BaseFetcher):
         name = ""
 
         if static is not None:
-            name = getattr(static, "name_cn", "") or getattr(static, "name_en", "") or ""
+            name = (
+                getattr(static, "name_cn", "") or getattr(static, "name_en", "") or ""
+            )
             circulating = int(getattr(static, "circulating_shares", 0) or 0)
             total_shares = int(getattr(static, "total_shares", 0) or 0)
             eps_ttm = safe_float(getattr(static, "eps_ttm", None))
@@ -898,15 +941,17 @@ class LongbridgeFetcher(BaseFetcher):
             else:
                 dt = datetime.fromtimestamp(int(ts)).date()
 
-            rows.append({
-                "date": dt.strftime("%Y-%m-%d"),
-                "open": safe_float(getattr(c, "open", None)),
-                "high": safe_float(getattr(c, "high", None)),
-                "low": safe_float(getattr(c, "low", None)),
-                "close": safe_float(getattr(c, "close", None)),
-                "volume": int(getattr(c, "volume", 0) or 0),
-                "turnover": safe_float(getattr(c, "turnover", None)),
-            })
+            rows.append(
+                {
+                    "date": dt.strftime("%Y-%m-%d"),
+                    "open": safe_float(getattr(c, "open", None)),
+                    "high": safe_float(getattr(c, "high", None)),
+                    "low": safe_float(getattr(c, "low", None)),
+                    "close": safe_float(getattr(c, "close", None)),
+                    "volume": int(getattr(c, "volume", 0) or 0),
+                    "turnover": safe_float(getattr(c, "turnover", None)),
+                }
+            )
 
         return pd.DataFrame(rows)
 
