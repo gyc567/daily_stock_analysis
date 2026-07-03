@@ -209,7 +209,7 @@ def validate_position(request: ValidatePositionRequest) -> ValidatePositionRespo
     """
     try:
         valid, warning = validate_position_with_concentration(
-            position_suggestion=request.position_size,  # type: ignore[reportCallIssue]
+            suggested_position=request.position_size,
             current_concentration=request.current_concentration or 0.0,
         )
 

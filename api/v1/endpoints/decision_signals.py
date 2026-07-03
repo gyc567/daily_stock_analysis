@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Query, Security
 from fastapi.security import APIKeyCookie
@@ -34,7 +34,7 @@ admin_session_cookie = APIKeyCookie(
 )
 router = APIRouter(dependencies=[Security(admin_session_cookie)])
 
-AUTH_RESPONSE = {
+AUTH_RESPONSE: Dict[Union[int, str], Dict[str, Any]] = {
     401: {
         "model": ErrorResponse,
         "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",

@@ -259,7 +259,7 @@ class DecisionSignalRepository:
                 .scalars()
                 .all()
             )
-            return cast(Any, list(rows))
+            return cast(List[DecisionSignalRecord], list(rows))
 
     def list_active_by_stock_actions(
         self,
@@ -293,7 +293,7 @@ class DecisionSignalRepository:
                 .scalars()
                 .all()
             )
-            return cast(Any, list(rows))
+            return cast(List[DecisionSignalRecord], list(rows))
 
     def update_status(
         self,
@@ -410,12 +410,15 @@ class DecisionSignalRepository:
             ]
         else:
             return None
-        return session.execute(
-            select(DecisionSignalRecord)
-            .where(and_(*conditions))
-            .order_by(DecisionSignalRecord.id.asc())
-            .limit(1)
-        ).scalar_one_or_none()
+        return cast(
+            Optional[DecisionSignalRecord],
+            session.execute(
+                select(DecisionSignalRecord)
+                .where(and_(*conditions))
+                .order_by(DecisionSignalRecord.id.asc())
+                .limit(1)
+            ).scalar_one_or_none(),
+        )
 
     @classmethod
     def _find_relaxed_existing_in_session(

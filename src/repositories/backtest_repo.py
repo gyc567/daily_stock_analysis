@@ -77,7 +77,7 @@ class BacktestRepository:
 
             query = query.order_by(desc(AnalysisHistory.created_at)).limit(limit)
             rows = session.execute(query).scalars().all()
-            return cast(Any, list(rows))
+            return cast(List[AnalysisHistory], list(rows))
 
     def save_result(self, result: BacktestResult) -> None:
         with self.db.get_session() as session:
@@ -231,7 +231,7 @@ class BacktestRepository:
                 .offset(offset)
                 .limit(limit)
             ).all()
-            return cast(Any, list(rows))
+            return cast(List[BacktestResultContextRow], list(rows))
 
     def list_results_with_context(
         self,
@@ -268,7 +268,7 @@ class BacktestRepository:
             )
             if limit is not None:
                 query = query.limit(limit)
-            return cast(Any, list(session.execute(query).all()))
+            return cast(List[Tuple[BacktestResult, Optional[str]]], list(session.execute(query).all()))
 
     def count_results(
         self,
@@ -333,7 +333,7 @@ class BacktestRepository:
             if limit is not None:
                 query = query.limit(limit)
             rows = session.execute(query).scalars().all()
-            return cast(Any, list(rows))
+            return cast(List[BacktestResult], list(rows))
 
     def upsert_summary(self, summary: BacktestSummary) -> None:
         """Insert or replace summary row by unique key."""

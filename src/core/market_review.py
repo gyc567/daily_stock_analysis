@@ -534,7 +534,7 @@ def _persist_market_review_history(
         )
 
         history_query_id = query_id or f"market_review_{uuid.uuid4().hex}"
-        context_snapshot = {
+        context_snapshot: Dict[str, Any] = {
             "report_kind": MARKET_REVIEW_REPORT_TYPE,
             "market_review_region": region,
             "report_language": report_language,

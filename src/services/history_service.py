@@ -492,7 +492,7 @@ class HistoryService:
             for candidate in (raw_result.get("dashboard"), raw_result):
                 if not isinstance(candidate, dict):
                     continue
-                raw_points = find_sniper_points(candidate) or raw_points  # type: ignore[reportAssignmentType]
+                raw_points = cast(Dict[str, Any], find_sniper_points(candidate)) or raw_points
                 if any(
                     raw_points.get(k) is not None
                     for k in ("ideal_buy", "secondary_buy", "stop_loss", "take_profit")
@@ -619,12 +619,15 @@ class HistoryService:
         self, record, raw_result: Any
     ) -> Dict[str, Any]:
         raw = raw_result if isinstance(raw_result, dict) else {}
-        return build_action_fields(  # type: ignore[reportReturnType]
-            operation_advice=raw.get("operation_advice")
-            or getattr(record, "operation_advice", None),
-            explicit_action=raw.get("action"),
-            report_type=getattr(record, "report_type", None),
-            report_language=normalize_report_language(raw.get("report_language")),
+        return cast(
+            Dict[str, Any],
+            build_action_fields(
+                operation_advice=raw.get("operation_advice")
+                or getattr(record, "operation_advice", None),
+                explicit_action=raw.get("action"),
+                report_type=getattr(record, "report_type", None),
+                report_language=normalize_report_language(raw.get("report_language")),
+            ),
         )
 
     def delete_history_records(self, record_ids: List[int]) -> int:

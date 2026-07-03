@@ -738,16 +738,16 @@ class AskCommand(BotCommand):
                 for position in positions[:5]:
                     if not isinstance(position, dict):
                         continue
-                    code = position.get("code")
+                    position_code = position.get("code")
                     weight = position.get("suggested_weight")
                     signal = position.get("signal")
-                    if code and weight is not None:
+                    if position_code and weight is not None:
                         try:
                             weight_text = f"{float(weight):.0%}"
                         except (TypeError, ValueError):
                             weight_text = str(weight)
                         suffix = f" ({signal})" if signal else ""
-                        position_parts.append(f"{code}: {weight_text}{suffix}")
+                        position_parts.append(f"{position_code}: {weight_text}{suffix}")
                 if position_parts:
                     lines.append(f"- 建议仓位: {'；'.join(position_parts)}")
 

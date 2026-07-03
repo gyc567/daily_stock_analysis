@@ -267,6 +267,7 @@ class DingtalkPlatform(BotPlatform):
         
         try:
             # 构建消息
+            payload: Dict[str, Any]
             if response.markdown:
                 payload = {
                     "msgtype": "markdown",
