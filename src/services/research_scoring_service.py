@@ -731,7 +731,10 @@ class ResearchScoringService:
         if self._tushare_supply_chain is None:
             return {"suppliers": [], "customers": []}
 
-        return self._tushare_supply_chain.get_supplier_customer(stock_code, year)
+        return cast(
+            Dict[str, List[str]],
+            self._tushare_supply_chain.get_supplier_customer(stock_code, year),
+        )
 
     def extract_supply_chain_from_annual_report(
         self,

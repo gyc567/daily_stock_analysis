@@ -172,7 +172,7 @@ class AnalysisService:
             格式化的响应字典
         """
         # 获取狙击点位
-        sniper_points = {}
+        sniper_points: Dict[str, str] = {}
         if hasattr(result, "get_sniper_points"):
             sniper_points = result.get_sniper_points() or {}
 

@@ -407,6 +407,8 @@ class DecisionSignalService:
         if value in (None, ""):
             return None
         try:
+            if value is None:
+                return None
             minutes = int(float(value))
         except (TypeError, ValueError):
             return None
@@ -465,7 +467,7 @@ class DecisionSignalService:
                 return candidate_created_at < reference_at
 
         if candidate_any.id is not None and current_any.id is not None:
-            return candidate_any.id < current_any.id
+            return cast(bool, candidate_any.id < current_any.id)
         return False
 
     @staticmethod
