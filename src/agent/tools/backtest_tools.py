@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _backtest_service = None
 
 
-def _get_backtest_service():
+def _get_backtest_service() -> Any:
     """Lazy import + singleton to avoid circular deps and repeated instantiation."""
     global _backtest_service
     if _backtest_service is None:

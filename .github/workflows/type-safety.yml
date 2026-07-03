@@ -56,7 +56,21 @@ jobs:
             -p src.agent.tools.analysis_tools \
             -p src.notification \
             -p src.agent.runner \
-            -p src.services.supply_chain_report_service
+            -p src.services.supply_chain_report_service \
+            -p src.core.scheduled_task_lock \
+            -p src.market_analyzer \
+            -p src.agent.research \
+            -p src.agent.tools.backtest_tools \
+            -p src.notification_sender.feishu_sender \
+            -p src.notification_sender.telegram_sender \
+            -p src.notification_sender.custom_webhook_sender \
+            -p src.services.decision_signal_service \
+            -p src.services.research_scoring_service \
+            -p src.services.analysis_service \
+            -p src.services.supply_chain.scorecard \
+            -p src.services.zhengxi.fund_data \
+            -p src.services.alert_indicators \
+            -p src.schemas.analysis_context_pack
 
       - name: Contract smoke test
         env:

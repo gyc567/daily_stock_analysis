@@ -37,13 +37,13 @@ logger = logging.getLogger(__name__)
 class ResearchScoringService:
     """Service for orchestrating research scoring pipeline"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.db_manager = DatabaseManager.get_instance()
         self._data_providers_initialized = False
         self._llm_service = None
         self._agents_initialized = False
 
-    def _init_data_providers(self):
+    def _init_data_providers(self) -> None:
         """Lazy initialize P2 data providers"""
         if self._data_providers_initialized:
             return
@@ -480,7 +480,7 @@ class ResearchScoringService:
             "p2_enriched": enrich_with_providers,
         }
 
-    def _init_agents(self):
+    def _init_agents(self) -> None:
         """Lazy initialize P3 agents"""
         if self._agents_initialized:
             return
@@ -731,10 +731,7 @@ class ResearchScoringService:
         if self._tushare_supply_chain is None:
             return {"suppliers": [], "customers": []}
 
-        return cast(
-            Dict[str, List[str]],
-            self._tushare_supply_chain.get_supplier_customer(stock_code, year),
-        )
+        return self._tushare_supply_chain.get_supplier_customer(stock_code, year)
 
     def extract_supply_chain_from_annual_report(
         self,

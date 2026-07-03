@@ -382,7 +382,7 @@ class TelegramSender:
         _link_placeholder = f"__LINK_{_uuid.uuid4().hex[:8]}__"
         _links = []
 
-        def _save_link(m):
+        def _save_link(m: Any) -> Any:
             _links.append(m.group(0))
             return f"{_link_placeholder}{len(_links) - 1}"
 

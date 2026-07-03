@@ -127,7 +127,7 @@ class MarketAnalyzer:
     def __init__(
         self,
         search_service: Optional[SearchService] = None,
-        analyzer=None,
+        analyzer: Any = None,
         region: str = "cn",
         config: Optional[Any] = None,
     ):
@@ -413,7 +413,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         return indices
 
-    def _get_market_statistics(self, overview: MarketOverview):
+    def _get_market_statistics(self, overview: MarketOverview) -> Any:
         """获取市场涨跌统计"""
         try:
             logger.info(
@@ -456,7 +456,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 e,
             )
 
-    def _get_sector_rankings(self, overview: MarketOverview):
+    def _get_sector_rankings(self, overview: MarketOverview) -> Any:
         """获取板块涨跌榜"""
         try:
             logger.info(

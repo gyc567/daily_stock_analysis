@@ -16,7 +16,7 @@ from src.services.supply_chain.paths import scorecard_script_path
 _SCORECARD_MODULE = None
 
 
-def _load_module():
+def _load_module() -> Any:
     global _SCORECARD_MODULE
     if _SCORECARD_MODULE is None:
         path = scorecard_script_path()

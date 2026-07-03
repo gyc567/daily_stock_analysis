@@ -96,6 +96,20 @@ module = [
     "src.notification",
     "src.agent.runner",
     "src.services.supply_chain_report_service",
+    "src.core.scheduled_task_lock",
+    "src.market_analyzer",
+    "src.agent.research",
+    "src.agent.tools.backtest_tools",
+    "src.notification_sender.feishu_sender",
+    "src.notification_sender.telegram_sender",
+    "src.notification_sender.custom_webhook_sender",
+    "src.services.decision_signal_service",
+    "src.services.research_scoring_service",
+    "src.services.analysis_service",
+    "src.services.supply_chain.scorecard",
+    "src.services.zhengxi.fund_data",
+    "src.services.alert_indicators",
+    "src.schemas.analysis_context_pack",
 ]
 enable_error_code = ["ignore-without-code"]
 disallow_untyped_defs = true

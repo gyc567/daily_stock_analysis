@@ -42,7 +42,7 @@ class AnalysisService:
     封装股票分析相关的业务逻辑
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化分析服务"""
         self.repo = AnalysisRepository()
         self.last_error: Optional[str] = None
