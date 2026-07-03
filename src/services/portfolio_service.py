@@ -605,11 +605,11 @@ class PortfolioService:
         config = get_config()
         refresh_enabled = bool(getattr(config, "portfolio_fx_update_enabled", True))
         if account_id is not None:
-            account_rows = [self._require_active_account(account_id)]
+            account_rows: List[Any] = [self._require_active_account(account_id)]
         else:
             account_rows = self.repo.list_accounts(include_inactive=False)
 
-        summary = {
+        summary: Dict[str, Any] = {
             "as_of": as_of_date.isoformat(),
             "account_count": len(account_rows),
             "refresh_enabled": refresh_enabled,
@@ -622,11 +622,12 @@ class PortfolioService:
             "error_count": 0,
         }
         for account in account_rows:
-            item = self._refresh_account_fx_rates(
+            item_raw = self._refresh_account_fx_rates(
                 account=account,
                 as_of_date=as_of_date,
                 refresh_enabled=refresh_enabled,
             )
+            item: Dict[str, int] = item_raw
             summary["pair_count"] += item["pair_count"]
             summary["updated_count"] += item["updated_count"]
             summary["stale_count"] += item["stale_count"]
@@ -710,25 +711,25 @@ class PortfolioService:
                 as_of=as_of_date,
             )
 
-        events = []
-        for row in corporate_actions:
-            row_any = cast(Any, row)
+        events: List[Tuple[str, Any, Any, Any]] = []
+        for corp_row in corporate_actions:
+            row_corp: Any = corp_row
             event_key = (
-                self._normalize_symbol_for_position(row_any.symbol),
-                self._normalize_market(row_any.market),
-                self._normalize_currency(row_any.currency),
+                self._normalize_symbol_for_position(row_corp.symbol),
+                self._normalize_market(row_corp.market),
+                self._normalize_currency(row_corp.currency),
             )
             if event_key == key:
-                events.append(("corp", row_any.effective_date, row_any.id, row))
-        for row in trades:
-            row_any = cast(Any, row)
+                events.append(("corp", row_corp.effective_date, row_corp.id, corp_row))
+        for trade_row in trades:
+            row_trade: Any = trade_row
             event_key = (
-                self._normalize_symbol_for_position(row_any.symbol),
-                self._normalize_market(row_any.market),
-                self._normalize_currency(row_any.currency),
+                self._normalize_symbol_for_position(row_trade.symbol),
+                self._normalize_market(row_trade.market),
+                self._normalize_currency(row_trade.currency),
             )
             if event_key == key:
-                events.append(("trade", row.trade_date, row.id, row))
+                events.append(("trade", row_trade.trade_date, row_trade.id, trade_row))
 
         # Quantity validation only depends on position-changing events for one symbol.
         # Cash ledger entries do not affect shares held, so we keep the same corp->trade
@@ -738,11 +739,12 @@ class PortfolioService:
 
         quantity_held = 0.0
         for event_type, event_date, _, event in events:
+            event_any = cast(Any, event)
             if event_type == "corp":
-                action_type = (event.action_type or "").strip().lower()
+                action_type = (event_any.action_type or "").strip().lower()
                 if action_type != "split_adjustment":
                     continue
-                split_ratio = float(event.split_ratio or 0.0)
+                split_ratio = float(event_any.split_ratio or 0.0)
                 if split_ratio <= 0:
                     raise ValueError(f"Invalid split_ratio for {key[0]}")
                 if abs(split_ratio - 1.0) <= EPS:
@@ -750,15 +752,15 @@ class PortfolioService:
                 quantity_held *= split_ratio
                 continue
 
-            qty = float(event.quantity or 0.0)
+            qty = float(event_any.quantity or 0.0)
             if qty <= 0:
                 raise ValueError(f"Invalid trade quantity for {key[0]}")
-            side = (event.side or "").strip().lower()
+            side = (event_any.side or "").strip().lower()
             if side == "buy":
                 quantity_held += qty
                 continue
             if side != "sell":
-                raise ValueError(f"Unsupported trade side: {event.side}")
+                raise ValueError(f"Unsupported trade side: {event_any.side}")
             if quantity_held + EPS < qty:
                 raise PortfolioOversellError(
                     symbol=key[0],
@@ -781,13 +783,16 @@ class PortfolioService:
             account.id, as_of=as_of_date
         )
 
-        events = []
-        for row in cash_ledger:
-            events.append(("cash", row.event_date, row.id, row))
-        for row in trades:
-            events.append(("trade", row.trade_date, row.id, row))
-        for row in corporate_actions:
-            events.append(("corp", row.effective_date, row.id, row))
+        events: List[Tuple[str, Any, Any, Any]] = []
+        for cash_row in cash_ledger:
+            row_cash: Any = cash_row
+            events.append(("cash", row_cash.event_date, row_cash.id, cash_row))
+        for trade_row in trades:
+            row_trade: Any = trade_row
+            events.append(("trade", row_trade.trade_date, row_trade.id, trade_row))
+        for corp_row in corporate_actions:
+            row_corp: Any = corp_row
+            events.append(("corp", row_corp.effective_date, row_corp.id, corp_row))
 
         # Same-day deterministic ordering: cash -> corporate action -> trade.
         event_priority = {"cash": 0, "corp": 1, "trade": 2}
@@ -803,34 +808,37 @@ class PortfolioService:
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
 
         for event_type, event_date, _, event in events:
+            event_any = cast(Any, event)
             if event_type == "cash":
-                currency = self._normalize_currency(event.currency)
-                amount = float(event.amount or 0.0)
-                if event.direction == "in":
+                currency = self._normalize_currency(event_any.currency)
+                amount = float(event_any.amount or 0.0)
+                if event_any.direction == "in":
                     cash_balances[currency] += amount
-                elif event.direction == "out":
+                elif event_any.direction == "out":
                     cash_balances[currency] -= amount
                 else:
-                    raise ValueError(f"Unsupported cash direction: {event.direction}")
+                    raise ValueError(
+                        f"Unsupported cash direction: {event_any.direction}"
+                    )
                 continue
 
             if event_type == "trade":
                 key = (
-                    self._normalize_symbol_for_position(event.symbol),
-                    self._normalize_market(event.market),
-                    self._normalize_currency(event.currency),
+                    self._normalize_symbol_for_position(event_any.symbol),
+                    self._normalize_market(event_any.market),
+                    self._normalize_currency(event_any.currency),
                 )
-                qty = float(event.quantity or 0.0)
-                price = float(event.price or 0.0)
-                fee = float(event.fee or 0.0)
-                tax = float(event.tax or 0.0)
+                qty = float(event_any.quantity or 0.0)
+                price = float(event_any.price or 0.0)
+                fee = float(event_any.fee or 0.0)
+                tax = float(event_any.tax or 0.0)
                 if qty <= 0 or price <= 0:
                     raise ValueError(
-                        f"Invalid trade quantity or price for {event.symbol}"
+                        f"Invalid trade quantity or price for {event_any.symbol}"
                     )
 
                 gross = qty * price
-                side = (event.side or "").lower().strip()
+                side = (event_any.side or "").lower().strip()
                 if side == "buy":
                     cash_balances[key[2]] -= gross + fee + tax
                     if cost_method == "fifo":
@@ -843,7 +851,7 @@ class PortfolioService:
                                 "open_date": event_date,
                                 "remaining_quantity": qty,
                                 "unit_cost": unit_cost,
-                                "source_trade_id": event.id,
+                                "source_trade_id": event_any.id,
                             }
                         )
                     else:
@@ -877,7 +885,7 @@ class PortfolioService:
                     realized_pnl_base += realized_base
                     fx_stale = fx_stale or stale_realized
                 else:
-                    raise ValueError(f"Unsupported trade side: {event.side}")
+                    raise ValueError(f"Unsupported trade side: {event_any.side}")
 
                 fee_base, stale_fee, _ = self._convert_amount(
                     amount=fee,
@@ -898,13 +906,13 @@ class PortfolioService:
 
             if event_type == "corp":
                 key = (
-                    self._normalize_symbol_for_position(event.symbol),
-                    self._normalize_market(event.market),
-                    self._normalize_currency(event.currency),
+                    self._normalize_symbol_for_position(event_any.symbol),
+                    self._normalize_market(event_any.market),
+                    self._normalize_currency(event_any.currency),
                 )
-                action_type = (event.action_type or "").strip().lower()
+                action_type = (event_any.action_type or "").strip().lower()
                 if action_type == "cash_dividend":
-                    per_share = float(event.cash_dividend_per_share or 0.0)
+                    per_share = float(event_any.cash_dividend_per_share or 0.0)
                     if per_share <= 0:
                         continue
                     qty_held = self._held_quantity(
@@ -916,9 +924,9 @@ class PortfolioService:
                     if qty_held > EPS:
                         cash_balances[key[2]] += qty_held * per_share
                 elif action_type == "split_adjustment":
-                    split_ratio = float(event.split_ratio or 0.0)
+                    split_ratio = float(event_any.split_ratio or 0.0)
                     if split_ratio <= 0:
-                        raise ValueError(f"Invalid split_ratio for {event.symbol}")
+                        raise ValueError(f"Invalid split_ratio for {event_any.symbol}")
                     if abs(split_ratio - 1.0) <= EPS:
                         continue
                     if cost_method == "fifo":
@@ -930,7 +938,7 @@ class PortfolioService:
                         state.quantity *= split_ratio
                 else:
                     raise ValueError(
-                        f"Unsupported corporate action type: {event.action_type}"
+                        f"Unsupported corporate action type: {event_any.action_type}"
                     )
 
         position_rows, lot_rows, market_value_base, total_cost_base, stale_pos = (
