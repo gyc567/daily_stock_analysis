@@ -195,7 +195,7 @@ class AlertWorker:
 
         for row in self.service.repo.list_enabled_rules(limit=ALERT_WORKER_RULE_LIMIT):
             try:
-                cooldown_policy = self.service._load_json(row.cooldown_policy, default=None)  # type: ignore[reportArgumentType]
+                cooldown_policy = self.service._load_json(row.cooldown_policy, default=None)  # type: ignore[arg-type]
                 for payload in self.service.build_runtime_payloads(row, config=config, include_overflow_payload=False):
                     if len(runtime_rules) >= ALERT_WORKER_RULE_LIMIT:
                         logger.warning(
@@ -208,7 +208,7 @@ class AlertWorker:
                             key=payload.key,
                             rule=payload.rule,
                             source="db",
-                            severity=row.severity,  # type: ignore[reportArgumentType]
+                            severity=row.severity,  # type: ignore[arg-type]
                             cooldown_policy=cooldown_policy,
                             effective_target=payload.effective_target,
                             display_target=payload.display_target,
@@ -246,6 +246,7 @@ class AlertWorker:
                 parameters = self.service._normalize_parameters(alert_type, entry)
                 key = self._semantic_key("single_symbol", stock_code, alert_type, parameters)
                 metadata = {"source": "legacy_env", "legacy_rule_index": index}
+                rule: Any
                 if alert_type == "price_cross":
                     rule = PriceAlert(
                         stock_code=stock_code,

@@ -400,6 +400,7 @@ class EventMonitor:
 
                 alert_type = entry.get("alert_type", "custom")
                 stock_code = entry.get("stock_code", "")
+                rule: AlertRule
                 if alert_type == AlertType.PRICE_CROSS.value:
                     rule = PriceAlert(
                         stock_code=stock_code,
@@ -496,7 +497,7 @@ def validate_event_alert_rule(rule: Dict[str, Any]) -> None:
         if direction not in {"above", "below"}:
             raise ValueError(f"invalid direction: {direction}")
         try:
-            price = float(rule.get("price"))  # type: ignore[reportArgumentType]
+            price = float(rule.get("price"))  # type: ignore[arg-type]
         except (TypeError, ValueError) as exc:
             raise ValueError(f"invalid price: {rule.get('price')}") from exc
         if price <= 0:
@@ -506,7 +507,7 @@ def validate_event_alert_rule(rule: Dict[str, Any]) -> None:
         if direction not in {"up", "down"}:
             raise ValueError(f"invalid direction: {direction}")
         try:
-            change_pct = float(rule.get("change_pct"))  # type: ignore[reportArgumentType]
+            change_pct = float(rule.get("change_pct"))  # type: ignore[arg-type]
         except (TypeError, ValueError) as exc:
             raise ValueError(f"invalid change_pct: {rule.get('change_pct')}") from exc
         if change_pct <= 0:

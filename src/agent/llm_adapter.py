@@ -519,7 +519,7 @@ class LLMToolAdapter:
         started_at = time.time()
         providers = [self._get_model_provider(model) for model in models_to_try]
 
-        last_error = None
+        last_error: Optional[Exception] = None
         hit_rate_limit = False
         for idx, model in enumerate(models_to_try):
             remaining_timeout = timeout

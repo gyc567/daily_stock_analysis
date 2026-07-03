@@ -706,7 +706,7 @@ def run_full_analysis(
             (
                 market_context_summary,
                 market_context_full_report,
-            ) = _prime_daily_market_context(
+            ) = _prime_daily_market_context(  # type: ignore[str-unpack]
                 config,
                 pipeline=pipeline,
                 region=market_review_region,
@@ -730,7 +730,7 @@ def run_full_analysis(
             (
                 market_context_summary,
                 market_context_full_report,
-            ) = _prime_daily_market_context(
+            ) = _prime_daily_market_context(  # type: ignore[str-unpack]
                 config,
                 pipeline=pipeline,
                 region=market_review_region,
@@ -816,7 +816,7 @@ def run_full_analysis(
                     (
                         market_context_summary,
                         market_context_full_report,
-                    ) = _prime_daily_market_context(
+                    ) = _prime_daily_market_context(  # type: ignore[str-unpack]
                         config,
                         pipeline=pipeline,
                         region=market_review_region,
@@ -1151,7 +1151,7 @@ def main() -> int:
         if args.host == "0.0.0.0" and os.getenv("WEBUI_HOST"):
             args.host = os.getenv("WEBUI_HOST")
         if args.port == 8000 and os.getenv("WEBUI_PORT"):
-            args.port = int(os.getenv("WEBUI_PORT"))
+            args.port = int(os.getenv("WEBUI_PORT") or "8000")
         _warn_if_public_webui_without_auth(args.host)
 
     bot_clients_started = False

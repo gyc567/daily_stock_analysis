@@ -124,10 +124,10 @@ class PositionLedgerRepo:
         if not record:
             return False
 
-        record.status = status  # type: ignore[reportAttributeAccessIssue]
+        record.status = status  # type: ignore[assignment]
         if realized_pnl is not None:
-            record.realized_pnl = realized_pnl  # type: ignore[reportAttributeAccessIssue]
-        record.evaluated_at = datetime.now()  # type: ignore[reportAttributeAccessIssue]
+            record.realized_pnl = realized_pnl  # type: ignore[assignment]
+        record.evaluated_at = datetime.now()  # type: ignore[assignment]
 
         self.db.commit()
         return True

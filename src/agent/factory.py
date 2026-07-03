@@ -75,7 +75,7 @@ def _coerce_config_int(
     try:
         if isinstance(raw_value, bool):
             return int(default)
-        return cast(int, int(raw_value))  # type: ignore[arg-type]
+        return cast(int, int(raw_value))  # type: ignore[call-overload]
     except (TypeError, ValueError, OverflowError):
         if field_name:
             logger.warning(
