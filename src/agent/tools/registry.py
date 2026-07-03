@@ -92,7 +92,7 @@ class ToolRegistry:
         registry.execute("get_realtime_quote", stock_code="600519")
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._tools: Dict[str, ToolDefinition] = {}
 
     # ----- Registration -----
@@ -143,7 +143,7 @@ class ToolRegistry:
 
     # ----- Execution -----
 
-    def execute(self, name: str, **kwargs) -> Any:
+    def execute(self, name: str, **kwargs: Any) -> Any:
         """Execute a registered tool by name.
 
         Returns the result as a JSON-serializable value.
@@ -183,7 +183,7 @@ def tool(
     category: str = "data",
     parameters: Optional[List[ToolParameter]] = None,
     registry: Optional[ToolRegistry] = None,
-):
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to register a function as an agent tool.
 
     Parameters can be specified explicitly or inferred from type hints.

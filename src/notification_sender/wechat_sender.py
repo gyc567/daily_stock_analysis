@@ -12,7 +12,7 @@ import base64
 import hashlib
 import requests
 import time
-from typing import Any, Optional
+from typing import Any, Dict, Optional, cast
 
 from src.config import Config
 from src.formatters import chunk_content_by_max_bytes
@@ -117,7 +117,7 @@ class WechatSender:
             }
             response = requests.post(
                 self._wechat_url,
-                json=payload,
+                json=cast(Dict[str, Any], payload),
                 timeout=30,
                 verify=self._webhook_verify_ssl,
             )

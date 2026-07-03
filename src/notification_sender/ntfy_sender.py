@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 from urllib.parse import unquote, urlparse, urlunparse
 
 import requests
@@ -16,7 +16,9 @@ from src.config import Config
 logger = logging.getLogger(__name__)
 
 
-def resolve_ntfy_endpoint(ntfy_url: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+def resolve_ntfy_endpoint(
+    ntfy_url: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
     """Split NTFY_URL into server root and topic from the final path segment."""
     raw_url = (ntfy_url or "").strip().rstrip("/")
     if not raw_url:
@@ -75,7 +77,9 @@ class NtfySender:
 
         server_url, topic = self._resolve_ntfy_endpoint()
         if not server_url or not topic:
-            logger.error("NTFY_URL 必须是包含 topic path 的完整 endpoint，例如 https://ntfy.sh/my-topic")
+            logger.error(
+                "NTFY_URL 必须是包含 topic path 的完整 endpoint，例如 https://ntfy.sh/my-topic"
+            )
             return False
 
         if title is None:
@@ -100,7 +104,7 @@ class NtfySender:
         try:
             response = requests.post(
                 server_url,
-                json=payload,
+                json=cast(Dict[str, Any], payload),
                 headers=headers,
                 timeout=timeout_seconds or 10,
                 verify=self._webhook_verify_ssl,

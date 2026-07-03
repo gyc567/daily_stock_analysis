@@ -71,7 +71,12 @@ jobs:
             -p src.services.zhengxi.fund_data \
             -p src.services.alert_indicators \
             -p src.schemas.analysis_context_pack \
-            -p src.scheduler
+            -p src.scheduler \
+            -p src.notification_sender.wechat_sender \
+            -p src.notification_sender.serverchan3_sender \
+            -p src.notification_sender.ntfy_sender \
+            -p src.notification_sender.gotify_sender \
+            -p src.agent.tools.registry
 
       - name: Contract smoke test
         env:
