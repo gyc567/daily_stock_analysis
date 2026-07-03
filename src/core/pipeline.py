@@ -18,7 +18,7 @@ import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional, Tuple, Callable
+from typing import List, Dict, Any, Optional, Tuple, Callable, cast
 
 import pandas as pd
 
@@ -168,7 +168,7 @@ class StockAnalysisPipeline:
 
         # 初始化搜索服务（可选，初始化失败不应阻断主分析流程）
         try:
-            self.search_service = SearchService(
+            self.search_service: Optional[SearchService] = SearchService(
                 bocha_keys=self.config.bocha_api_keys,
                 tavily_keys=self.config.tavily_api_keys,
                 anspire_keys=self.config.anspire_api_keys,
@@ -214,9 +214,11 @@ class StockAnalysisPipeline:
 
         # 初始化社交舆情服务（仅美股，可选）
         try:
-            self.social_sentiment_service = SocialSentimentService(
-                api_key=self.config.social_sentiment_api_key,
-                api_url=self.config.social_sentiment_api_url,
+            self.social_sentiment_service: Optional[SocialSentimentService] = (
+                SocialSentimentService(
+                    api_key=self.config.social_sentiment_api_key,
+                    api_url=self.config.social_sentiment_api_url,
+                )
             )
             if self.social_sentiment_service.is_available:
                 logger.info(
@@ -277,7 +279,9 @@ class StockAnalysisPipeline:
         stock_name = code
         try:
             # 首先获取股票名称
-            stock_name = self.fetcher_manager.get_stock_name(code, allow_realtime=False)
+            stock_name = (
+                self.fetcher_manager.get_stock_name(code, allow_realtime=False) or code
+            )
 
             target_date = self._resolve_resume_target_date(
                 code, current_time=current_time
@@ -372,7 +376,9 @@ class StockAnalysisPipeline:
 
             self._emit_progress(18, f"{code}：正在获取行情与筹码数据")
             # 获取股票名称（先走轻量名称路径，后续若 realtime_quote 有 name 再覆盖）
-            stock_name = self.fetcher_manager.get_stock_name(code, allow_realtime=False)
+            stock_name = (
+                self.fetcher_manager.get_stock_name(code, allow_realtime=False) or code
+            )
 
             # Step 1: 获取实时行情（量比、换手率等）- 使用统一入口，自动故障切换
             realtime_quote = None
@@ -735,8 +741,11 @@ class StockAnalysisPipeline:
                     result,
                     market_phase_summary=market_phase_summary,
                     analysis_context_pack_overview=analysis_context_pack_overview,
-                    report_language=getattr(result, "report_language", None)
-                    or getattr(self.config, "report_language", "zh"),
+                    report_language=cast(
+                        str,
+                        getattr(result, "report_language", None)
+                        or getattr(self.config, "report_language", "zh"),
+                    ),
                 )
                 if adjustments:
                     logger.info(
@@ -747,8 +756,11 @@ class StockAnalysisPipeline:
                 market_context_adjustments = apply_daily_market_context_guardrail(
                     result,
                     daily_market_context=enhanced_context.get("daily_market_context"),
-                    report_language=getattr(result, "report_language", None)
-                    or getattr(self.config, "report_language", "zh"),
+                    report_language=cast(
+                        str,
+                        getattr(result, "report_language", None)
+                        or getattr(self.config, "report_language", "zh"),
+                    ),
                 )
                 if market_context_adjustments:
                     logger.info(
@@ -767,7 +779,12 @@ class StockAnalysisPipeline:
                 )
 
             # Step 7.8: 长线投研框架集成 (Research Framework Integration)
-            result = self._integrate_research_framework(result, enhanced_context)
+            if result is not None:
+                integrated: Optional[AnalysisResult] = (
+                    self._integrate_research_framework(result, enhanced_context)
+                )
+                if integrated is not None:
+                    result = integrated
 
             # Step 8: 保存分析历史记录
             if result and result.success:
@@ -1219,7 +1236,7 @@ class StockAnalysisPipeline:
             executor = build_agent_executor(self.config, requested_skills)
 
             # Build initial context to avoid redundant tool calls
-            initial_context = {
+            initial_context: Dict[str, Any] = {
                 "stock_code": code,
                 "stock_name": stock_name,
                 "report_type": report_type.value,
@@ -1387,8 +1404,11 @@ class StockAnalysisPipeline:
                     result,
                     market_phase_summary=market_phase_summary,
                     analysis_context_pack_overview=analysis_context_pack_overview,
-                    report_language=getattr(result, "report_language", None)
-                    or getattr(self.config, "report_language", "zh"),
+                    report_language=cast(
+                        str,
+                        getattr(result, "report_language", None)
+                        or getattr(self.config, "report_language", "zh"),
+                    ),
                 )
                 if adjustments:
                     logger.info(
@@ -1399,8 +1419,11 @@ class StockAnalysisPipeline:
                 market_context_adjustments = apply_daily_market_context_guardrail(
                     result,
                     daily_market_context=initial_context.get("daily_market_context"),
-                    report_language=getattr(result, "report_language", None)
-                    or getattr(self.config, "report_language", "zh"),
+                    report_language=cast(
+                        str,
+                        getattr(result, "report_language", None)
+                        or getattr(self.config, "report_language", "zh"),
+                    ),
                 )
                 if market_context_adjustments:
                     logger.info(
@@ -1419,7 +1442,12 @@ class StockAnalysisPipeline:
                 )
 
             # Agent 路径: 长线投研框架集成 (Research Framework Integration)
-            result = self._integrate_research_framework(result, initial_context)
+            if result is not None:
+                integrated: Optional[AnalysisResult] = (
+                    self._integrate_research_framework(result, initial_context)
+                )
+                if integrated is not None:
+                    result = integrated
 
             resolved_stock_name = result.name if result and result.name else stock_name
 
@@ -1564,7 +1592,7 @@ class StockAnalysisPipeline:
                     if service is None:
                         service = DailyMarketContextService(db_manager=self.db)
                         self._daily_market_context_service = service
-            get_context_kwargs = {
+            get_context_kwargs: Dict[str, Any] = {
                 "region": market,
                 "config": self.config,
                 "notifier": self.notifier,
@@ -1589,7 +1617,7 @@ class StockAnalysisPipeline:
     def _get_daily_market_context_service_lock(self) -> threading.Lock:
         service_lock = getattr(self, "_daily_market_context_service_lock", None)
         if service_lock is not None:
-            return service_lock
+            return cast(threading.Lock, service_lock)
         with _DAILY_MARKET_CONTEXT_SERVICE_LOCK_INIT_GUARD:
             service_lock = getattr(self, "_daily_market_context_service_lock", None)
             if service_lock is None:
@@ -1930,7 +1958,7 @@ class StockAnalysisPipeline:
     def _extract_advice_text_from_dict(raw_advice: dict[str, Any]) -> str:
         for field in ("has_position", "no_position"):
             if isinstance(raw_advice.get(field), str):
-                text = raw_advice[field].strip()
+                text = cast(str, raw_advice[field]).strip()
                 if not StockAnalysisPipeline._is_agent_placeholder_text(text):
                     return text
 
@@ -2375,7 +2403,7 @@ class StockAnalysisPipeline:
         """
         构建分析上下文快照
         """
-        snapshot = {
+        snapshot: Dict[str, Any] = {
             "enhanced_context": self._without_runtime_prompt_context(enhanced_context),
             "news_content": news_content,
             "realtime_quote_raw": self._safe_to_dict(realtime_quote),
@@ -2677,7 +2705,7 @@ class StockAnalysisPipeline:
             return None
         if hasattr(value, "to_dict"):
             try:
-                return value.to_dict()
+                return cast(Dict[str, Any], value.to_dict())
             except Exception:
                 return None
         if hasattr(value, "__dict__"):
