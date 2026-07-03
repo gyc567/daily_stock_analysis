@@ -18,7 +18,7 @@ import logging
 import re
 import time
 from contextlib import contextmanager
-from typing import Optional, Generator, List, Tuple, Any
+from typing import Optional, Generator, List, Tuple, Any, Dict, cast
 
 import pandas as pd
 from tenacity import (
@@ -148,8 +148,8 @@ class PytdxFetcher(BaseFetcher):
         self._api = None
         self._connected = False
         self._current_host_idx = 0
-        self._stock_list_cache = None  # 股票列表缓存
-        self._stock_name_cache = {}  # 股票名称缓存 {code: name}
+        self._stock_list_cache: Optional[Dict[str, str]] = None  # 股票列表缓存
+        self._stock_name_cache: Dict[str, str] = {}  # 股票名称缓存 {code: name}
         self._unavailable_until = 0.0
         self._last_unavailable_reason = ""
 
@@ -376,7 +376,7 @@ class PytdxFetcher(BaseFetcher):
                 df["datetime"] = pd.to_datetime(df["datetime"])
                 df = df[(df["datetime"] >= start_date) & (df["datetime"] <= end_date)]
 
-                return df
+                return cast(pd.DataFrame, df)
 
             except Exception as e:
                 if isinstance(e, DataFetchError):
@@ -458,7 +458,7 @@ class PytdxFetcher(BaseFetcher):
                 if finance_info and "name" in finance_info:
                     name = finance_info["name"]
                     self._stock_name_cache[stock_code] = name
-                    return name
+                    return cast(Optional[str], name)
 
         except Exception as e:
             logger.debug(f"Pytdx 获取股票名称失败 {stock_code}: {e}")
