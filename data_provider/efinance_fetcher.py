@@ -603,7 +603,7 @@ class EfinanceFetcher(BaseFetcher):
         # 只保留需要的列
         keep_cols = ["code"] + STANDARD_COLUMNS
         existing_cols = [col for col in keep_cols if col in df.columns]
-        df = cast(pd.DataFrame, df[existing_cols])
+        df = df[existing_cols]
 
         return df
 

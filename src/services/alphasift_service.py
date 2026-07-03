@@ -3290,7 +3290,7 @@ def _alphasift_litellm_headers(config: Config) -> Iterator[None]:
         routes = _ALPHASIFT_LITELLM_COMPLETION_ROUTES.get()
         if routes:
             headers = _match_alphasift_litellm_headers(
-                args, kwargs, [cast(Dict[str, Any], r) for r in routes]
+                args, kwargs, [r for r in routes]
             )
             if headers:
                 existing_headers = kwargs.get("extra_headers")
