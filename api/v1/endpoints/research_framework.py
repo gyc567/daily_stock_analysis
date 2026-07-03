@@ -22,7 +22,10 @@ from api.v1.schemas.research_framework import (
 )
 from src.repositories import PositionLedgerRepo
 from src.storage import DatabaseManager
-from src.scoring.bayesian import validate_position_with_concentration
+# TODO: src.scoring module missing from repo, temporarily disabled
+# from src.scoring.bayesian import validate_position_with_concentration
+def validate_position_with_concentration(*args, **kwargs):
+    raise NotImplementedError("src.scoring module missing")
 
 router = APIRouter()
 
