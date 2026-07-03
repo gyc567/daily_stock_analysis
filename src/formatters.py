@@ -14,28 +14,30 @@ import markdown2
 
 TRUNCATION_SUFFIX = "\n\n...(本段内容过长已截断)"
 PAGE_MARKER_PREFIX = f"\n\n📄"
-PAGE_MARKER_SAFE_BYTES = 16 # "\n\n📄 9999/9999"
-PAGE_MARKER_SAFE_LEN = 13   # "\n\n📄 9999/9999"
+PAGE_MARKER_SAFE_BYTES = 16  # "\n\n📄 9999/9999"
+PAGE_MARKER_SAFE_LEN = 13  # "\n\n📄 9999/9999"
 MIN_MAX_WORDS = 10
 MIN_MAX_BYTES = 40
-FENCED_CODE_BLOCK_RE = re.compile(r"(^```[^\n]*\n.*?^```[ \t]*$)", re.MULTILINE | re.DOTALL)
+FENCED_CODE_BLOCK_RE = re.compile(
+    r"(^```[^\n]*\n.*?^```[ \t]*$)", re.MULTILINE | re.DOTALL
+)
 FENCED_CODE_BLOCK_PLACEHOLDER = "@@DSA_FENCED_CODE_BLOCK_{}@@"
 
 # Unicode code point ranges for special characters.
 _SPECIAL_CHAR_RANGE = (0x10000, 0xFFFFF)
-_SPECIAL_CHAR_REGEX = re.compile(r'[\U00010000-\U000FFFFF]')
+_SPECIAL_CHAR_REGEX = re.compile(r"[\U00010000-\U000FFFFF]")
 
 
 def _page_marker(i: int, total: int) -> str:
-    return f"{PAGE_MARKER_PREFIX} {i+1}/{total}"
+    return f"{PAGE_MARKER_PREFIX} {i + 1}/{total}"
 
 
 def _is_special_char(c: str) -> bool:
     """判断字符是否为特殊字符
-    
+
     Args:
         c: 字符
-        
+
     Returns:
         True 如果字符为特殊字符，False 否则
     """
@@ -48,7 +50,7 @@ def _is_special_char(c: str) -> bool:
 def _count_special_chars(s: str) -> int:
     """
     计算字符串中的特殊字符数量
-    
+
     Args:
         s: 字符串
     """
@@ -60,11 +62,11 @@ def _count_special_chars(s: str) -> int:
 def _effective_len(s: str, special_char_len: int = 2) -> int:
     """
     计算字符串的有效长度
-    
+
     Args:
         s: 字符串
         special_char_len: 每个特殊字符的长度，默认为 2
-        
+
     Returns:
         s 的有效长度
     """
@@ -73,28 +75,30 @@ def _effective_len(s: str, special_char_len: int = 2) -> int:
     return n
 
 
-def _slice_at_effective_len(s: str, effective_len: int, special_char_len: int = 2) -> tuple[str, str]:
+def _slice_at_effective_len(
+    s: str, effective_len: int, special_char_len: int = 2
+) -> tuple[str, str]:
     """
     按有效长度分割字符串
-    
+
     Args:
         s: 字符串
         effective_len: 有效长度
         special_char_len: 每个特殊字符的长度，默认为 2
-        
+
     Returns:
         分割后的前、后部分字符串
     """
     if _effective_len(s, special_char_len) <= effective_len:
         return s, ""
-    
+
     s_ = s[:effective_len]
     n_special_chars = _count_special_chars(s_)
     residual_lens = n_special_chars * (special_char_len - 1) + len(s_) - effective_len
     while residual_lens > 0:
         residual_lens -= special_char_len if _is_special_char(s_[-1]) else 1
         s_ = s_[:-1]
-    return s_, s[len(s_):]
+    return s_, s[len(s_) :]
 
 
 def markdown_to_html_document(markdown_text: str) -> str:
@@ -229,41 +233,41 @@ def markdown_to_html_document(markdown_text: str) -> str:
 def markdown_to_plain_text(markdown_text: str) -> str:
     """
     将 Markdown 转换为纯文本
-    
+
     移除 Markdown 格式标记，保留可读性
     """
     text = markdown_text
-    
+
     # 移除标题标记 # ## ###
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-    
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+
     # 移除加粗 **text** -> text
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+
     # 移除斜体 *text* -> text
-    text = re.sub(r'\*(.+?)\*', r'\1', text)
-    
+    text = re.sub(r"\*(.+?)\*", r"\1", text)
+
     # 移除引用 > text -> text
-    text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
-    
+    text = re.sub(r"^>\s+", "", text, flags=re.MULTILINE)
+
     # 移除列表标记 - item -> item
-    text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
-    
+    text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
+
     # 移除分隔线 ---
-    text = re.sub(r'^---+$', '────────', text, flags=re.MULTILINE)
-    
+    text = re.sub(r"^---+$", "────────", text, flags=re.MULTILINE)
+
     # 移除表格语法 |---|---|
-    text = re.sub(r'\|[-:]+\|[-:|\s]+\|', '', text)
-    text = re.sub(r'^\|(.+)\|$', r'\1', text, flags=re.MULTILINE)
-    
+    text = re.sub(r"\|[-:]+\|[-:|\s]+\|", "", text)
+    text = re.sub(r"^\|(.+)\|$", r"\1", text, flags=re.MULTILINE)
+
     # 清理多余空行
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
     return text.strip()
 
 
 def _bytes(s: str) -> int:
-    return len(s.encode('utf-8'))
+    return len(s.encode("utf-8"))
 
 
 def utf8_len(s: str) -> int:
@@ -312,7 +316,7 @@ def _has_unclosed_inline_code(text: str) -> bool:
         if ch == "`" and not escaped:
             # Triple backticks are handled as fenced code by the caller; skip
             # them here so fence delimiters do not look like inline spans.
-            if text[i:i + 3] == "```":
+            if text[i : i + 3] == "```":
                 i += 3
                 escaped = False
                 continue
@@ -370,19 +374,32 @@ def chunk_markdown_preserving_blocks(
 
     while remaining:
         prefix = f"```{carry_lang}\n" if carry_lang is not None else ""
-        headroom = max_units - marker_reserve - indicator_reserve - measure(prefix) - measure(fence_close)
+        headroom = (
+            max_units
+            - marker_reserve
+            - indicator_reserve
+            - measure(prefix)
+            - measure(fence_close)
+        )
         if headroom < MIN_MAX_WORDS:
-            headroom = max(MIN_MAX_WORDS, max_units - marker_reserve - indicator_reserve - measure(prefix))
+            headroom = max(
+                MIN_MAX_WORDS,
+                max_units - marker_reserve - indicator_reserve - measure(prefix),
+            )
         if headroom <= 0:
             raise ValueError("max_units is too small for markdown-preserving chunking")
 
-        if measure(prefix) + measure(remaining) <= max_units - marker_reserve - indicator_reserve:
+        if (
+            measure(prefix) + measure(remaining)
+            <= max_units - marker_reserve - indicator_reserve
+        ):
             chunks.append(prefix + remaining)
             break
 
         cp_limit = (
             _custom_unit_to_index(remaining, headroom, measure)
-            if measure is not len else min(headroom, len(remaining))
+            if measure is not len
+            else min(headroom, len(remaining))
         )
         region = remaining[:cp_limit]
         split_at = region.rfind("\n\n")
@@ -405,7 +422,10 @@ def chunk_markdown_preserving_blocks(
             unsafe_start = min(unsafe_start, link_start)
 
         if unsafe_start < len(candidate):
-            safe_split = max(candidate.rfind(" ", 0, unsafe_start), candidate.rfind("\n", 0, unsafe_start))
+            safe_split = max(
+                candidate.rfind(" ", 0, unsafe_start),
+                candidate.rfind("\n", 0, unsafe_start),
+            )
             if safe_split > 0:
                 split_at = safe_split
 
@@ -454,18 +474,18 @@ def chunk_markdown_preserving_blocks(
 
 
 def _is_markdown_table_separator(row: str) -> bool:
-    return bool(re.match(r'^\s*\|?\s*[:-]+\s*(\|\s*[:-]+\s*)+\|?\s*$', row))
+    return bool(re.match(r"^\s*\|?\s*[:-]+\s*(\|\s*[:-]+\s*)+\|?\s*$", row))
 
 
 def _parse_markdown_table_row(row: str) -> List[str]:
-    cells = [c.strip() for c in row.strip().strip('|').split('|')]
+    cells = [c.strip() for c in row.strip().strip("|").split("|")]
     return [c for c in cells if c]
 
 
 def _strip_inline_markdown(text: str) -> str:
     text = text.strip()
-    text = re.sub(r'^\*\*(.+)\*\*$', r'\1', text)
-    text = re.sub(r'^\*(.+)\*$', r'\1', text)
+    text = re.sub(r"^\*\*(.+)\*\*$", r"\1", text)
+    text = re.sub(r"^\*(.+)\*$", r"\1", text)
     text = text.replace("**", "")
     return text.strip()
 
@@ -482,7 +502,9 @@ def _format_two_column_table_row(header: List[str], row: List[str]) -> str:
     return f"{key}：{value}"
 
 
-def _flush_table_as_key_value_rows(buffer: List[str], output: List[str], *, bullet: str) -> None:
+def _flush_table_as_key_value_rows(
+    buffer: List[str], output: List[str], *, bullet: str
+) -> None:
     if not buffer:
         return
 
@@ -506,7 +528,11 @@ def _flush_table_as_key_value_rows(buffer: List[str], output: List[str], *, bull
 
         pairs = []
         for idx, cell in enumerate(row):
-            key = _strip_inline_markdown(header[idx]) if idx < len(header) else f"列{idx + 1}"
+            key = (
+                _strip_inline_markdown(header[idx])
+                if idx < len(header)
+                else f"列{idx + 1}"
+            )
             pairs.append(f"{key}：{_strip_inline_markdown(cell)}")
         output.append(f"{bullet} {' | '.join(pairs)}")
 
@@ -528,7 +554,9 @@ def _restore_fenced_code_blocks(content: str, blocks: List[str]) -> str:
     return restored
 
 
-def _transform_outside_fenced_code_blocks(content: str, transform: Callable[[str], str]) -> str:
+def _transform_outside_fenced_code_blocks(
+    content: str, transform: Callable[[str], str]
+) -> str:
     protected, blocks = _protect_fenced_code_blocks(content)
     return _restore_fenced_code_blocks(transform(protected), blocks)
 
@@ -541,7 +569,7 @@ def _markdown_tables_to_key_value_rows_unprotected(content: str, *, bullet: str)
 
     for raw_line in content.splitlines():
         line = raw_line.rstrip()
-        if line.strip().startswith('|'):
+        if line.strip().startswith("|"):
             table_buffer.append(line)
             continue
 
@@ -562,7 +590,9 @@ def markdown_tables_to_key_value_rows(content: str, *, bullet: str = "•") -> s
 
     return _transform_outside_fenced_code_blocks(
         content,
-        lambda text: _markdown_tables_to_key_value_rows_unprotected(text, bullet=bullet),
+        lambda text: _markdown_tables_to_key_value_rows_unprotected(
+            text, bullet=bullet
+        ),
     ).strip()
 
 
@@ -571,14 +601,14 @@ def _chunk_by_max_bytes(content: str, max_bytes: int) -> List[str]:
         return [content]
     if max_bytes < MIN_MAX_BYTES:
         raise ValueError(f"max_bytes={max_bytes} < {MIN_MAX_BYTES}, 可能陷入无限递归。")
-    
+
     sections: List[str] = []
     suffix = TRUNCATION_SUFFIX
     effective_max_bytes = max_bytes - _bytes(suffix)
     if effective_max_bytes <= 0:
         effective_max_bytes = max_bytes
         suffix = ""
-        
+
     while True:
         chunk, content = slice_at_max_bytes(content, effective_max_bytes)
         if content.strip() != "":
@@ -590,31 +620,36 @@ def _chunk_by_max_bytes(content: str, max_bytes: int) -> List[str]:
     return sections
 
 
-def chunk_content_by_max_bytes(content: str, max_bytes: int, add_page_marker: bool = False) -> List[str]:
+def chunk_content_by_max_bytes(
+    content: str, max_bytes: int, add_page_marker: bool = False
+) -> List[str]:
     """
     按字节数智能分割消息内容
-    
+
     Args:
         content: 完整消息内容
         max_bytes: 单条消息最大字节数
         add_page_marker: 是否添加分页标记
-        
+
     Returns:
         分割后的区块列表
     """
+
     def _chunk(content: str, max_bytes: int) -> List[str]:
         # 优先按分隔线/标题分割，保证分页自然
         if max_bytes < MIN_MAX_BYTES:
-            raise ValueError(f"max_bytes={max_bytes} < {MIN_MAX_BYTES}, 可能陷入无限递归。")
-        
+            raise ValueError(
+                f"max_bytes={max_bytes} < {MIN_MAX_BYTES}, 可能陷入无限递归。"
+            )
+
         if _bytes(content) <= max_bytes:
             return [content]
-        
+
         sections, separator = _chunk_by_separators(content)
         if separator == "" and len(sections) == 1:
             # 无法智能分割，则强制按字数分割
             return _chunk_by_max_bytes(content, max_bytes)
-        
+
         chunks: List[str] = []
         current_chunk: List[str] = []
         current_bytes = 0
@@ -624,7 +659,7 @@ def chunk_content_by_max_bytes(content: str, max_bytes: int, add_page_marker: bo
         for section in sections:
             section += separator
             section_bytes = _bytes(section)
-            
+
             # 如果单个 section 就超长，需要强制截断
             if section_bytes > effective_max_bytes:
                 # 先保存当前积累的内容
@@ -634,9 +669,7 @@ def chunk_content_by_max_bytes(content: str, max_bytes: int, add_page_marker: bo
                     current_bytes = 0
 
                 # 强制按字节截断，避免整段被截断丢失
-                section_chunks = _chunk(
-                    section[:-separator_bytes], effective_max_bytes
-                )
+                section_chunks = _chunk(section[:-separator_bytes], effective_max_bytes)
                 section_chunks[-1] = section_chunks[-1] + separator
                 chunks.extend(section_chunks)
                 continue
@@ -651,23 +684,24 @@ def chunk_content_by_max_bytes(content: str, max_bytes: int, add_page_marker: bo
             else:
                 current_chunk.append(section)
                 current_bytes += section_bytes
-                
+
         # 添加最后一块
         if current_chunk:
             chunks.append("".join(current_chunk))
-            
+
         # 移除最后一个块的分割符
-        if (chunks and 
-            len(chunks[-1]) > separator_bytes and 
-            chunks[-1][-separator_bytes:] == separator
+        if (
+            chunks
+            and len(chunks[-1]) > separator_bytes
+            and chunks[-1][-separator_bytes:] == separator
         ):
             chunks[-1] = chunks[-1][:-separator_bytes]
-        
+
         return chunks
-    
+
     if add_page_marker:
         max_bytes = max_bytes - PAGE_MARKER_SAFE_BYTES
-    
+
     chunks = _chunk(content, max_bytes)
     if add_page_marker:
         total_chunks = len(chunks)
@@ -692,23 +726,23 @@ def slice_at_max_bytes(text: str, max_bytes: int) -> tuple[str, str]:
         return text, ""
 
     # 从最大字节数开始向前查找，找到完整的 UTF-8 字符边界
-    truncated = encoded[:max_bytes]
-    while truncated and (truncated[-1] & 0xC0) == 0x80:
-        truncated = truncated[:-1]
+    truncated_bytes = encoded[:max_bytes]
+    while truncated_bytes and (truncated_bytes[-1] & 0xC0) == 0x80:
+        truncated_bytes = truncated_bytes[:-1]
 
-    truncated = truncated.decode('utf-8', errors='ignore')
-    return truncated, text[len(truncated):]
+    truncated = truncated_bytes.decode("utf-8", errors="ignore")
+    return truncated, text[len(truncated) :]
 
 
 def _format_feishu_markdown_unprotected(content: str) -> str:
-    lines = []
+    lines: List[str] = []
     table_buffer: List[str] = []
 
     for raw_line in content.splitlines():
         line = raw_line.rstrip()
 
         # 处理表格行
-        if line.strip().startswith('|'):
+        if line.strip().startswith("|"):
             table_buffer.append(line)
             continue
 
@@ -718,18 +752,18 @@ def _format_feishu_markdown_unprotected(content: str) -> str:
             table_buffer = []
 
         # 转换标题（# ## ### 等）
-        if re.match(r'^#{1,6}\s+', line):
-            title = re.sub(r'^#{1,6}\s+', '', line).strip()
+        if re.match(r"^#{1,6}\s+", line):
+            title = re.sub(r"^#{1,6}\s+", "", line).strip()
             line = f"**{title}**" if title else ""
         # 转换引用块
-        elif line.startswith('> '):
+        elif line.startswith("> "):
             quote = line[2:].strip()
             line = quote
         # 转换分隔线
-        elif line.strip() == '---':
-            line = '────────'
+        elif line.strip() == "---":
+            line = "────────"
         # 转换列表项
-        elif line.startswith('- '):
+        elif line.startswith("- "):
             line = f"• {line[2:].strip()}"
 
         lines.append(line)
@@ -765,6 +799,7 @@ def format_feishu_markdown(content: str) -> str:
         💬 引用
         • 列1：值1 | 列2：值2
     """
+
     def _flush_table_rows(buffer: List[str], output: List[str]) -> None:
         """将表格缓冲区中的行转换为飞书格式"""
         if not buffer:
@@ -772,13 +807,13 @@ def format_feishu_markdown(content: str) -> str:
 
         def _parse_row(row: str) -> List[str]:
             """解析表格行，提取单元格"""
-            cells = [c.strip() for c in row.strip().strip('|').split('|')]
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
             return [c for c in cells if c]
 
         rows = []
         for raw in buffer:
             # 跳过分隔行（如 |---|---|）
-            if re.match(r'^\s*\|?\s*[:-]+\s*(\|\s*[:-]+\s*)+\|?\s*$', raw):
+            if re.match(r"^\s*\|?\s*[:-]+\s*(\|\s*[:-]+\s*)+\|?\s*$", raw):
                 continue
             parsed = _parse_row(raw)
             if parsed:
@@ -796,14 +831,14 @@ def format_feishu_markdown(content: str) -> str:
                 pairs.append(f"{key}：{cell}")
             output.append(f"• {' | '.join(pairs)}")
 
-    lines = []
+    lines: List[str] = []
     table_buffer: List[str] = []
 
     for raw_line in content.splitlines():
         line = raw_line.rstrip()
 
         # 处理表格行
-        if line.strip().startswith('|'):
+        if line.strip().startswith("|"):
             table_buffer.append(line)
             continue
 
@@ -813,18 +848,18 @@ def format_feishu_markdown(content: str) -> str:
             table_buffer = []
 
         # 转换标题（# ## ### 等）
-        if re.match(r'^#{1,6}\s+', line):
-            title = re.sub(r'^#{1,6}\s+', '', line).strip()
+        if re.match(r"^#{1,6}\s+", line):
+            title = re.sub(r"^#{1,6}\s+", "", line).strip()
             line = f"**{title}**" if title else ""
         # 转换引用块
-        elif line.startswith('> '):
+        elif line.startswith("> "):
             quote = line[2:].strip()
             line = f"💬 {quote}" if quote else ""
         # 转换分隔线
-        elif line.strip() == '---':
-            line = '────────'
+        elif line.strip() == "---":
+            line = "────────"
         # 转换列表项
-        elif line.startswith('- '):
+        elif line.startswith("- "):
             line = f"• {line[2:].strip()}"
 
         lines.append(line)
@@ -840,9 +875,9 @@ def _format_telegram_markdown_unprotected(content: str) -> str:
     """Convert common report Markdown to Telegram legacy Markdown."""
 
     result = _markdown_tables_to_key_value_rows_unprotected(content, bullet="-")
-    result = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', result, flags=re.MULTILINE)
-    result = re.sub(r'\*\*(.+?)\*\*', r'*\1*', result)
-    result = re.sub(r'^\s*---+\s*$', '────────', result, flags=re.MULTILINE)
+    result = re.sub(r"^#{1,6}\s+(.+)$", r"*\1*", result, flags=re.MULTILINE)
+    result = re.sub(r"\*\*(.+?)\*\*", r"*\1*", result)
+    result = re.sub(r"^\s*---+\s*$", "────────", result, flags=re.MULTILINE)
     result = _escape_telegram_non_link_markdown_chars(result)
     return result.strip()
 
@@ -856,7 +891,7 @@ def _escape_telegram_non_link_markdown_chars(content: str) -> str:
         links.append(match.group(0))
         return f"@@DSA_TELEGRAM_LINK_{len(links) - 1}@@"
 
-    result = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _save_link, content)
+    result = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _save_link, content)
     for char in ("[", "]", "(", ")"):
         result = result.replace(char, f"\\{char}")
 
@@ -878,7 +913,7 @@ def format_wechat_markdown(content: str) -> str:
     """Keep WeChat Markdown style while making pipe tables mobile-readable."""
 
     result = markdown_tables_to_key_value_rows(content, bullet="•")
-    result = re.sub(r'^\s*---+\s*$', '────────', result, flags=re.MULTILINE)
+    result = re.sub(r"^\s*---+\s*$", "────────", result, flags=re.MULTILINE)
     return result.strip()
 
 
@@ -886,11 +921,11 @@ def _format_slack_mrkdwn_unprotected(content: str) -> str:
     """Convert common report Markdown to Slack mrkdwn."""
 
     result = _markdown_tables_to_key_value_rows_unprotected(content, bullet="•")
-    result = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', r'<\2|\1>', result)
-    result = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<\2|\1>', result)
-    result = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', result, flags=re.MULTILINE)
-    result = re.sub(r'\*\*(.+?)\*\*', r'*\1*', result)
-    result = re.sub(r'^\s*---+\s*$', '────────', result, flags=re.MULTILINE)
+    result = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r"<\2|\1>", result)
+    result = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<\2|\1>", result)
+    result = re.sub(r"^#{1,6}\s+(.+)$", r"*\1*", result, flags=re.MULTILINE)
+    result = re.sub(r"\*\*(.+?)\*\*", r"*\1*", result)
+    result = re.sub(r"^\s*---+\s*$", "────────", result, flags=re.MULTILINE)
     return result.strip()
 
 
@@ -906,10 +941,10 @@ def format_slack_mrkdwn(content: str) -> str:
 def _chunk_by_separators(content: str) -> tuple[list[str], str]:
     """
     通过分割线等特殊字符将消息内容分割为多个区块
-    
+
     Args:
         content: 完整消息内容
-        
+
     Returns:
         sections: 分割后的区块列表
         separator: 区块之间的分隔符，None 表示无法分割
@@ -948,24 +983,24 @@ def _chunk_by_separators(content: str) -> tuple[list[str], str]:
     return sections, separator
 
 
-def _chunk_by_max_words(content: str, max_words: int, special_char_len: int = 2) -> list[str]:
+def _chunk_by_max_words(
+    content: str, max_words: int, special_char_len: int = 2
+) -> list[str]:
     """
     按字数分割消息内容
-    
+
     Args:
         content: 完整消息内容
         max_words: 单条消息最大字数
         special_char_len: 每个特殊字符的长度，默认为 2
-        
+
     Returns:
         分割后的区块列表
     """
     if _effective_len(content, special_char_len) <= max_words:
         return [content]
     if max_words < MIN_MAX_WORDS:
-        raise ValueError(
-            f"max_words={max_words} < {MIN_MAX_WORDS}, 可能陷入无限递归。"
-        )
+        raise ValueError(f"max_words={max_words} < {MIN_MAX_WORDS}, 可能陷入无限递归。")
 
     sections = []
     suffix = TRUNCATION_SUFFIX
@@ -975,7 +1010,9 @@ def _chunk_by_max_words(content: str, max_words: int, special_char_len: int = 2)
         suffix = ""
 
     while True:
-        chunk, content = _slice_at_effective_len(content, effective_max_words, special_char_len)
+        chunk, content = _slice_at_effective_len(
+            content, effective_max_words, special_char_len
+        )
         if content.strip() != "":
             sections.append(chunk + suffix)
         else:
@@ -986,30 +1023,33 @@ def _chunk_by_max_words(content: str, max_words: int, special_char_len: int = 2)
 
 
 def chunk_content_by_max_words(
-    content: str, 
-    max_words: int, 
+    content: str,
+    max_words: int,
     special_char_len: int = 2,
-    add_page_marker: bool = False
-    ) -> list[str]:
+    add_page_marker: bool = False,
+) -> list[str]:
     """
     按字数智能分割消息内容
-    
+
     Args:
         content: 完整消息内容
         max_words: 单条消息最大字数
         special_char_len: 每个特殊字符的长度，默认为 2
         add_page_marker: 是否添加分页标记
-        
+
     Returns:
         分割后的区块列表
     """
+
     def _chunk(content: str, max_words: int, special_char_len: int = 2) -> list[str]:
         if max_words < MIN_MAX_WORDS:
             # Safe guard，避免无限递归
             # 理论上，max_words在每次递归中可以减小到无限小，但实际中不太可能发生，
             # 除非每次_chunk_by_separators都能成功返回分隔符，且max_words初始值太小。
-            raise ValueError(f"max_words={max_words} < {MIN_MAX_WORDS}, 可能陷入无限递归。")
-        
+            raise ValueError(
+                f"max_words={max_words} < {MIN_MAX_WORDS}, 可能陷入无限递归。"
+            )
+
         if _effective_len(content, special_char_len) <= max_words:
             return [content]
 
@@ -1018,11 +1058,11 @@ def chunk_content_by_max_words(
             # 无法智能分割，则强制按字数分割
             return _chunk_by_max_words(content, max_words, special_char_len)
 
-        chunks = []
-        current_chunk = []
+        chunks: List[str] = []
+        current_chunk: List[str] = []
         current_word_len = 0
         separator_len = len(separator) if separator else 0
-        effective_max_words = max_words - separator_len # 预留分割符长度，避免边界超限
+        effective_max_words = max_words - separator_len  # 预留分割符长度，避免边界超限
 
         for section in sections:
             section += separator
@@ -1037,7 +1077,7 @@ def chunk_content_by_max_words(
                 # 强制截断这个超长 section
                 section_chunks = _chunk(
                     section[:-separator_len], effective_max_words, special_char_len
-                    )
+                )
                 section_chunks[-1] = section_chunks[-1] + separator
                 chunks.extend(section_chunks)
                 continue
@@ -1058,17 +1098,17 @@ def chunk_content_by_max_words(
             chunks.append("".join(current_chunk))
 
         # 移除最后一个块的分割符
-        if (chunks and
-            len(chunks[-1]) > separator_len and
-            chunks[-1][-separator_len:] == separator
+        if (
+            chunks
+            and len(chunks[-1]) > separator_len
+            and chunks[-1][-separator_len:] == separator
         ):
             chunks[-1] = chunks[-1][:-separator_len]
         return chunks
-    
-    
+
     if add_page_marker:
         max_words = max_words - PAGE_MARKER_SAFE_LEN
-    
+
     chunks = _chunk(content, max_words, special_char_len)
     if add_page_marker:
         total_chunks = len(chunks)
