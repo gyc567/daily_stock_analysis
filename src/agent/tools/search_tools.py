@@ -381,68 +381,6 @@ def _handle_search_market_discussion(
             "error": f"未知 source={source}，仅支持 xueqiu_hot / x_global",
         }
 
-    return {
-        "status": "ok" if results else "empty",
-        "source_type": used_source_type,
-        "source_name": used_source_name,
-        "count": len(results),
-        "results": results,
-    }
-
-    service = AgentReachService()
-    if not service.is_available():
-        reason = service.unavailable_reason() or "agent_reach 不可用"
-        logger.info("search_market_discussion 跳过: %s", reason)
-        return {
-            "status": "unavailable",
-            "source_type": "community_cn",
-            "source_name": source,
-            "results": [],
-            "error": reason,
-        }
-
-    results: List[Dict[str, Any]] = []
-    used_source_name = source
-    used_source_type = "community_cn"
-
-    if source == "xueqiu_hot":
-        try:
-            items = service.get_xueqiu_hot_posts(limit=limit) or []
-            results = _normalize_discussion_items(
-                items,
-                source_type="community_cn",
-                source_name="雪球热帖",
-                stock_code=stock_code,
-            )
-            used_source_name = "雪球热帖"
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("search_market_discussion 雪球热帖失败: %s", exc)
-            return {
-                "status": "unavailable",
-                "source_type": "community_cn",
-                "source_name": "雪球热帖",
-                "results": [],
-                "error": f"雪球热帖失败: {exc}",
-            }
-    elif source == "x_global":
-        # 海外社区占位：当前渠道未接入时静默 unavailable，不抛异常
-        # （避免 LLM 误把空 results 当作"无讨论"）
-        return {
-            "status": "unavailable",
-            "source_type": "community_global",
-            "source_name": "x_global",
-            "results": [],
-            "error": "海外社区渠道暂未接入",
-        }
-    else:
-        return {
-            "status": "unavailable",
-            "source_type": "community_cn",
-            "source_name": source,
-            "results": [],
-            "error": f"未知 source={source}，仅支持 xueqiu_hot / x_global",
-        }
-
     # 4) P3 持久化（best-effort）：社区源按 source_type=community_cn/community_global
     # + reliability_hint=low 写入 news_intel
     if results and stock_code:
