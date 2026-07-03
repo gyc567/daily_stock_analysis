@@ -35,11 +35,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 FEISHU_SDK_AVAILABLE = False
-_lark: Any = None  # type: ignore[assignment]
+_lark: Any
 FEISHU_DOMAIN = "feishu"
 LARK_DOMAIN = "lark"
 try:
-    import lark_oapi as _lark
+    import lark_oapi as _lark  # type: ignore[assignment,no-redef]
     from lark_oapi.api.im.v1 import (
         CreateMessageRequest,
         CreateMessageRequestBody,
@@ -114,7 +114,7 @@ class FeishuSender:
                 getattr(config, "feishu_domain", None)
                 or os.getenv("FEISHU_DOMAIN", "feishu")
             )
-            .strip()
+            .strip()  # type: ignore[union-attr]
             .lower()
         )
         if raw_domain not in ("feishu", "lark"):
