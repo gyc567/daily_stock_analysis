@@ -18,7 +18,7 @@ import logging
 import re
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Optional, Generator, Any
+from typing import Optional, Generator, Any, Dict
 
 import pandas as pd
 from tenacity import (
@@ -78,7 +78,8 @@ class BaostockFetcher(BaseFetcher):
 
     def __init__(self):
         """初始化 BaostockFetcher"""
-        self._bs_module = None
+        self._bs_module: Optional[Any] = None
+        self._stock_name_cache: Dict[str, str] = {}
 
     def _get_baostock(self):
         """

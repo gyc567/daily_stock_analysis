@@ -1728,7 +1728,7 @@ class MiniMaxSearchProvider(BaseSearchProvider):
             dt = dateutil_parser.parse(date_str, fuzzy=True)
             from datetime import datetime as _dt_cls, timedelta, timezone
 
-            dt_typed: _dt_cls = cast(_dt_cls, dt)
+            dt_typed: _dt_cls = dt
             now = _dt_cls.now(timezone.utc) if dt_typed.tzinfo else _dt_cls.now()
             return (now - dt_typed) <= timedelta(days=days + 1)  # +1 buffer
         except Exception:

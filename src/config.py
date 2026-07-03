@@ -15,7 +15,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 from urllib.parse import unquote, urlparse
 from dotenv import load_dotenv, dotenv_values
 from dataclasses import dataclass, field
@@ -1773,15 +1773,17 @@ class Config:
                 field_name="AGENT_DEEP_RESEARCH_TIMEOUT",
                 minimum=30,
             ),
-            agent_memory_enabled=os.getenv("AGENT_MEMORY_ENABLED", "false").lower()
+            agent_memory_enabled=cast(
+                str, os.getenv("AGENT_MEMORY_ENABLED", "false")
+            ).lower()
             == "true",
             agent_skill_autoweight=(
-                os.getenv("AGENT_SKILL_AUTOWEIGHT")
+                cast(str, os.getenv("AGENT_SKILL_AUTOWEIGHT"))
                 or os.getenv("AGENT_STRATEGY_AUTOWEIGHT", "true")
             ).lower()
             == "true",
             agent_skill_routing=(
-                os.getenv("AGENT_SKILL_ROUTING")
+                cast(str, os.getenv("AGENT_SKILL_ROUTING"))
                 or os.getenv("AGENT_STRATEGY_ROUTING", "auto")
             ).lower(),
             agent_context_compression_enabled=parse_env_bool(
@@ -2008,11 +2010,14 @@ class Config:
             config_validate_mode=os.getenv("CONFIG_VALIDATE_MODE", "warn").lower(),
             http_proxy=os.getenv("HTTP_PROXY"),
             https_proxy=os.getenv("HTTPS_PROXY"),
-            schedule_enabled=(cls._resolve_env_value(
-                "SCHEDULE_ENABLED",
-                default="false",
-                prefer_env_file=True,
-            ) or "false").lower()
+            schedule_enabled=(
+                cls._resolve_env_value(
+                    "SCHEDULE_ENABLED",
+                    default="false",
+                    prefer_env_file=True,
+                )
+                or "false"
+            ).lower()
             == "true",
             schedule_time=(schedule_time_value or "18:00").strip() or "18:00",
             schedule_run_immediately=schedule_run_immediately,
@@ -2039,14 +2044,16 @@ class Config:
                     "WATCHLIST_ANALYSIS_TIME",
                     default="",
                     prefer_env_file=True,
-                ) or ""
+                )
+                or ""
             ).strip(),
             market_review_time=(
                 cls._resolve_env_value(
                     "MARKET_REVIEW_TIME",
                     default="",
                     prefer_env_file=True,
-                ) or ""
+                )
+                or ""
             ).strip(),
             webui_enabled=os.getenv("WEBUI_ENABLED", "false").lower() == "true",
             webui_host=os.getenv("WEBUI_HOST", "127.0.0.1"),
