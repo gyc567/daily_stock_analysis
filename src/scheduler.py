@@ -35,7 +35,7 @@ class GracefulShutdown:
     """
 
     def __init__(self):
-        self.shutdown_requested = False
+        self.shutdown_requested: bool = False
         self._lock = threading.Lock()
 
         # 注册信号处理器

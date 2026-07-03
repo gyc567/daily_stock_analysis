@@ -153,7 +153,7 @@ class SupplyChainReportService:
                 normalize_stock_code = None  # type: ignore
             normalized = (
                 normalize_stock_code(str(raw_code).strip())
-                if normalize_stock_code
+                if normalize_stock_code is not None
                 else str(raw_code).strip()
             )
             if normalized and normalized.isdigit() and len(normalized) == 6:

@@ -20,7 +20,11 @@ import logging
 import re
 import time
 import contextvars
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+    as_completed,
+)
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -57,6 +61,7 @@ _THINKING_TOOL_LABELS: Dict[str, str] = {
 # RunLoopResult — the output of one run_agent_loop invocation
 # ============================================================
 
+
 @dataclass
 class RunLoopResult:
     """Output produced by :func:`run_agent_loop`."""
@@ -81,6 +86,7 @@ class RunLoopResult:
 # ============================================================
 # Helpers
 # ============================================================
+
 
 def serialize_tool_result(result: Any) -> str:
     """Serialize a tool result to a JSON string consumable by an LLM."""
@@ -145,7 +151,9 @@ def _build_tool_cache_key(tool_name: str, arguments: Dict[str, Any]) -> Optional
             normalized_args[key] = value
 
     try:
-        payload = json.dumps(normalized_args, ensure_ascii=False, sort_keys=True, default=str)
+        payload = json.dumps(
+            normalized_args, ensure_ascii=False, sort_keys=True, default=str
+        )
     except (TypeError, ValueError):
         return None
     return f"{tool_name}:{payload}"
@@ -177,7 +185,12 @@ def _normalize_guard_stock_code(value: Any) -> str:
     return normalized if isinstance(normalized, str) else str(normalized)
 
 
-def _guard_tool_stock_scope(tool_registry: ToolRegistry, tool_name: str, arguments: Dict[str, Any], stock_scope: Optional[StockScope]) -> Optional[Dict[str, Any]]:
+def _guard_tool_stock_scope(
+    tool_registry: ToolRegistry,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    stock_scope: Optional[StockScope],
+) -> Optional[Dict[str, Any]]:
     if stock_scope is None or not isinstance(arguments, dict):
         return None
     if not _is_stock_scoped_tool(tool_registry, tool_name):
@@ -278,8 +291,8 @@ def try_parse_json(text: str) -> Optional[Dict[str, Any]]:
         candidates.append(cleaned)
 
     if cleaned.startswith("```"):
-        unfenced = re.sub(r'^```(?:json)?\s*', '', cleaned)
-        unfenced = re.sub(r'\s*```$', '', unfenced)
+        unfenced = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        unfenced = re.sub(r"\s*```$", "", unfenced)
         if unfenced:
             candidates.append(unfenced.strip())
 
@@ -292,7 +305,7 @@ def try_parse_json(text: str) -> Optional[Dict[str, Any]]:
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:
-        snippet = text[start:end + 1].strip()
+        snippet = text[start : end + 1].strip()
         if snippet:
             candidates.append(snippet)
 
@@ -314,7 +327,7 @@ def try_parse_json(text: str) -> Optional[Dict[str, Any]]:
     try:
         from json_repair import repair_json
     except Exception:
-        repair_json = None
+        repair_json = None  # type: ignore[assignment]
 
     if repair_json is not None:
         for candidate in unique_candidates:
@@ -329,7 +342,9 @@ def try_parse_json(text: str) -> Optional[Dict[str, Any]]:
 _try_parse_json = try_parse_json
 
 
-def _try_repair_json(text: str, repair_fn: Callable[..., Any]) -> Optional[Dict[str, Any]]:
+def _try_repair_json(
+    text: str, repair_fn: Callable[..., Any]
+) -> Optional[Dict[str, Any]]:
     try:
         repaired = repair_fn(text)
         obj = json.loads(repaired)
@@ -406,6 +421,7 @@ def _build_budget_guard_result(
 # Core loop
 # ============================================================
 
+
 def run_agent_loop(
     *,
     messages: List[Dict[str, Any]],
@@ -457,7 +473,9 @@ def run_agent_loop(
     _MIN_STEP_BUDGET_S = 8.0
 
     for step in range(max_steps):
-        remaining_timeout = _remaining_timeout_seconds(start_time, max_wall_clock_seconds)
+        remaining_timeout = _remaining_timeout_seconds(
+            start_time, max_wall_clock_seconds
+        )
         timeout_exhausted = remaining_timeout is not None and remaining_timeout <= 0
         budget_guard_triggered = (
             not timeout_exhausted
@@ -481,7 +499,9 @@ def run_agent_loop(
                     provider_used=provider_used,
                     models_used=models_used,
                     messages=messages,
-                    remaining_timeout_s=(remaining_timeout if remaining_timeout is not None else 0.0),
+                    remaining_timeout_s=(
+                        remaining_timeout if remaining_timeout is not None else 0.0
+                    ),
                     min_step_budget_s=_MIN_STEP_BUDGET_S,
                 )
 
@@ -489,7 +509,9 @@ def run_agent_loop(
                 logger.warning("Agent timed out before step %d", step + 1)
             return _build_timeout_result(
                 start_time=start_time,
-                max_wall_clock_seconds=float(max_wall_clock_seconds) if max_wall_clock_seconds is not None else 0.0,
+                max_wall_clock_seconds=float(max_wall_clock_seconds)
+                if max_wall_clock_seconds is not None
+                else 0.0,
                 step=step,
                 tool_calls_log=tool_calls_log,
                 total_tokens=total_tokens,
@@ -508,7 +530,9 @@ def run_agent_loop(
                 last_tool = tool_calls_log[-1].get("tool", "")
                 label = labels.get(last_tool, last_tool)
                 thinking_msg = f"「{label}」已完成，继续深入分析..."
-            progress_callback({"type": "thinking", "step": step + 1, "message": thinking_msg})
+            progress_callback(
+                {"type": "thinking", "step": step + 1, "message": thinking_msg}
+            )
 
         # --- LLM call ---
         response = llm_adapter.call_with_tools(
@@ -522,15 +546,23 @@ def run_agent_loop(
         if m and m != "error":
             models_used.append(m)
         model_for_usage = m or response.provider
-        if model_for_usage and model_for_usage != "error" and should_persist_usage_telemetry(response.usage):
+        if (
+            model_for_usage
+            and model_for_usage != "error"
+            and should_persist_usage_telemetry(response.usage)
+        ):
             _persist_usage(response.usage, model_for_usage, call_type="agent")
 
-        remaining_timeout = _remaining_timeout_seconds(start_time, max_wall_clock_seconds)
+        remaining_timeout = _remaining_timeout_seconds(
+            start_time, max_wall_clock_seconds
+        )
         if remaining_timeout is not None and remaining_timeout <= 0:
             logger.warning("Agent timed out after LLM call at step %d", step + 1)
             return _build_timeout_result(
                 start_time=start_time,
-                max_wall_clock_seconds=float(max_wall_clock_seconds) if max_wall_clock_seconds is not None else 0.0,
+                max_wall_clock_seconds=float(max_wall_clock_seconds)
+                if max_wall_clock_seconds is not None
+                else 0.0,
                 step=step + 1,
                 tool_calls_log=tool_calls_log,
                 total_tokens=total_tokens,
@@ -558,8 +590,16 @@ def run_agent_loop(
                         "id": tc.id,
                         "name": tc.name,
                         "arguments": tc.arguments,
-                        **({"provider_specific_fields": tc.provider_specific_fields} if tc.provider_specific_fields else {}),
-                        **({"thought_signature": tc.thought_signature} if tc.thought_signature is not None else {}),
+                        **(
+                            {"provider_specific_fields": tc.provider_specific_fields}
+                            if tc.provider_specific_fields
+                            else {}
+                        ),
+                        **(
+                            {"thought_signature": tc.thought_signature}
+                            if tc.thought_signature is not None
+                            else {}
+                        ),
                     }
                     for tc in response.tool_calls
                 ],
@@ -575,7 +615,9 @@ def run_agent_loop(
             if remaining_timeout is not None:
                 effective_tool_timeout = min(
                     remaining_timeout,
-                    tool_call_timeout_seconds if tool_call_timeout_seconds and tool_call_timeout_seconds > 0 else remaining_timeout,
+                    tool_call_timeout_seconds
+                    if tool_call_timeout_seconds and tool_call_timeout_seconds > 0
+                    else remaining_timeout,
                 )
             tool_results = _execute_tools(
                 response.tool_calls,
@@ -601,12 +643,18 @@ def run_agent_loop(
                     }
                 )
 
-            remaining_timeout = _remaining_timeout_seconds(start_time, max_wall_clock_seconds)
+            remaining_timeout = _remaining_timeout_seconds(
+                start_time, max_wall_clock_seconds
+            )
             if remaining_timeout is not None and remaining_timeout <= 0:
-                logger.warning("Agent timed out after tool execution at step %d", step + 1)
+                logger.warning(
+                    "Agent timed out after tool execution at step %d", step + 1
+                )
                 return _build_timeout_result(
                     start_time=start_time,
-                    max_wall_clock_seconds=float(max_wall_clock_seconds) if max_wall_clock_seconds is not None else 0.0,
+                    max_wall_clock_seconds=float(max_wall_clock_seconds)
+                    if max_wall_clock_seconds is not None
+                    else 0.0,
                     step=step + 1,
                     tool_calls_log=tool_calls_log,
                     total_tokens=total_tokens,
@@ -624,7 +672,13 @@ def run_agent_loop(
                 total_tokens,
             )
             if progress_callback:
-                progress_callback({"type": "generating", "step": step + 1, "message": "正在生成最终分析..."})
+                progress_callback(
+                    {
+                        "type": "generating",
+                        "step": step + 1,
+                        "message": "正在生成最终分析...",
+                    }
+                )
 
             final_content = response.content or ""
             is_error = response.provider == "error"
@@ -660,6 +714,7 @@ def run_agent_loop(
 # Internal tool execution
 # ============================================================
 
+
 def _execute_tools(
     tool_calls,
     tool_registry: ToolRegistry,
@@ -678,7 +733,9 @@ def _execute_tools(
     def _exec_single(tc_item):
         t0 = time.time()
         cache_key = _build_tool_cache_key(tc_item.name, tc_item.arguments)
-        guard_result = _guard_tool_stock_scope(tool_registry, tc_item.name, tc_item.arguments, stock_scope)
+        guard_result = _guard_tool_stock_scope(
+            tool_registry, tc_item.name, tc_item.arguments, stock_scope
+        )
         if guard_result is not None:
             dur = round(time.time() - t0, 2)
             result_str = serialize_tool_result(guard_result)
@@ -693,20 +750,35 @@ def _execute_tools(
             )
             return tc_item, result_str, False, dur, False, guard_result
 
-        if cache_key and non_retriable_tool_results is not None and cache_key in non_retriable_tool_results:
+        if (
+            cache_key
+            and non_retriable_tool_results is not None
+            and cache_key in non_retriable_tool_results
+        ):
             dur = round(time.time() - t0, 2)
             logger.info(
                 "Tool '%s' skipped via non-retriable cache for arguments=%s",
                 tc_item.name,
                 tc_item.arguments,
             )
-            return tc_item, non_retriable_tool_results[cache_key], False, dur, True, None
+            return (
+                tc_item,
+                non_retriable_tool_results[cache_key],
+                False,
+                dur,
+                True,
+                None,
+            )
 
         try:
             res = tool_registry.execute(tc_item.name, **tc_item.arguments)
             res_str = serialize_tool_result(res)
             ok = True
-            if cache_key and non_retriable_tool_results is not None and _is_non_retriable_tool_result(res):
+            if (
+                cache_key
+                and non_retriable_tool_results is not None
+                and _is_non_retriable_tool_result(res)
+            ):
                 non_retriable_tool_results[cache_key] = res_str
         except Exception as e:
             res_str = json.dumps({"error": str(e)})
@@ -728,29 +800,52 @@ def _execute_tools(
             try:
                 future = pool.submit(ctx.run, _exec_single, tc)
                 try:
-                    _, result_str, success, dur, cached, guard_result = future.result(timeout=tool_wait_timeout_seconds)
+                    _, result_str, success, dur, cached, guard_result = future.result(
+                        timeout=tool_wait_timeout_seconds
+                    )
                 except FuturesTimeoutError:
                     timeout_triggered = True
                     future.cancel()
                     timeout_label = f"{tool_wait_timeout_seconds:.2f}s"
-                    logger.warning("Tool '%s' timed out after %s at step %d", tc.name, timeout_label, step)
-                    result_str = json.dumps({
-                        "error": f"Tool execution timed out after {timeout_label}",
-                        "timeout": True,
-                    })
+                    logger.warning(
+                        "Tool '%s' timed out after %s at step %d",
+                        tc.name,
+                        timeout_label,
+                        step,
+                    )
+                    result_str = json.dumps(
+                        {
+                            "error": f"Tool execution timed out after {timeout_label}",
+                            "timeout": True,
+                        }
+                    )
                     success = False
                     dur = round(tool_wait_timeout_seconds, 2)
                     cached = False
                     guard_result = None
             finally:
-                pool.shutdown(wait=not timeout_triggered, cancel_futures=timeout_triggered)
+                pool.shutdown(
+                    wait=not timeout_triggered, cancel_futures=timeout_triggered
+                )
         else:
             _, result_str, success, dur, cached, guard_result = _exec_single(tc)
         if progress_callback:
-            progress_callback({"type": "tool_done", "step": step, "tool": tc.name, "success": success, "duration": dur})
+            progress_callback(
+                {
+                    "type": "tool_done",
+                    "step": step,
+                    "tool": tc.name,
+                    "success": success,
+                    "duration": dur,
+                }
+            )
         log_entry = {
-            "step": step, "tool": tc.name, "arguments": tc.arguments,
-            "success": success, "duration": dur, "result_length": len(result_str),
+            "step": step,
+            "tool": tc.name,
+            "arguments": tc.arguments,
+            "success": success,
+            "duration": dur,
+            "result_length": len(result_str),
             "cached": cached,
         }
         if tool_wait_timeout_seconds and tool_wait_timeout_seconds > 0 and not success:
@@ -760,12 +855,14 @@ def _execute_tools(
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
         if guard_result is not None:
-            log_entry.update({
-                "guarded": True,
-                "expected_stock_code": guard_result.get("expected_stock_code"),
-                "requested_stock_code": guard_result.get("requested_stock_code"),
-                "allowed_stock_codes": guard_result.get("allowed_stock_codes", []),
-            })
+            log_entry.update(
+                {
+                    "guarded": True,
+                    "expected_stock_code": guard_result.get("expected_stock_code"),
+                    "requested_stock_code": guard_result.get("requested_stock_code"),
+                    "allowed_stock_codes": guard_result.get("allowed_stock_codes", []),
+                }
+            )
         tool_calls_log.append(log_entry)
         results.append({"tc": tc, "result_str": result_str})
     else:
@@ -778,28 +875,55 @@ def _execute_tools(
         futures: Dict[Any, Any] = {}
         pending: Set[Any] = set()
         try:
-            futures = {pool.submit(contextvars.copy_context().run, _exec_single, tc): tc for tc in tool_calls}
+            futures = {
+                pool.submit(contextvars.copy_context().run, _exec_single, tc): tc
+                for tc in tool_calls
+            }
             pending = set(futures)
             for future in as_completed(
                 futures,
-                timeout=tool_wait_timeout_seconds if tool_wait_timeout_seconds and tool_wait_timeout_seconds > 0 else None,
+                timeout=tool_wait_timeout_seconds
+                if tool_wait_timeout_seconds and tool_wait_timeout_seconds > 0
+                else None,
             ):
                 pending.discard(future)
-                tc_item, result_str, success, dur, cached, guard_result = future.result()
+                tc_item, result_str, success, dur, cached, guard_result = (
+                    future.result()
+                )
                 if progress_callback:
-                    progress_callback({"type": "tool_done", "step": step, "tool": tc_item.name, "success": success, "duration": dur})
+                    progress_callback(
+                        {
+                            "type": "tool_done",
+                            "step": step,
+                            "tool": tc_item.name,
+                            "success": success,
+                            "duration": dur,
+                        }
+                    )
                 log_entry = {
-                    "step": step, "tool": tc_item.name, "arguments": tc_item.arguments,
-                    "success": success, "duration": dur, "result_length": len(result_str),
+                    "step": step,
+                    "tool": tc_item.name,
+                    "arguments": tc_item.arguments,
+                    "success": success,
+                    "duration": dur,
+                    "result_length": len(result_str),
                     "cached": cached,
                 }
                 if guard_result is not None:
-                    log_entry.update({
-                        "guarded": True,
-                        "expected_stock_code": guard_result.get("expected_stock_code"),
-                        "requested_stock_code": guard_result.get("requested_stock_code"),
-                        "allowed_stock_codes": guard_result.get("allowed_stock_codes", []),
-                    })
+                    log_entry.update(
+                        {
+                            "guarded": True,
+                            "expected_stock_code": guard_result.get(
+                                "expected_stock_code"
+                            ),
+                            "requested_stock_code": guard_result.get(
+                                "requested_stock_code"
+                            ),
+                            "allowed_stock_codes": guard_result.get(
+                                "allowed_stock_codes", []
+                            ),
+                        }
+                    )
                 tool_calls_log.append(log_entry)
                 results.append({"tc": tc_item, "result_str": result_str})
         except FuturesTimeoutError:
@@ -809,32 +933,40 @@ def _execute_tools(
                 if tool_wait_timeout_seconds is not None
                 else "the configured limit"
             )
-            logger.warning("Tool batch timed out after %s at step %d", timeout_label, step)
+            logger.warning(
+                "Tool batch timed out after %s at step %d", timeout_label, step
+            )
             for future, tc_item in futures.items():
                 if future in pending:
                     future.cancel()
-                    result_str = json.dumps({
-                        "error": f"Tool execution timed out after {timeout_label}",
-                        "timeout": True,
-                    })
+                    result_str = json.dumps(
+                        {
+                            "error": f"Tool execution timed out after {timeout_label}",
+                            "timeout": True,
+                        }
+                    )
                     if progress_callback:
-                        progress_callback({
-                            "type": "tool_done",
+                        progress_callback(
+                            {
+                                "type": "tool_done",
+                                "step": step,
+                                "tool": tc_item.name,
+                                "success": False,
+                                "duration": round(tool_wait_timeout_seconds or 0.0, 2),
+                            }
+                        )
+                    tool_calls_log.append(
+                        {
                             "step": step,
                             "tool": tc_item.name,
+                            "arguments": tc_item.arguments,
                             "success": False,
                             "duration": round(tool_wait_timeout_seconds or 0.0, 2),
-                        })
-                    tool_calls_log.append({
-                        "step": step,
-                        "tool": tc_item.name,
-                        "arguments": tc_item.arguments,
-                        "success": False,
-                        "duration": round(tool_wait_timeout_seconds or 0.0, 2),
-                        "result_length": len(result_str),
-                        "cached": False,
-                        "timeout": True,
-                    })
+                            "result_length": len(result_str),
+                            "cached": False,
+                            "timeout": True,
+                        }
+                    )
                     results.append({"tc": tc_item, "result_str": result_str})
         finally:
             pool.shutdown(wait=not timeout_triggered, cancel_futures=timeout_triggered)
