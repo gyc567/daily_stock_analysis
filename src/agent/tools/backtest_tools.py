@@ -9,7 +9,7 @@ Tools:
 """
 
 import logging
-from typing import Any
+from typing import Any, Dict
 
 from src.agent.tools.registry import ToolParameter, ToolDefinition
 
@@ -23,6 +23,7 @@ def _get_backtest_service():
     global _backtest_service
     if _backtest_service is None:
         from src.services.backtest_service import BacktestService
+
         _backtest_service = BacktestService()
     return _backtest_service
 
@@ -31,7 +32,10 @@ def _get_backtest_service():
 # get_skill_backtest_summary / get_strategy_backtest_summary
 # ============================================================
 
-def _serialize_overall_backtest_summary(summary: dict[str, Any], eval_window_days: int) -> dict[str, Any]:
+
+def _serialize_overall_backtest_summary(
+    summary: dict[str, Any], eval_window_days: int
+) -> dict[str, Any]:
     """Return the public overall-summary payload exposed to the agent."""
     return {
         "scope": summary.get("scope", "overall"),
@@ -53,16 +57,24 @@ def _handle_get_overall_backtest_summary(eval_window_days: int = 30) -> dict[str
     """Get the overall backtest summary for the full analysis corpus."""
     try:
         svc = _get_backtest_service()
-        summary = svc.get_summary(scope="overall", code=None, eval_window_days=eval_window_days)
+        summary = svc.get_summary(
+            scope="overall", code=None, eval_window_days=eval_window_days
+        )
         if summary is None:
-            return {"info": "No backtest summary available. Backtest may not have been run yet."}
+            return {
+                "info": "No backtest summary available. Backtest may not have been run yet."
+            }
         return _serialize_overall_backtest_summary(summary, eval_window_days)
     except Exception:
-        logger.warning("[backtest_tools] get_overall_backtest_summary error", exc_info=True)
+        logger.warning(
+            "[backtest_tools] get_overall_backtest_summary error", exc_info=True
+        )
         return {"error": "Failed to retrieve backtest summary."}
 
 
-def _handle_get_skill_backtest_summary(skill_id: str = "", eval_window_days: int = 30) -> dict[str, Any]:
+def _handle_get_skill_backtest_summary(
+    skill_id: str = "", eval_window_days: int = 30
+) -> dict[str, Any]:
     """Get a skill-scoped backtest summary when real per-skill stats exist."""
     if not skill_id:
         return {
@@ -96,7 +108,9 @@ def _handle_get_skill_backtest_summary(skill_id: str = "", eval_window_days: int
             "computed_at": summary.get("computed_at"),
         }
     except Exception:
-        logger.warning("[backtest_tools] get_skill_backtest_summary error", exc_info=True)
+        logger.warning(
+            "[backtest_tools] get_skill_backtest_summary error", exc_info=True
+        )
         return {"error": "Failed to retrieve backtest summary."}
 
 
@@ -150,17 +164,22 @@ get_strategy_backtest_summary_tool = ToolDefinition(
 # get_stock_backtest_summary
 # ============================================================
 
-def _handle_get_stock_backtest_summary(stock_code: str, eval_window_days: int = 30, limit: int = 10) -> dict[str, Any]:
+
+def _handle_get_stock_backtest_summary(
+    stock_code: str, eval_window_days: int = 30, limit: int = 10
+) -> dict[str, Any]:
     """Get backtest results for a specific stock.
 
     Returns the summary plus recent evaluation items.
     """
     try:
         svc = _get_backtest_service()
-        result = {}
+        result: Dict[str, Any] = {}
 
         # Per-stock summary
-        summary = svc.get_summary(scope="stock", code=stock_code, eval_window_days=eval_window_days)
+        summary = svc.get_summary(
+            scope="stock", code=stock_code, eval_window_days=eval_window_days
+        )
         if summary:
             result["summary"] = {
                 "code": summary.get("code", stock_code),
@@ -176,7 +195,9 @@ def _handle_get_stock_backtest_summary(stock_code: str, eval_window_days: int = 
             result["summary"] = None
 
         # Recent evaluations
-        evals = svc.get_recent_evaluations(code=stock_code, eval_window_days=eval_window_days, limit=limit)
+        evals = svc.get_recent_evaluations(
+            code=stock_code, eval_window_days=eval_window_days, limit=limit
+        )
         items = evals.get("items", [])
         # Slim down items to essential fields
         result["recent_evaluations"] = [
@@ -195,11 +216,15 @@ def _handle_get_stock_backtest_summary(stock_code: str, eval_window_days: int = 
         result["total"] = evals.get("total", 0)
 
         if result["summary"] is None and not result["recent_evaluations"]:
-            return {"info": f"No backtest data available for {stock_code}. Backtest may not have been run yet."}
+            return {
+                "info": f"No backtest data available for {stock_code}. Backtest may not have been run yet."
+            }
 
         return result
     except Exception:
-        logger.warning("[backtest_tools] get_stock_backtest_summary error", exc_info=True)
+        logger.warning(
+            "[backtest_tools] get_stock_backtest_summary error", exc_info=True
+        )
         return {"error": "Failed to retrieve backtest data."}
 
 

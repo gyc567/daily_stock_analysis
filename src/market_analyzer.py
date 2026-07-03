@@ -15,7 +15,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Dict, Any, List, cast
+from typing import Literal, Optional, Dict, Any, List, cast
 
 import pandas as pd
 
@@ -569,7 +569,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 e,
             )
 
-        return all_news
+        return cast(List[Dict[str, Any]], all_news)
 
     def generate_market_review(self, overview: MarketOverview, news: List[Any]) -> str:
         """
@@ -900,6 +900,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         scores = self._build_market_light_scores(overview)
         score = int(scores["score"])
         temperature_label = str(scores["temperature_label"])
+        status: Literal["green", "yellow", "red"]
         if score >= 60:
             status = "green"
         elif score >= 40:
