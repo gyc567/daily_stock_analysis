@@ -562,7 +562,7 @@ class AkshareFetcher(BaseFetcher):
 
             api_start = _time.time()
 
-            df = ak.stock_zh_a_hist(
+            df: pd.DataFrame = ak.stock_zh_a_hist(
                 symbol=stock_code,
                 period="daily",
                 start_date=start_date.replace("-", ""),
@@ -605,7 +605,7 @@ class AkshareFetcher(BaseFetcher):
         self._enforce_rate_limit()
 
         try:
-            df = _akshare_call_with_timeout(
+            df: pd.DataFrame = _akshare_call_with_timeout(
                 ak.stock_zh_a_daily,
                 symbol=symbol,
                 start_date=start_date.replace("-", ""),
@@ -660,7 +660,7 @@ class AkshareFetcher(BaseFetcher):
         self._enforce_rate_limit()
 
         try:
-            df = _akshare_call_with_timeout(
+            df: pd.DataFrame = _akshare_call_with_timeout(
                 ak.stock_zh_a_hist_tx,
                 symbol=symbol,
                 start_date=start_date.replace("-", ""),
@@ -732,7 +732,7 @@ class AkshareFetcher(BaseFetcher):
             api_start = _time.time()
 
             # 调用 akshare 获取 ETF 日线数据
-            df = ak.fund_etf_hist_em(
+            df: pd.DataFrame = ak.fund_etf_hist_em(
                 symbol=stock_code,
                 period="daily",
                 start_date=start_date.replace("-", ""),
@@ -808,7 +808,7 @@ class AkshareFetcher(BaseFetcher):
 
             # 调用 akshare 获取美股日线数据
             # stock_us_daily 返回全部历史数据，后续需要按日期过滤
-            df = ak.stock_us_daily(
+            df: pd.DataFrame = ak.stock_us_daily(
                 symbol=symbol,
                 adjust="qfq",  # 前复权
             )
@@ -829,8 +829,8 @@ class AkshareFetcher(BaseFetcher):
                 df = df[(df["date"] >= start_dt) & (df["date"] <= end_dt)]
 
                 if not df.empty:
-                    first_date = cast(pd.Series, df["date"]).iloc[0]
-                    last_date = cast(pd.Series, df["date"]).iloc[-1]
+                    first_date = df["date"].iloc[0]
+                    last_date = df["date"].iloc[-1]
                     logger.info(
                         f"[API返回] 过滤后日期范围: {first_date.strftime('%Y-%m-%d')} ~ {last_date.strftime('%Y-%m-%d')}"
                     )
@@ -921,7 +921,7 @@ class AkshareFetcher(BaseFetcher):
             api_start = _time.time()
 
             # 调用 akshare 获取港股日线数据
-            df = ak.stock_hk_hist(
+            df: pd.DataFrame = ak.stock_hk_hist(
                 symbol=code,
                 period="daily",
                 start_date=start_date.replace("-", ""),
