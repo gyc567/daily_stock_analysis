@@ -10,7 +10,7 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter
 
@@ -18,23 +18,23 @@ logger = logging.getLogger(__name__)
 
 # serenity_scorecard 的 8 个加权因子 + 8 个惩罚项（各 0-5 分）
 FACTOR_KEYS = (
-    "demand_inflection",        # 需求拐点
-    "architecture_coupling",    # 架构耦合
-    "chokepoint_severity",      # 卡点严重度
-    "supplier_concentration",   # 供应商集中度
-    "expansion_difficulty",     # 扩产难度
-    "evidence_quality",         # 证据质量
-    "valuation_disconnect",     # 估值脱节
-    "catalyst_timing",          # 催化时点
+    "demand_inflection",  # 需求拐点
+    "architecture_coupling",  # 架构耦合
+    "chokepoint_severity",  # 卡点严重度
+    "supplier_concentration",  # 供应商集中度
+    "expansion_difficulty",  # 扩产难度
+    "evidence_quality",  # 证据质量
+    "valuation_disconnect",  # 估值脱节
+    "catalyst_timing",  # 催化时点
 )
 PENALTY_KEYS = (
-    "dilution_financing",       # 稀释/融资
-    "governance",               # 治理
-    "geopolitics",              # 地缘
-    "liquidity",                # 流动性
-    "hype_risk",                # 炒作
-    "accounting_quality",       # 会计质量
-    "cyclicality",              # 周期性
+    "dilution_financing",  # 稀释/融资
+    "governance",  # 治理
+    "geopolitics",  # 地缘
+    "liquidity",  # 流动性
+    "hype_risk",  # 炒作
+    "accounting_quality",  # 会计质量
+    "cyclicality",  # 周期性
     "alternative_design_risk",  # 替代路线
 )
 
@@ -73,7 +73,9 @@ def _coerce_rating(value: Any) -> float:
     return rating
 
 
-def _normalize_ratings(raw: Optional[Dict[str, Any]], keys: tuple[str, ...]) -> Dict[str, float]:
+def _normalize_ratings(
+    raw: Optional[Dict[str, Any]], keys: tuple[str, ...]
+) -> Dict[str, float]:
     """补全缺失字段为 0，并把每个值规整到 0-5。"""
     raw = raw or {}
     return {key: _coerce_rating(raw.get(key, 0)) for key in keys}
@@ -82,6 +84,7 @@ def _normalize_ratings(raw: Optional[Dict[str, Any]], keys: tuple[str, ...]) -> 
 # ============================================================
 # score_supply_chain_bottleneck
 # ============================================================
+
 
 def _handle_score_supply_chain_bottleneck(
     ticker: str,
@@ -109,7 +112,9 @@ def _handle_score_supply_chain_bottleneck(
     try:
         result, verdict = scorecard.score(data)
     except Exception as exc:
-        logger.error("supply chain scorecard failed for %s: %s", ticker, exc, exc_info=True)
+        logger.error(
+            "supply chain scorecard failed for %s: %s", ticker, exc, exc_info=True
+        )
         return {"error": f"打分失败: {exc}", "input_echo": data}
 
     return {
@@ -260,11 +265,16 @@ def _handle_search_semianalysis(
         response = provider.search(query, max_results=max_results, days=_SEARCH_DAYS)
     except Exception as exc:  # noqa: BLE001 - 检索异常不得拖垮 agent
         logger.error("[SupplyChain] SemiAnalysis 检索异常 (%s): %s", keywords, exc)
-        return {"error": f"SemiAnalysis 检索异常: {exc}", "keywords": keywords, "query": query}
+        return {
+            "error": f"SemiAnalysis 检索异常: {exc}",
+            "keywords": keywords,
+            "query": query,
+        }
 
     if not getattr(response, "success", False):
         return {
-            "error": getattr(response, "error_message", None) or "SemiAnalysis 搜索失败",
+            "error": getattr(response, "error_message", None)
+            or "SemiAnalysis 搜索失败",
             "keywords": keywords,
             "query": query,
         }
@@ -467,6 +477,7 @@ search_clue_hype_tool = ToolDefinition(
 # 供应链双源校验（公司 / 板块归属，东方财富 + 同花顺结构化核验）
 # ============================================================
 
+
 def _get_supply_chain_validator():
     """Lazy 默认双源校验器访问器（测试可 monkeypatch 替换为注入 fake 探针的实例）。"""
     from data_provider.supply_chain.cross_source import get_default_validator
@@ -492,7 +503,7 @@ def _handle_verify_supply_chain_evidence(
     result = validator.verify(
         stock_code, stock_name, claim=claim, board_hint=board_hint, topic=topic
     )
-    return result.to_dict()
+    return cast(Dict[str, Any], result.to_dict())
 
 
 verify_supply_chain_evidence_tool = ToolDefinition(

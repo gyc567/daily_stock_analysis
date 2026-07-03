@@ -106,9 +106,12 @@ class PortfolioRepository:
         conditions = [PortfolioAccount.id == account_id]
         if not include_inactive:
             conditions.append(PortfolioAccount.is_active.is_(True))
-        return session.execute(
-            select(PortfolioAccount).where(and_(*conditions)).limit(1)
-        ).scalar_one_or_none()
+        return cast(
+            Optional[PortfolioAccount],
+            session.execute(
+                select(PortfolioAccount).where(and_(*conditions)).limit(1)
+            ).scalar_one_or_none(),
+        )
 
     def update_account(
         self, account_id: int, fields: Dict[str, Any]
