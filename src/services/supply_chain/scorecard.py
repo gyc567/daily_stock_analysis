@@ -9,7 +9,7 @@ serenity_scorecard 是纯函数库（stdlib only），通过 importlib 从
 from __future__ import annotations
 
 import importlib.util
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, cast
 
 from src.services.supply_chain.paths import scorecard_script_path
 
@@ -31,7 +31,7 @@ def _load_module():
 
 def score(data: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
     """对一份瓶颈打分卡输入计算 ``(result_dict, verdict_str)``。"""
-    return _load_module().score(data)
+    return cast(Tuple[Dict[str, Any], str], _load_module().score(data))
 
 
 def to_markdown(result: Dict[str, Any]) -> str:
@@ -39,7 +39,7 @@ def to_markdown(result: Dict[str, Any]) -> str:
 
     上游英文版，保留给 upstream CLI / 对齐对照。工具层用 :func:`to_markdown_zh`。
     """
-    return _load_module().to_markdown(result)
+    return cast(str, _load_module().to_markdown(result))
 
 
 # ---- 中文渲染（工具层用，避免泄露内部 snake_case 字段名） ----
@@ -110,9 +110,13 @@ def to_markdown_zh(result: Dict[str, Any]) -> str:
     lines.extend(["", "## 惩罚项", "| 惩罚项 | 评分 | 扣分 |", "|---|---:|---:|"])
     for key, detail in result.get("penalty_details", {}).items():
         label = _PENALTY_LABEL_ZH.get(key, key)
-        lines.append(f"| {label} | {detail.get('rating', 0)} | {detail.get('points', 0)} |")
+        lines.append(
+            f"| {label} | {detail.get('rating', 0)} | {detail.get('points', 0)} |"
+        )
 
-    weakening = [str(x).strip() for x in result.get("kill_switches", []) if str(x).strip()]
+    weakening = [
+        str(x).strip() for x in result.get("kill_switches", []) if str(x).strip()
+    ]
     if weakening:
         lines.extend(["", "## 可能削弱判断的因素"])
         for item in weakening:
