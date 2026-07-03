@@ -825,8 +825,11 @@ class AlertService:
         if hasattr(value, "to_pydatetime"):
             try:
                 parsed = value.to_pydatetime()
-                return (
-                    parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+                return cast(
+                    Optional[datetime],
+                    parsed.replace(tzinfo=None)
+                    if parsed.tzinfo is not None
+                    else parsed,
                 )
             except Exception:
                 return None

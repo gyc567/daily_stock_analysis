@@ -14,7 +14,7 @@ Only activates for US stock codes (AAPL, TSLA, etc.).
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import requests
 from tenacity import (
@@ -46,8 +46,13 @@ _REQUEST_RETRY_WAIT_CAP = 5  # wait_exponential(..., max=5)
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-def _get_with_retry(url: str, *, headers: Dict[str, str], params: Optional[Dict[str, Any]] = None,
-                    timeout: int = _REQUEST_TIMEOUT) -> requests.Response:
+def _get_with_retry(
+    url: str,
+    *,
+    headers: Dict[str, str],
+    params: Optional[Dict[str, Any]] = None,
+    timeout: int = _REQUEST_TIMEOUT,
+) -> requests.Response:
     """GET with retry on transient network errors."""
     return requests.get(url, headers=headers, params=params or {}, timeout=timeout)
 
@@ -69,7 +74,9 @@ class SocialSentimentService:
     # Cache TTL for trending endpoints (seconds)
     _TRENDING_CACHE_TTL = 600  # 10 minutes
 
-    def __init__(self, api_key: Optional[str] = None, api_url: str = "https://api.adanos.org"):
+    def __init__(
+        self, api_key: Optional[str] = None, api_url: str = "https://api.adanos.org"
+    ):
         self._api_key = (api_key or "").strip() or None
         self._api_url = (api_url or "https://api.adanos.org").rstrip("/")
         # Simple in-memory cache: {"key": (timestamp, data)}
@@ -89,12 +96,14 @@ class SocialSentimentService:
     # API calls
     # ------------------------------------------------------------------
 
-    def _fetch_json(self, url: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    def _fetch_json(
+        self, url: str, params: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
         """Fetch JSON from API, return None on any error."""
         try:
             resp = _get_with_retry(url, headers=self._headers, params=params)
             if resp.status_code == 200:
-                return resp.json()
+                return cast(Dict[str, Any], resp.json())
             logger.warning("Social sentiment API %s returned %s", url, resp.status_code)
         except _TRANSIENT_EXCEPTIONS as e:
             logger.warning("Social sentiment API %s network error: %s", url, e)
@@ -104,10 +113,16 @@ class SocialSentimentService:
 
     @classmethod
     def _cache_wait_timeout_seconds(cls) -> float:
-        request_budget = (_REQUEST_TIMEOUT * _REQUEST_RETRY_ATTEMPTS) + _REQUEST_RETRY_WAIT_CAP
-        return max(1.0, min(float(cls._TRENDING_CACHE_TTL), float(request_budget), 30.0))
+        request_budget = (
+            _REQUEST_TIMEOUT * _REQUEST_RETRY_ATTEMPTS
+        ) + _REQUEST_RETRY_WAIT_CAP
+        return max(
+            1.0, min(float(cls._TRENDING_CACHE_TTL), float(request_budget), 30.0)
+        )
 
-    def _fetch_cached(self, cache_key: str, url: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+    def _fetch_cached(
+        self, cache_key: str, url: str, params: Optional[Dict[str, Any]] = None
+    ) -> Optional[Any]:
         """Fetch with simple TTL cache (for trending endpoints)."""
         now = time.monotonic()
         with self._cache_lock:
@@ -224,10 +239,14 @@ class SocialSentimentService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _find_ticker_in_trending(trending: List[Dict[str, Any]], ticker: str) -> Optional[Dict[str, Any]]:
+    def _find_ticker_in_trending(
+        trending: List[Dict[str, Any]], ticker: str
+    ) -> Optional[Dict[str, Any]]:
         """Find a ticker entry in a trending list."""
         for entry in trending:
-            code = (entry.get("ticker") or entry.get("symbol") or entry.get("code") or "").upper()
+            code = (
+                entry.get("ticker") or entry.get("symbol") or entry.get("code") or ""
+            ).upper()
             if code == ticker:
                 return entry
         return None
@@ -248,7 +267,9 @@ class SocialSentimentService:
         poly_entry: Optional[Dict[str, Any]],
     ) -> str:
         """Format social sentiment data as a prompt-ready text block."""
-        lines = [f"📱 Social Sentiment Intelligence for {ticker} (Reddit / X / Polymarket)"]
+        lines = [
+            f"📱 Social Sentiment Intelligence for {ticker} (Reddit / X / Polymarket)"
+        ]
         lines.append("=" * 60)
 
         # --- Reddit ---
@@ -257,21 +278,32 @@ class SocialSentimentService:
             report = reddit_data.get("report", reddit_data)
 
             # Buzz score
-            buzz = SocialSentimentService._coalesce(report.get("buzz_score"), report.get("buzz"))
+            buzz = SocialSentimentService._coalesce(
+                report.get("buzz_score"), report.get("buzz")
+            )
             if buzz is not None:
                 trend_label = report.get("trend", "")
-                lines.append(f"  Buzz Score: {buzz}/100 ({trend_label})" if trend_label
-                             else f"  Buzz Score: {buzz}/100")
+                lines.append(
+                    f"  Buzz Score: {buzz}/100 ({trend_label})"
+                    if trend_label
+                    else f"  Buzz Score: {buzz}/100"
+                )
 
             # Sentiment (0 is a valid neutral value, must not be dropped)
-            sentiment = SocialSentimentService._coalesce(report.get("sentiment_score"), report.get("sentiment"))
+            sentiment = SocialSentimentService._coalesce(
+                report.get("sentiment_score"), report.get("sentiment")
+            )
             if sentiment is not None:
                 lines.append(f"  Sentiment Score: {sentiment}")
 
             # Mentions
-            mentions = SocialSentimentService._coalesce(report.get("total_mentions"), report.get("mentions"))
+            mentions = SocialSentimentService._coalesce(
+                report.get("total_mentions"), report.get("mentions")
+            )
             if mentions is not None:
-                subs = SocialSentimentService._coalesce(report.get("subreddit_count"), report.get("subreddits"))
+                subs = SocialSentimentService._coalesce(
+                    report.get("subreddit_count"), report.get("subreddits")
+                )
                 sub_str = f" across {subs} subreddits" if subs else ""
                 lines.append(f"  Mentions: {mentions}{sub_str} (7-day)")
 
@@ -282,7 +314,9 @@ class SocialSentimentService:
                 for i, m in enumerate(top_mentions[:5], 1):
                     text = (m.get("text") or m.get("title") or "")[:120]
                     sub = m.get("subreddit", "")
-                    score = SocialSentimentService._coalesce(m.get("sentiment_score"), m.get("sentiment"))
+                    score = SocialSentimentService._coalesce(
+                        m.get("sentiment_score"), m.get("sentiment")
+                    )
                     upvotes = m.get("upvotes", "")
                     meta_parts = []
                     if score is not None:
@@ -292,7 +326,7 @@ class SocialSentimentService:
                     if upvotes:
                         meta_parts.append(f"{upvotes} upvotes")
                     meta = f" ({', '.join(meta_parts)})" if meta_parts else ""
-                    lines.append(f"    {i}. \"{text}\"{meta}")
+                    lines.append(f'    {i}. "{text}"{meta}')
 
             # Daily stats
             daily = report.get("daily_stats", [])
@@ -302,20 +336,31 @@ class SocialSentimentService:
                     day = d.get("date", "")
                     day_mentions = d.get("mentions", "?")
                     day_sentiment = d.get("avg_sentiment", "?")
-                    lines.append(f"    {day}: {day_mentions} mentions, avg sentiment {day_sentiment}")
+                    lines.append(
+                        f"    {day}: {day_mentions} mentions, avg sentiment {day_sentiment}"
+                    )
         else:
             lines.append("\n🔴 Reddit: No data available")
 
         # --- X / Twitter ---
         if x_entry:
             lines.append("\n🐦 X (Twitter) Sentiment:")
-            x_buzz = SocialSentimentService._coalesce(x_entry.get("buzz_score"), x_entry.get("buzz"))
-            x_sentiment = SocialSentimentService._coalesce(x_entry.get("sentiment_score"), x_entry.get("sentiment"))
-            x_mentions = SocialSentimentService._coalesce(x_entry.get("total_mentions"), x_entry.get("mentions"))
+            x_buzz = SocialSentimentService._coalesce(
+                x_entry.get("buzz_score"), x_entry.get("buzz")
+            )
+            x_sentiment = SocialSentimentService._coalesce(
+                x_entry.get("sentiment_score"), x_entry.get("sentiment")
+            )
+            x_mentions = SocialSentimentService._coalesce(
+                x_entry.get("total_mentions"), x_entry.get("mentions")
+            )
             x_trend = x_entry.get("trend", "")
             if x_buzz is not None:
-                lines.append(f"  Buzz Score: {x_buzz}/100 ({x_trend})" if x_trend
-                             else f"  Buzz Score: {x_buzz}/100")
+                lines.append(
+                    f"  Buzz Score: {x_buzz}/100 ({x_trend})"
+                    if x_trend
+                    else f"  Buzz Score: {x_buzz}/100"
+                )
             if x_sentiment is not None:
                 lines.append(f"  Sentiment Score: {x_sentiment}")
             if x_mentions is not None:
@@ -326,9 +371,15 @@ class SocialSentimentService:
         # --- Polymarket ---
         if poly_entry:
             lines.append("\n🔮 Polymarket (Prediction Markets):")
-            poly_buzz = SocialSentimentService._coalesce(poly_entry.get("buzz_score"), poly_entry.get("buzz"))
-            poly_sentiment = SocialSentimentService._coalesce(poly_entry.get("sentiment_score"), poly_entry.get("sentiment"))
-            poly_trades = SocialSentimentService._coalesce(poly_entry.get("trade_count"), poly_entry.get("trades"))
+            poly_buzz = SocialSentimentService._coalesce(
+                poly_entry.get("buzz_score"), poly_entry.get("buzz")
+            )
+            poly_sentiment = SocialSentimentService._coalesce(
+                poly_entry.get("sentiment_score"), poly_entry.get("sentiment")
+            )
+            poly_trades = SocialSentimentService._coalesce(
+                poly_entry.get("trade_count"), poly_entry.get("trades")
+            )
             if poly_buzz is not None:
                 lines.append(f"  Buzz Score: {poly_buzz}/100")
             if poly_sentiment is not None:

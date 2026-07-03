@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from src.core.trading_calendar import get_open_markets_today
 from src.schemas.market_light import MarketLightSnapshot
@@ -45,7 +45,9 @@ class MarketLightAlert:
         self.stock_code = self.target
 
 
-def normalize_market_alert_parameters(alert_type: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_market_alert_parameters(
+    alert_type: str, parameters: Dict[str, Any]
+) -> Dict[str, Any]:
     if alert_type not in MARKET_ALERT_TYPES:
         raise ValueError(f"unsupported market alert_type: {alert_type}")
     if not isinstance(parameters, dict):
@@ -63,7 +65,9 @@ def normalize_market_alert_parameters(alert_type: str, parameters: Dict[str, Any
         for raw_status in raw_statuses:
             status = str(raw_status or "").strip().lower()
             if status not in MARKET_STATUS_VALUES:
-                raise ValueError("market_light_status statuses only supports red or yellow")
+                raise ValueError(
+                    "market_light_status statuses only supports red or yellow"
+                )
             if status not in statuses:
                 statuses.append(status)
         return {"statuses": statuses}
@@ -117,7 +121,9 @@ def evaluate_market_light_alert(
     current_snapshot: Optional[Dict[str, Any]] = None,
     cache: Optional[Dict[Any, Any]] = None,
 ) -> Dict[str, Any]:
-    if rule.metadata.get("trading_day_check_enabled") and not rule.metadata.get("market_is_open", True):
+    if rule.metadata.get("trading_day_check_enabled") and not rule.metadata.get(
+        "market_is_open", True
+    ):
         return _market_result(
             rule,
             triggered=False,
@@ -175,13 +181,15 @@ def parse_trade_date_to_datetime(trade_date: str) -> datetime:
     return datetime.fromisoformat(str(trade_date))
 
 
-def _cached_current_snapshot(region: str, cache: Optional[Dict[Any, Any]]) -> Dict[str, Any]:
+def _cached_current_snapshot(
+    region: str, cache: Optional[Dict[Any, Any]]
+) -> Dict[str, Any]:
     if cache is None:
         return build_current_snapshot(region)
     cache_key = ("market_light", region)
     if cache_key not in cache:
         cache[cache_key] = build_current_snapshot(region)
-    return cache[cache_key]
+    return cast(Dict[str, Any], cache[cache_key])
 
 
 def _evaluate_status(
@@ -216,8 +224,12 @@ def _evaluate_score_drop(
 ) -> Dict[str, Any]:
     min_drop = float(rule.parameters["min_drop"])
     try:
-        raw_previous = load_previous_snapshot(rule.target, before_trade_date=current.trade_date)
-        previous = MarketLightSnapshot.model_validate(raw_previous) if raw_previous else None
+        raw_previous = load_previous_snapshot(
+            rule.target, before_trade_date=current.trade_date
+        )
+        previous = (
+            MarketLightSnapshot.model_validate(raw_previous) if raw_previous else None
+        )
     except Exception as exc:
         return _market_result(
             rule,
@@ -277,7 +289,9 @@ def _evaluate_score_drop(
 
     drop = float(previous.score - current.score)
     triggered = drop >= min_drop
-    partial_comparison = current.data_quality == "partial" or previous.data_quality == "partial"
+    partial_comparison = (
+        current.data_quality == "partial" or previous.data_quality == "partial"
+    )
     diagnostics = {
         **_base_diagnostics(current),
         "prev_trade_date": previous.trade_date,
@@ -329,7 +343,9 @@ def _market_result(
         "data_timestamp": data_timestamp,
         "reason": message,
         "message": message,
-        "diagnostics": json.dumps(diagnostics or {}, ensure_ascii=False, sort_keys=True),
+        "diagnostics": json.dumps(
+            diagnostics or {}, ensure_ascii=False, sort_keys=True
+        ),
     }
 
 
@@ -349,7 +365,9 @@ def _base_diagnostics(snapshot: MarketLightSnapshot) -> Dict[str, Any]:
 
 def _missing_dimensions(snapshot: MarketLightSnapshot) -> list[str]:
     dimensions = snapshot.dimensions.model_dump()
-    return sorted(name for name, item in dimensions.items() if not item.get("available"))
+    return sorted(
+        name for name, item in dimensions.items() if not item.get("available")
+    )
 
 
 def _positive_float(value: Any, field_name: str) -> float:
