@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, SupportsInt, cast
 
 
 _BUILTIN_SKILLS_DIR = (
@@ -105,7 +105,7 @@ def _coerce_priority(value: object, default: int = 100) -> int:
     try:
         if isinstance(value, bool):
             return default
-        return int(value)  # type: ignore[arg-type]
+        return int(cast(SupportsInt, value))
     except (TypeError, ValueError):
         return default
 
