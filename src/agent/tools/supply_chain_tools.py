@@ -216,7 +216,7 @@ _MAX_SNIPPET = 500
 _SEMIANALYSIS_SITE = "semianalysis.com"
 
 
-def _get_search_service():
+def _get_search_service() -> Any:
     """Lazy 共享 SearchService 访问器（测试可 monkeypatch 替换为 fake，避免真实网络）。"""
     from src.search_service import get_search_service
 
@@ -478,7 +478,7 @@ search_clue_hype_tool = ToolDefinition(
 # ============================================================
 
 
-def _get_supply_chain_validator():
+def _get_supply_chain_validator() -> Any:
     """Lazy 默认双源校验器访问器（测试可 monkeypatch 替换为注入 fake 探针的实例）。"""
     from data_provider.supply_chain.cross_source import get_default_validator
 

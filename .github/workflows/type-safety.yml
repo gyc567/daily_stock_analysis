@@ -40,7 +40,23 @@ jobs:
             -p src.utils.type_guards \
             -p src.core.pipeline_context \
             -p src.services.system_config_service \
-            -p src.md2pdf
+            -p src.md2pdf \
+            -p src.agent.skills.router \
+            -p src.agent.skills.aggregator \
+            -p src.services.knowledge_base_parser \
+            -p src.services.knowledge_base_service \
+            -p src.services.image_stock_extractor \
+            -p src.services.backtest_service \
+            -p src.services.social_sentiment_service \
+            -p src.services.market_light_alerts \
+            -p src.services.alert_service \
+            -p src.repositories.portfolio_repo \
+            -p src.agent.tools.supply_chain_tools \
+            -p src.agent.tools.data_tools \
+            -p src.agent.tools.analysis_tools \
+            -p src.notification \
+            -p src.agent.runner \
+            -p src.services.supply_chain_report_service
 
       - name: Contract smoke test
         env:

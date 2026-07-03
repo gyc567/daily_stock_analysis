@@ -165,7 +165,7 @@ class PortfolioRepository:
     # Event writes
     # ------------------------------------------------------------------
     @contextmanager
-    def portfolio_write_session(self):
+    def portfolio_write_session(self) -> Any:
         session = self.db.get_session()
         try:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")

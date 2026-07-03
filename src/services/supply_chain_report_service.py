@@ -150,7 +150,7 @@ class SupplyChainReportService:
             try:
                 from data_provider.base import normalize_stock_code
             except ImportError:
-                normalize_stock_code = None  # type: ignore
+                normalize_stock_code = None  # type: ignore[assignment]
             normalized = (
                 normalize_stock_code(str(raw_code).strip())
                 if normalize_stock_code is not None

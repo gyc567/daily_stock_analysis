@@ -716,7 +716,7 @@ def run_agent_loop(
 
 
 def _execute_tools(
-    tool_calls,
+    tool_calls: Any,
     tool_registry: ToolRegistry,
     step: int,
     progress_callback: Optional[Callable[..., Any]],
@@ -730,7 +730,7 @@ def _execute_tools(
     Single tools run inline; multiple tools run in parallel threads.
     """
 
-    def _exec_single(tc_item):
+    def _exec_single(tc_item: Any) -> Any:
         t0 = time.time()
         cache_key = _build_tool_cache_key(tc_item.name, tc_item.arguments)
         guard_result = _guard_tool_stock_scope(

@@ -113,7 +113,7 @@ def _merge_today_realtime_bar(
     return merged
 
 
-def _fetch_trend_data(stock_code: str):
+def _fetch_trend_data(stock_code: str) -> Any:
     """Fetch historical OHLCV (DataFrame) for trend analysis. DB first, then DataFetcher fallback.
 
     盘中会合并今日实时行情 bar（见 _merge_today_realtime_bar），避免 current_price
@@ -665,7 +665,7 @@ def _handle_analyze_pattern(stock_code: str, days: int = 60) -> dict[str, Any]:
             )
 
     # Deduplicate by pattern name, keep most recent
-    seen: set = set()
+    seen: set[Any] = set()
     unique_patterns: list[dict[str, Any]] = []
     for p in reversed(patterns_detected):
         if p["pattern"] not in seen:

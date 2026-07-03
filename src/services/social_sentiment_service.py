@@ -252,7 +252,7 @@ class SocialSentimentService:
         return None
 
     @staticmethod
-    def _coalesce(*values):
+    def _coalesce(*values: Any) -> Any:
         """Return the first value that is not None (preserves 0 and 0.0)."""
         for v in values:
             if v is not None:
