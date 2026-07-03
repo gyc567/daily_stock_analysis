@@ -79,6 +79,7 @@ module = [
     "src.utils.type_guards",
     "src.core.pipeline_context",
     "src.services.system_config_service",
+    "src.md2pdf",
 ]
 enable_error_code = ["ignore-without-code"]
 disallow_untyped_defs = true

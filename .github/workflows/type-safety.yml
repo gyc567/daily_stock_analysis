@@ -39,7 +39,8 @@ jobs:
             --follow-imports=silent \
             -p src.utils.type_guards \
             -p src.core.pipeline_context \
-            -p src.services.system_config_service
+            -p src.services.system_config_service \
+            -p src.md2pdf
 
       - name: Contract smoke test
         env:
