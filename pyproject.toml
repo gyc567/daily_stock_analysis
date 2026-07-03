@@ -68,6 +68,20 @@ disallow_incomplete_defs = false
 disallow_any_generics = false
 check_untyped_defs = true
 
+# 渐进类型治理：先在已具备完整类型注解的基础设施模块启用 ``ignore-without-code``，
+# 强制 ``# type: ignore`` 必须带错误码。这能阻止历史 ``# type: ignore`` 继续掩盖
+# 真实问题，同时不影响其他模块。
+[[tool.mypy.overrides]]
+module = [
+    "src.utils.type_guards",
+    "src.core.pipeline_context",
+]
+enable_error_code = ["ignore-without-code"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_any_generics = true
+check_untyped_defs = true
+
 [tool.pydantic-mypy]
 init_forbid_extra = true
 init_typed = true

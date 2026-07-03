@@ -28,6 +28,15 @@ jobs:
       - name: Mypy type audit
         run: mypy src data_provider api bot
 
+      - name: Mypy governed-modules check
+        # 渐进治理：以下模块已在 ``pyproject.toml`` 中启用 ``ignore-without-code``，
+        # 必须保持 0 错误，否则视为 PR 引入回归。
+        # 新模块在治理前应先在 ``pyproject.toml`` 注册。
+        run: |
+          mypy \
+            -p src.utils.type_guards \
+            -p src.core.pipeline_context
+
       - name: Contract smoke test
         env:
           ICONTRACT_SLOW: "true"
