@@ -198,7 +198,7 @@ def _load_alphasift_hotspot_detail_cache(
     if stale:
         cached["fallback_used"] = True
         cached["stale_age_seconds"] = round(age_seconds, 1)
-    return _remove_non_finite_json_values(cached)
+    return cast(Dict[str, Any], _remove_non_finite_json_values(cached))
 
 
 def _write_alphasift_hotspot_detail_cache(
@@ -272,7 +272,7 @@ def _load_alphasift_hotspot_cache(
         }
     )
     cached["source_errors"] = list(cached.get("source_errors") or [])
-    return _remove_non_finite_json_values(cached)
+    return cast(Dict[str, Any], _remove_non_finite_json_values(cached))
 
 
 def _normalize_alphasift_hotspot_cache_payload(raw: Any) -> Optional[Dict[str, Any]]:
@@ -1214,7 +1214,7 @@ class AlphaSiftService:
         _write_alphasift_hotspot_detail_cache(
             provider=provider_name, topic=topic_text, payload=cleaned
         )
-        return cleaned
+        return cast(Dict[str, Any], cleaned)
 
     def screen(self, *, strategy: str, market: str, max_results: int) -> Dict[str, Any]:
         _ensure_alphasift_enabled(self.config)
@@ -1820,13 +1820,15 @@ def _call_alphasift_status() -> Dict[str, Any]:
             diagnostics=diagnostics,
         ) from exc
     if not isinstance(result, dict):
-        exc = TypeError(f"get_status returned {type(result).__name__}, expected dict")
-        diagnostics = _log_unexpected_alphasift_exception("get_status_result", exc)
+        type_exc = TypeError(
+            f"get_status returned {type(result).__name__}, expected dict"
+        )
+        diagnostics = _log_unexpected_alphasift_exception("get_status_result", type_exc)
         raise _alphasift_unavailable_exception(
             "AlphaSift 适配层 get_status 返回结构非法，请检查适配层版本。",
             diagnostics=diagnostics,
-        ) from exc
-    return result
+        ) from type_exc
+    return cast(Dict[str, Any], result)
 
 
 def _is_expected_alphasift_missing(exc: ModuleNotFoundError) -> bool:
@@ -1867,7 +1869,7 @@ def _log_unexpected_alphasift_exception(
 
 
 def _extract_alphasift_diagnostics(exc: HTTPException) -> Optional[Dict[str, str]]:
-    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    detail: Dict[str, Any] = exc.detail if isinstance(exc.detail, dict) else {}
     diagnostics = detail.get("diagnostics")
     if not isinstance(diagnostics, dict):
         return None
@@ -2714,7 +2716,7 @@ class DsaEastMoneyHotspotProvider:
             ]
         if rows.empty:
             return {}
-        return rows.iloc[0].to_dict()
+        return cast(Dict[str, Any], rows.iloc[0].to_dict())
 
     def _is_industry_hotspot(self, topic: str) -> bool:
         # EastMoney board-change rows are concept-like hot boards; if the topic is
@@ -3342,7 +3344,7 @@ def _build_alphasift_litellm_model_list(
 def _channel_litellm_model_list(channels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     model_list_builder = getattr(Config, "_channels_to_model_list", None)
     if callable(model_list_builder):
-        return _to_plain(model_list_builder(channels))
+        return cast(List[Dict[str, Any]], _to_plain(model_list_builder(channels)))
 
     model_list: List[Dict[str, Any]] = []
     for channel in channels:
@@ -3487,7 +3489,7 @@ def _normalize_dsa_llm_channels(config: Config) -> List[Dict[str, Any]]:
         models = _dedupe_strings(
             raw.get("models") if isinstance(raw.get("models"), list) else []
         )
-        channel = {
+        channel: Dict[str, Any] = {
             "name": name,
             "protocol": _env_text(raw.get("protocol")),
             "base_url": _env_text(raw.get("base_url")),
@@ -3648,9 +3650,12 @@ def get_dsa_realtime_quote(stock_code: str) -> Dict[str, Any]:
     if quote is None:
         return {}
     if hasattr(quote, "to_dict") and callable(quote.to_dict):
-        return _remove_non_finite_json_values(quote.to_dict())
+        return cast(Dict[str, Any], _remove_non_finite_json_values(quote.to_dict()))
     payload = _to_plain(quote)
-    return _remove_non_finite_json_values(payload if isinstance(payload, dict) else {})
+    return cast(
+        Dict[str, Any],
+        _remove_non_finite_json_values(payload if isinstance(payload, dict) else {}),
+    )
 
 
 def get_dsa_fundamental_context(stock_code: str) -> Dict[str, Any]:
@@ -3686,14 +3691,17 @@ def search_dsa_stock_news(
                 "published_date": getattr(item, "published_date", None),
             }
         )
-    return _remove_non_finite_json_values(
-        {
-            "query": getattr(response, "query", ""),
-            "provider": getattr(response, "provider", ""),
-            "success": bool(getattr(response, "success", False)),
-            "error": getattr(response, "error_message", None),
-            "results": results,
-        }
+    return cast(
+        Dict[str, Any],
+        _remove_non_finite_json_values(
+            {
+                "query": getattr(response, "query", ""),
+                "provider": getattr(response, "provider", ""),
+                "success": bool(getattr(response, "success", False)),
+                "error": getattr(response, "error_message", None),
+                "results": results,
+            }
+        ),
     )
 
 
@@ -3712,7 +3720,7 @@ def get_dsa_candidate_context(
         include_fundamentals=include_fundamentals,
         profile=mode or "pre_rank_light",
     )
-    return context.get("dsa_context", {})
+    return cast(Dict[str, Any], context.get("dsa_context", {}))
 
 
 def _enrich_candidates_with_dsa(
