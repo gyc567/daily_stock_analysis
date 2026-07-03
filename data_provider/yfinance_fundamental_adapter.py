@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def _pick_row(df: pd.DataFrame, keys) -> Optional[pd.Series]:
     for key in keys:
         if key in df.index:
             try:
-                return df.loc[key]
+                return cast(Optional[pd.Series], df.loc[key])
             except KeyError:
                 continue
     return None

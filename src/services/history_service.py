@@ -40,6 +40,7 @@ from src.utils.data_processing import (
     normalize_model_used,
     parse_json_field,
 )
+from typing import cast  # added by mypy_codemod
 
 if TYPE_CHECKING:
     from src.analyzer import AnalysisResult
@@ -1316,7 +1317,7 @@ class HistoryService:
             try:
                 return f"{float(value):{fmt}}"
             except (ValueError, TypeError):
-                return value
+                return cast(str, value)
         return str(value)
 
     @staticmethod

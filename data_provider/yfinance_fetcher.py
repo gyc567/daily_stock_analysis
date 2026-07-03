@@ -49,6 +49,7 @@ except (ImportError, ModuleNotFoundError):
         return bool(n and n.upper() != str(stock_code).strip().upper())
 
 import os
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ class YfinanceFetcher(BaseFetcher):
         yf_symbol, _ = get_us_index_yf_symbol(code)
         if yf_symbol:
             logger.debug(f"识别为美股指数: {code} -> {yf_symbol}")
-            return yf_symbol
+            return cast(str, yf_symbol)
 
         # 美股：1-5 个大写字母（可选 .X 后缀），原样返回
         if is_us_stock_code(code):
@@ -198,7 +199,7 @@ class YfinanceFetcher(BaseFetcher):
             if df.empty:
                 raise DataFetchError(f"Yahoo Finance 未查询到 {stock_code} 的数据")
 
-            return df
+            return cast(pd.DataFrame, df)
 
         except Exception as e:
             if isinstance(e, DataFetchError):

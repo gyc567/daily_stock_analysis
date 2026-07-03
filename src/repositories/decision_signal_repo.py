@@ -458,7 +458,7 @@ class DecisionSignalRepository:
                 fields,
                 allow_horizon_fill=allow_relaxed_horizon_fill,
             ):
-                return candidate
+                return cast(Optional[DecisionSignalRecord], candidate)
         return None
 
     @classmethod

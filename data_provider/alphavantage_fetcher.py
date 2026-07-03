@@ -18,6 +18,7 @@ import requests
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
 from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
 from .us_index_mapping import is_us_stock_code
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -177,5 +178,5 @@ class AlphaVantageFetcher(BaseFetcher):
 
         for match in data.get('bestMatches', []):
             if match.get('1. symbol') == symbol and match.get('2. name'):
-                return match['2. name']
+                return cast(Optional[str], match['2. name'])
         return None

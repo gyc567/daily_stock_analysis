@@ -18,6 +18,7 @@ import requests
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
 from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
 from .us_index_mapping import is_us_stock_code
+from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
 
@@ -165,5 +166,5 @@ class FinnhubFetcher(BaseFetcher):
 
         for item in data.get('result', []):
             if item.get('symbol') == symbol and item.get('description'):
-                return item['description']
+                return cast(Optional[str], item['description'])
         return None

@@ -78,7 +78,7 @@ class StrategiesCommand(BotCommand):
                 "reversal": "🔄 反转类",
                 "framework": "🧩 框架类",
             }
-            grouped = {}
+            grouped: dict[str, Any] = {}
             for skill in skills:
                 cat = skill.category or "trend"
                 grouped.setdefault(cat, []).append(skill)
