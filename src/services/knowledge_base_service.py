@@ -21,7 +21,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from sqlalchemy import text, select, func, and_, delete
 from sqlalchemy.orm import Session
@@ -48,16 +48,19 @@ MAX_FILE_SIZE = int(os.environ.get("KNOWLEDGE_BASE_MAX_FILE_MB", "20")) * 1024 *
 
 class KnowledgeBaseServiceError(Exception):
     """Base exception for service errors."""
+
     pass
 
 
 class DocumentNotFoundError(KnowledgeBaseServiceError):
     """Raised when document is not found."""
+
     pass
 
 
 class DuplicateDocumentError(KnowledgeBaseServiceError):
     """Raised when document content hash already exists."""
+
     pass
 
 
@@ -265,11 +268,14 @@ class KnowledgeBaseService:
                 query = query.where(KnowledgeDocument.source_type == source_type)
 
             # Count total
-            total = session.execute(
-                select(func.count(KnowledgeDocument.id)).where(
-                    KnowledgeDocument.deleted_at.is_(None)
-                )
-            ).scalar() or 0
+            total = (
+                session.execute(
+                    select(func.count(KnowledgeDocument.id)).where(
+                        KnowledgeDocument.deleted_at.is_(None)
+                    )
+                ).scalar()
+                or 0
+            )
 
             # Apply tag filter in Python (JSON stored)
             query = query.order_by(desc(KnowledgeDocument.created_at))
@@ -294,24 +300,32 @@ class KnowledgeBaseService:
     def get_document(self, doc_id: str) -> KnowledgeDocumentDetailResponse:
         """Get document detail with chunks."""
         with self._db.get_session() as session:
-            doc = session.execute(
-                select(KnowledgeDocument).where(
-                    and_(
-                        KnowledgeDocument.id == doc_id,
-                        KnowledgeDocument.deleted_at.is_(None),
+            doc = (
+                session.execute(
+                    select(KnowledgeDocument).where(
+                        and_(
+                            KnowledgeDocument.id == doc_id,
+                            KnowledgeDocument.deleted_at.is_(None),
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
 
             if not doc:
                 raise DocumentNotFoundError(f"Document not found: {doc_id}")
 
             # Get chunks
-            chunks = session.execute(
-                select(KnowledgeChunk)
-                .where(KnowledgeChunk.document_id == doc_id)
-                .order_by(KnowledgeChunk.chunk_index)
-            ).scalars().all()
+            chunks = (
+                session.execute(
+                    select(KnowledgeChunk)
+                    .where(KnowledgeChunk.document_id == doc_id)
+                    .order_by(KnowledgeChunk.chunk_index)
+                )
+                .scalars()
+                .all()
+            )
 
             chunk_list = []
             for chunk in chunks:
@@ -321,13 +335,15 @@ class KnowledgeBaseService:
                         metadata = json.loads(chunk.metadata_json)
                     except Exception:
                         pass
-                chunk_list.append({
-                    "chunk_id": chunk.id,
-                    "chunk_index": chunk.chunk_index,
-                    "content": chunk.content,
-                    "token_estimate": chunk.token_estimate,
-                    "metadata": metadata,
-                })
+                chunk_list.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "chunk_index": chunk.chunk_index,
+                        "content": chunk.content,
+                        "token_estimate": chunk.token_estimate,
+                        "metadata": metadata,
+                    }
+                )
 
             return KnowledgeDocumentDetailResponse(
                 id=doc.id,
@@ -344,15 +360,20 @@ class KnowledgeBaseService:
 
     def delete_document(self, doc_id: str) -> bool:
         """Soft delete document and its chunks."""
+
         def _write(session: Session) -> bool:
-            doc = session.execute(
-                select(KnowledgeDocument).where(
-                    and_(
-                        KnowledgeDocument.id == doc_id,
-                        KnowledgeDocument.deleted_at.is_(None),
+            doc = (
+                session.execute(
+                    select(KnowledgeDocument).where(
+                        and_(
+                            KnowledgeDocument.id == doc_id,
+                            KnowledgeDocument.deleted_at.is_(None),
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
 
             if not doc:
                 return False
@@ -365,9 +386,7 @@ class KnowledgeBaseService:
 
             # Delete chunks from table
             session.execute(
-                delete(KnowledgeChunk).where(
-                    KnowledgeChunk.document_id == doc_id
-                )
+                delete(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id)
             )
 
             # Delete file if exists
@@ -390,14 +409,18 @@ class KnowledgeBaseService:
         from src.services.knowledge_base_parser import parse_markdown, parse_text
 
         with self._db.get_session() as session:
-            doc = session.execute(
-                select(KnowledgeDocument).where(
-                    and_(
-                        KnowledgeDocument.id == doc_id,
-                        KnowledgeDocument.deleted_at.is_(None),
+            doc = (
+                session.execute(
+                    select(KnowledgeDocument).where(
+                        and_(
+                            KnowledgeDocument.id == doc_id,
+                            KnowledgeDocument.deleted_at.is_(None),
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
 
             if not doc:
                 raise DocumentNotFoundError(f"Document not found: {doc_id}")
@@ -405,9 +428,12 @@ class KnowledgeBaseService:
             # Read content from file or use source_url
             content = ""
             if doc.file_path and Path(doc.file_path).exists():
-                content = Path(doc.file_path).read_text(encoding="utf-8", errors="replace")
+                content = Path(doc.file_path).read_text(
+                    encoding="utf-8", errors="replace"
+                )
             elif doc.source_url:
                 from src.services.knowledge_base_parser import fetch_url_content
+
                 try:
                     chunks, _ = fetch_url_content(doc.source_url)
                     content = "\n\n".join(chunks)
@@ -430,9 +456,7 @@ class KnowledgeBaseService:
 
             # Delete old chunks
             session.execute(
-                delete(KnowledgeChunk).where(
-                    KnowledgeChunk.document_id == doc_id
-                )
+                delete(KnowledgeChunk).where(KnowledgeChunk.document_id == doc_id)
             )
 
             # Create new chunks
@@ -511,13 +535,19 @@ class KnowledgeBaseService:
                 if request.stock_code:
                     content_lower = row.content.lower()
                     code_lower = request.stock_code.lower()
-                    if code_lower not in content_lower and code_lower not in " ".join(tags).lower():
+                    if (
+                        code_lower not in content_lower
+                        and code_lower not in " ".join(tags).lower()
+                    ):
                         continue
 
                 if request.stock_name:
                     content_lower = row.content.lower()
                     name_lower = request.stock_name.lower()
-                    if name_lower not in content_lower and name_lower not in " ".join(tags).lower():
+                    if (
+                        name_lower not in content_lower
+                        and name_lower not in " ".join(tags).lower()
+                    ):
                         continue
 
                 # Filter by tags
@@ -532,26 +562,30 @@ class KnowledgeBaseService:
                     updated_at = row.updated_at
                     # Handle both datetime and string formats
                     if isinstance(updated_at, str):
-                        updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                        updated_at = datetime.fromisoformat(
+                            updated_at.replace("Z", "+00:00")
+                        )
                     days_old = (datetime.now() - updated_at).days
                     recency_boost = max(0, 0.1 - days_old * 0.001)
                     score = score * (1 + recency_boost)
 
-                hits.append(KnowledgeChunkHit(
-                    document_id=row.document_id,
-                    document_title=row.title,
-                    source_type=SourceType(row.source_type),
-                    source_url=row.source_url,
-                    chunk_id=row.chunk_id,
-                    content=row.content,
-                    score=min(1.0, max(0.0, -score / 10)),  # Normalize BM25 to 0-1
-                    created_at=row.created_at,
-                    validation_status=ValidationStatus.PENDING,
-                ))
+                hits.append(
+                    KnowledgeChunkHit(
+                        document_id=row.document_id,
+                        document_title=row.title,
+                        source_type=SourceType(row.source_type),
+                        source_url=row.source_url,
+                        chunk_id=row.chunk_id,
+                        content=row.content,
+                        score=min(1.0, max(0.0, -score / 10)),  # Normalize BM25 to 0-1
+                        created_at=row.created_at,
+                        validation_status=ValidationStatus.PENDING,
+                    )
+                )
 
             # Sort by score and limit
             hits.sort(key=lambda h: h.score, reverse=True)
-            hits = hits[:request.top_k]
+            hits = hits[: request.top_k]
 
             return KnowledgeSearchResponse(
                 available=True,
@@ -615,14 +649,18 @@ class KnowledgeBaseService:
     def _get_by_hash(self, content_hash: str) -> Optional[KnowledgeDocument]:
         """Find document by content hash."""
         with self._db.get_session() as session:
-            return session.execute(
-                select(KnowledgeDocument).where(
-                    and_(
-                        KnowledgeDocument.content_hash == content_hash,
-                        KnowledgeDocument.deleted_at.is_(None),
+            return (
+                session.execute(
+                    select(KnowledgeDocument).where(
+                        and_(
+                            KnowledgeDocument.content_hash == content_hash,
+                            KnowledgeDocument.deleted_at.is_(None),
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
 
     def _create_doc_record(
         self,
@@ -636,6 +674,7 @@ class KnowledgeBaseService:
         chunk_count: int,
     ) -> KnowledgeDocumentItem:
         """Create document record in DB and return as item."""
+
         def _write(session: Session) -> KnowledgeDocumentItem:
             doc = KnowledgeDocument(
                 id=doc_id,
@@ -667,9 +706,11 @@ class KnowledgeBaseService:
 
     def _create_chunks(self, doc_id: str, chunks: List[str]) -> None:
         """Create chunk records in DB."""
+
         def _write(session: Session) -> None:
             for idx, content in enumerate(chunks):
                 from src.services.knowledge_base_parser import _estimate_tokens
+
                 chunk_id = f"{doc_id}_chunk_{idx:04d}"
                 chunk = KnowledgeChunk(
                     id=chunk_id,
@@ -696,7 +737,11 @@ class KnowledgeBaseService:
                             INSERT INTO knowledge_chunks_fts (content, document_id, chunk_id)
                             VALUES (:content, :document_id, :chunk_id)
                         """),
-                        {"content": content, "document_id": doc_id, "chunk_id": chunk_id},
+                        {
+                            "content": content,
+                            "document_id": doc_id,
+                            "chunk_id": chunk_id,
+                        },
                     )
         except Exception as e:
             logger.error(f"Failed to index chunks for {doc_id}: {e}")
@@ -709,7 +754,9 @@ class KnowledgeBaseService:
         try:
             with self._db._engine.connect() as conn:
                 conn.execute(
-                    text("DELETE FROM knowledge_chunks_fts WHERE document_id = :doc_id"),
+                    text(
+                        "DELETE FROM knowledge_chunks_fts WHERE document_id = :doc_id"
+                    ),
                     {"doc_id": doc_id},
                 )
         except Exception as e:
@@ -737,7 +784,7 @@ class KnowledgeBaseService:
         if not tags_json:
             return []
         try:
-            return json.loads(tags_json)
+            return cast(List[str], json.loads(tags_json))
         except Exception:
             return []
 

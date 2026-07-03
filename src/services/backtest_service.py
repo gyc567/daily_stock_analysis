@@ -636,7 +636,7 @@ class BacktestService:
         if parsed:
             return parsed
         if getattr(analysis, "created_at", None):
-            return analysis.created_at.date()
+            return cast(date, analysis.created_at.date())
         logger.warning(
             f"无法确定分析日期，跳过记录: {analysis.code}#{getattr(analysis, 'id', '?')}"
         )
