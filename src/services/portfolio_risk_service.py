@@ -125,7 +125,7 @@ class PortfolioRiskService:
             existing_dates = {
                 row.snapshot_date
                 for row in existing_rows
-                if int(row.account_id) == int(account_id)
+                if int(cast(int, row.account_id)) == int(account_id)
             }  # type: ignore[arg-type]
             current_date = start_date
             while current_date <= as_of_date:
@@ -140,13 +140,13 @@ class PortfolioRiskService:
             return
 
         account_ids = [
-            int(account.id)
+            int(cast(int, account.id))
             for account in self.repo.list_accounts(include_inactive=False)
         ]  # type: ignore[arg-type]
         if not account_ids:
             return
         existing_pairs = {
-            (int(row.account_id), row.snapshot_date) for row in existing_rows
+            (int(cast(int, row.account_id)), row.snapshot_date) for row in existing_rows
         }  # type: ignore[arg-type]
         current_date = start_date
         while current_date <= as_of_date:
@@ -177,7 +177,7 @@ class PortfolioRiskService:
         first_activity_candidates: List[date] = []
         for account in self.repo.list_accounts(include_inactive=False):
             first_activity = self.repo.get_first_activity_date(
-                account_id=int(account.id), as_of=as_of_date
+                account_id=int(cast(int, account.id)), as_of=as_of_date
             )  # type: ignore[arg-type]
             if first_activity is not None:
                 first_activity_candidates.append(first_activity)
