@@ -231,8 +231,12 @@ class ConceptBoardProvider:
         ]
 
 
+_concept_board_provider: Optional[ConceptBoardProvider] = None
+
+
 def get_concept_board_provider() -> ConceptBoardProvider:
-    """Get singleton concept board provider"""
-    if not hasattr(get_concept_board_provider, "_instance"):
-        get_concept_board_provider._instance = ConceptBoardProvider()  # type: ignore[attr-defined]
-    return get_concept_board_provider._instance  # type: ignore[attr-defined]
+    """Get singleton provider"""
+    global _concept_board_provider
+    if _concept_board_provider is None:
+        _concept_board_provider = ConceptBoardProvider()
+    return _concept_board_provider
