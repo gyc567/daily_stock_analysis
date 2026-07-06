@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date, datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
+from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING, Union
 
 from src.config import get_config, resolve_news_window_days
 from src.report_language import (
@@ -74,8 +74,12 @@ class HistoryService:
         self.db = db_manager or DatabaseManager.get_instance()
 
     @staticmethod
-    def _history_code_filter_candidates(stock_code: str) -> List[str]:
-        raw_code = str(stock_code or "").strip()
+    def _history_code_filter_candidates(stock_code: Union[str, List[str]]) -> List[str]:
+        raw_code = ""
+        if isinstance(stock_code, list):
+            raw_code = str(stock_code[0] if stock_code else "").strip()
+        else:
+            raw_code = str(stock_code or "").strip()
         if not raw_code:
             return []
 
@@ -138,7 +142,7 @@ class HistoryService:
 
     def get_history_list(
         self,
-        stock_code: Optional[str] = None,
+        stock_code: Optional[Union[str, List[str]]] = None,
         report_type: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
@@ -161,10 +165,16 @@ class HistoryService:
         """
         try:
             if stock_code:
-                # _history_code_filter_candidates returns List[str]; take first match
+                # _history_code_filter_candidates returns 所有 stock_code 变体
+                # (.SH/.SS/无后缀/HK 前缀/补 0 等同一只股票的多写法)。
+                # 测试契约（tests/test_analysis_history.py）：用任一写法查询
+                # 应返回**全部变体**的所有历史记录，因此传入 list 走 IN 查询。
                 candidates: List[str] = self._history_code_filter_candidates(stock_code)
                 if candidates:
-                    stock_code = candidates[0]
+                    if len(candidates) > 1:
+                        stock_code = candidates  # 触发 IN 查询
+                    else:
+                        stock_code = candidates[0]
 
             # Parse date parameters
             start_dt = None
@@ -492,7 +502,9 @@ class HistoryService:
             for candidate in (raw_result.get("dashboard"), raw_result):
                 if not isinstance(candidate, dict):
                     continue
-                raw_points = cast(Dict[str, Any], find_sniper_points(candidate)) or raw_points
+                raw_points = (
+                    cast(Dict[str, Any], find_sniper_points(candidate)) or raw_points
+                )
                 if any(
                     raw_points.get(k) is not None
                     for k in ("ideal_buy", "secondary_buy", "stop_loss", "take_profit")
