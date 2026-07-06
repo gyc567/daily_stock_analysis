@@ -16,15 +16,11 @@ import inspect
 import logging
 from typing import Dict, Any, Optional, List, cast
 
-# TODO: src.scoring module missing from repo, temporarily disabled
-def calculate_bayesian(*args, **kwargs):
-    raise NotImplementedError("src.scoring module missing")
-
-def aggregate_framework(*args, **kwargs):
-    raise NotImplementedError("src.scoring module missing")
-
-def get_default_weights():
-    return {}
+from src.scoring import (
+    aggregate_framework,
+    calculate_bayesian,
+    get_default_weights,
+)
 from src.services.research_scoring_service import ResearchScoringService
 
 logger = logging.getLogger(__name__)

@@ -44,7 +44,7 @@ export const KnowledgeDocumentDetail: React.FC<KnowledgeDocumentDetailProps> = (
           <div className="flex items-center justify-center p-12" role="progressbar" aria-label="加载中">
             <Loader2 className="h-8 w-8 animate-spin text-cyan" aria-hidden="true" />
           </div>
-        ) : (
+        ) : document ? (
           <>
             {/* Header */}
             <div className="flex items-start justify-between border-b border-white/5 p-5">
@@ -138,7 +138,7 @@ export const KnowledgeDocumentDetail: React.FC<KnowledgeDocumentDetailProps> = (
               )}
             </div>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

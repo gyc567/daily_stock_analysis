@@ -12,45 +12,21 @@ import logging
 import os
 from typing import cast, Dict, Any, Optional, List
 
-# TODO: src.scoring module missing from repo, temporarily disabled
-# from src.scoring import (
-#     aggregate_framework,
-#     calculate_bayesian,
-#     get_default_weights,
-#     FrameworkScore,
-#     BayesianResult,
-# )
-# from src.scoring.indicators import (
-#     score_supply_chain,
-#     score_fundamental,
-#     score_capital,
-#     score_technical,
-#     score_sentiment,
-#     score_macro,
-# )
-from dataclasses import dataclass
-from typing import Any, Dict
-
-def aggregate_framework(*args, **kwargs): pass
-def calculate_bayesian(*args, **kwargs): pass
-def get_default_weights(): return {}
-def score_supply_chain(*args, **kwargs): return 0
-def score_fundamental(*args, **kwargs): return 0
-def score_capital(*args, **kwargs): return 0
-def score_technical(*args, **kwargs): return 0
-def score_sentiment(*args, **kwargs): return 0
-def score_macro(*args, **kwargs): return 0
-
-@dataclass
-class FrameworkScore:
-    score: float = 0.0
-    dimensions: Dict[str, Any] = None
-
-@dataclass
-class BayesianResult:
-    posterior: float = 0.0
-    prior: float = 0.0
-    likelihood: float = 0.0
+from src.scoring import (
+    aggregate_framework,
+    calculate_bayesian,
+    get_default_weights,
+    FrameworkScore,
+    BayesianResult,
+)
+from src.scoring.indicators import (
+    score_supply_chain,
+    score_fundamental,
+    score_capital,
+    score_technical,
+    score_sentiment,
+    score_macro,
+)
 from src.repositories import PositionLedgerRepo, ScoreLedgerRepo
 from src.storage import DatabaseManager
 import json_repair  # type: ignore[import-not-found]
