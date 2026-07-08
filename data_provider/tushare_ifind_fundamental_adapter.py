@@ -296,44 +296,6 @@ class TushareIfindFundamentalAdapter:
                     anchor_to_value[anchor] = None
         return [(bk, anchor, anchor_to_value.get(anchor)) for bk, anchor in items]
 
-        # Period candidates: the caller's anchor-specific period, then a
-        # short list of recent fiscal periods. We only parallelize
-        # across anchors; periods within an anchor are walked serially.
-        period_candidates: List[Optional[str]] = [period or None]
-        for fallback_period in _RECENT_PERIODS:
-            if fallback_period != period:
-                period_candidates.append(fallback_period)
-
-        def _read_one(anchor: str) -> Optional[float]:
-            for candidate in period_candidates:
-                try:
-                    reading = self._ifind.read(ts_code, anchor, candidate)
-                except Exception:  # noqa: BLE001 — fail-open
-                    continue
-                if reading is not None and reading.value is not None:
-                    return float(reading.value)
-            return None
-
-        # ``ThreadPoolExecutor`` lets the daemon-side ``IfindFetcher.fetch``
-        # block synchronously without blocking the caller. ``max_workers``
-        # matches the number of anchors so we fan out fully and still
-        # bound memory.
-        max_workers = max(1, min(len(items), 4))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_anchor = {
-                executor.submit(_read_one, anchor): anchor for _, anchor in items
-            }
-            anchor_to_value: Dict[str, Optional[float]] = {}
-            for future in concurrent.futures.as_completed(
-                future_to_anchor, timeout=None
-            ):
-                anchor = future_to_anchor[future]
-                try:
-                    anchor_to_value[anchor] = future.result()
-                except Exception:  # noqa: BLE001 — fail-open
-                    anchor_to_value[anchor] = None
-        return [(bk, anchor, anchor_to_value.get(anchor)) for bk, anchor in items]
-
     def _read_top10_holders(self, ts_code: str, period: str) -> Optional[float]:
         # Tushare top10_holders is restricted on basic-plan tokens; we still
         # try. iFinD does not expose this field, so we return None.

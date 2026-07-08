@@ -116,7 +116,6 @@ def data_freshness_line(
         if is_stale_flag
         else f"📅 数据截至 **{text}**。"
     )
-    return s
 
 
 def _resolve_templates_dir() -> Path:
@@ -183,7 +182,7 @@ def render(
 
     # Build template context with pre-computed signal levels (sorted by score)
     sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
-    sorted_enriched = []
+    sorted_enriched: List[Dict[str, Any]] = []
     for r in sorted_results:
         st, se, _ = get_signal_level(
             r.operation_advice, r.sentiment_score, report_language
@@ -222,11 +221,6 @@ def render(
 
     def failed_checks(checklist: List[str]) -> List[str]:
         return [c for c in (checklist or []) if c.startswith("❌") or c.startswith("⚠️")]
-        return (
-            f"⚠ 数据截至 **{text}**，可能已陈旧，请结合最新公告判断。"
-            if is_stale_flag
-            else f"📅 数据截至 **{text}**。"
-        )
 
     def phase_pack_excerpt(result: AnalysisResult) -> str:
         return format_public_phase_pack_excerpt(
