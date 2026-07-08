@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 SUPPORTED_REPORT_LANGUAGES = ("zh", "en")
 
@@ -457,7 +457,7 @@ def _strip_decision_negation_connectors(text: str) -> str:
         changed = False
         for connector in _DECISION_INTENT_NEGATION_CONNECTORS:
             if suffix.startswith(connector):
-                suffix = suffix[len(connector):].strip()
+                suffix = suffix[len(connector) :].strip()
                 changed = True
                 break
     return suffix
@@ -477,7 +477,9 @@ def is_supported_report_language_value(value: Optional[str]) -> bool:
     candidate = (value or "").strip().lower().replace(" ", "_")
     if not candidate:
         return False
-    return candidate in SUPPORTED_REPORT_LANGUAGES or candidate in _REPORT_LANGUAGE_ALIASES
+    return (
+        candidate in SUPPORTED_REPORT_LANGUAGES or candidate in _REPORT_LANGUAGE_ALIASES
+    )
 
 
 def get_report_labels(language: Optional[str]) -> Dict[str, str]:
@@ -506,6 +508,42 @@ def get_chip_unavailable_text(language: Optional[str]) -> str:
     return _CHIP_UNAVAILABLE_BY_LANGUAGE[normalize_report_language(language)]
 
 
+# 基本面快照（最新报告期）段 i18n 提示
+_FUNDAMENTAL_SNAPSHOT_TABLE_HEADER = {
+    "zh": ("指标", "数值"),
+    "en": ("Metric", "Value"),
+}
+_FUNDAMENTAL_SNAPSHOT_HEADING = {
+    "zh": "基本面快照（最新报告期 {as_of}）",
+    "en": "Fundamentals Snapshot (As-of {as_of})",
+}
+_FUNDAMENTAL_SNAPSHOT_DISCLAIMER = {
+    "zh": "以上数值来自 AkShare / iFinD / MX 多源融合；数据截至 {as_of}。若数据已陈旧（报告期早于近 1 年），请结合最新公告修正分析；不同字段的「报告期」可能不同，混合解读时以最新为准。",
+    "en": "Values above are fused from AkShare / iFinD / MX. Anchored to {as_of}. If the anchor is stale (older than ~1 year), reconcile with the latest filing before reasoning; different fields may use different periods, prefer the most recent when mixed.",
+}
+
+
+def get_fundamental_snapshot_heading(
+    language: Optional[str], as_of: Optional[str]
+) -> str:
+    return _FUNDAMENTAL_SNAPSHOT_HEADING[normalize_report_language(language)].format(
+        as_of=as_of or "N/A"
+    )
+
+
+def get_fundamental_snapshot_disclaimer(
+    language: Optional[str], as_of: Optional[str]
+) -> str:
+    return _FUNDAMENTAL_SNAPSHOT_DISCLAIMER[normalize_report_language(language)].format(
+        as_of=as_of or "N/A"
+    )
+
+
+def get_fundamental_snapshot_table_header(language: Optional[str]) -> Tuple[str, str]:
+    """Return the localized (metric, value) column headers for the snapshot table."""
+    return _FUNDAMENTAL_SNAPSHOT_TABLE_HEADER[normalize_report_language(language)]
+
+
 def _normalize_lookup_key(value: Any) -> str:
     return str(value or "").strip().lower().replace("_", " ").replace("-", " ")
 
@@ -523,7 +561,9 @@ def _iter_lookup_candidates(value: Any) -> list[str]:
     return candidates
 
 
-def _canonicalize_lookup_value(value: Any, canonical_map: Dict[str, str]) -> Optional[str]:
+def _canonicalize_lookup_value(
+    value: Any, canonical_map: Dict[str, str]
+) -> Optional[str]:
     for candidate in _iter_lookup_candidates(value):
         canonical = canonical_map.get(_normalize_lookup_key(candidate))
         if canonical:
@@ -537,7 +577,11 @@ def _first_non_negated_position(text: str, token: str) -> Optional[int]:
 
     normalized_text = text.lower().strip()
     if any(ch in normalized_text for ch in "abcdefghijklmnopqrstuvwxyz"):
-        matches = list(re.finditer(rf"(?<![a-z0-9_]){re.escape(token)}(?![a-z0-9_])", normalized_text))
+        matches = list(
+            re.finditer(
+                rf"(?<![a-z0-9_]){re.escape(token)}(?![a-z0-9_])", normalized_text
+            )
+        )
     else:
         matches = list(re.finditer(re.escape(token), normalized_text))
 
@@ -553,7 +597,7 @@ def _first_non_negated_position(text: str, token: str) -> Optional[int]:
             neg_idx = lookback.rfind(neg)
             if neg_idx < 0:
                 continue
-            suffix = lookback[neg_idx + len(neg):]
+            suffix = lookback[neg_idx + len(neg) :]
             if not suffix:
                 negated = True
                 break
@@ -563,7 +607,10 @@ def _first_non_negated_position(text: str, token: str) -> Optional[int]:
             if not normalized_suffix:
                 negated = True
                 break
-            if any(ch in normalized_suffix for ch in _DECISION_INTENT_NEGATION_SCOPE_BREAK_CHARS):
+            if any(
+                ch in normalized_suffix
+                for ch in _DECISION_INTENT_NEGATION_SCOPE_BREAK_CHARS
+            ):
                 continue
             if len(normalized_suffix) > 6 and token not in normalized_suffix:
                 continue
@@ -686,7 +733,9 @@ def is_chip_structure_unavailable(chip_data: Any) -> bool:
         if str(raw or "").strip():
             return True
     if any(key in chip_data for key in _CHIP_METRIC_KEYS):
-        return all(is_chip_placeholder_value(chip_data.get(key)) for key in _CHIP_METRIC_KEYS)
+        return all(
+            is_chip_placeholder_value(chip_data.get(key)) for key in _CHIP_METRIC_KEYS
+        )
     return all(is_chip_placeholder_value(value) for value in chip_data.values())
 
 
@@ -760,22 +809,44 @@ def infer_decision_type_from_advice(value: Any, default: str = "hold") -> str:
     return default
 
 
-def get_signal_level(advice: Any, score: Any, language: Optional[str]) -> tuple[str, str, str]:
+def get_signal_level(
+    advice: Any, score: Any, language: Optional[str]
+) -> tuple[str, str, str]:
     """Return localized signal text, emoji, and stable color tag."""
     normalized_language = normalize_report_language(language)
     canonical = _canonicalize_lookup_value(advice, _OPERATION_ADVICE_CANONICAL_MAP)
     if canonical == "strong_buy":
-        return (_OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language], "💚", "strong_buy")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language],
+            "💚",
+            "strong_buy",
+        )
     if canonical == "buy":
         return (_OPERATION_ADVICE_TRANSLATIONS["buy"][normalized_language], "🟢", "buy")
     if canonical == "hold":
-        return (_OPERATION_ADVICE_TRANSLATIONS["hold"][normalized_language], "🟡", "hold")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["hold"][normalized_language],
+            "🟡",
+            "hold",
+        )
     if canonical == "watch":
-        return (_OPERATION_ADVICE_TRANSLATIONS["watch"][normalized_language], "⚪", "watch")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["watch"][normalized_language],
+            "⚪",
+            "watch",
+        )
     if canonical == "reduce":
-        return (_OPERATION_ADVICE_TRANSLATIONS["reduce"][normalized_language], "🟠", "reduce")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["reduce"][normalized_language],
+            "🟠",
+            "reduce",
+        )
     if canonical in {"sell", "strong_sell"}:
-        return (_OPERATION_ADVICE_TRANSLATIONS["sell"][normalized_language], "🔴", "sell")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["sell"][normalized_language],
+            "🔴",
+            "sell",
+        )
 
     try:
         numeric_score = int(float(score))
@@ -783,15 +854,31 @@ def get_signal_level(advice: Any, score: Any, language: Optional[str]) -> tuple[
         numeric_score = 50
 
     if numeric_score >= 80:
-        return (_OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language], "💚", "strong_buy")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language],
+            "💚",
+            "strong_buy",
+        )
     if numeric_score >= 65:
         return (_OPERATION_ADVICE_TRANSLATIONS["buy"][normalized_language], "🟢", "buy")
     if numeric_score >= 55:
-        return (_OPERATION_ADVICE_TRANSLATIONS["hold"][normalized_language], "🟡", "hold")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["hold"][normalized_language],
+            "🟡",
+            "hold",
+        )
     if numeric_score >= 45:
-        return (_OPERATION_ADVICE_TRANSLATIONS["watch"][normalized_language], "⚪", "watch")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["watch"][normalized_language],
+            "⚪",
+            "watch",
+        )
     if numeric_score >= 35:
-        return (_OPERATION_ADVICE_TRANSLATIONS["reduce"][normalized_language], "🟠", "reduce")
+        return (
+            _OPERATION_ADVICE_TRANSLATIONS["reduce"][normalized_language],
+            "🟠",
+            "reduce",
+        )
     return (_OPERATION_ADVICE_TRANSLATIONS["sell"][normalized_language], "🔴", "sell")
 
 

@@ -3342,6 +3342,65 @@ class GeminiAnalyzer:
 > 若上述字段为 N/A 或缺失，请明确写“数据缺失，无法判断”，禁止编造。
 """
 
+        # 基本面快照：把 growth 块（revenue_yoy / net_profit_yoy / roe / gross_margin）
+        # 透传给 LLM，让分析基于最新结构化数据而不是仅看 K 线。
+        # as_of 优先取 fundamental_context["as_of"]（本次修复 1+2 注入的报告期），
+        # 缺失时回退 fundamental_context["as_of_date"]（DB 列兼容旧快照）。
+        # 仅在有任意非 None 字段或 as_of 已知时才渲染，避免空表。
+        growth_block = (
+            fundamental_context.get("growth", {})
+            if isinstance(fundamental_context, dict)
+            and isinstance(fundamental_context.get("growth"), dict)
+            else {}
+        )
+        growth_data = (
+            growth_block.get("data", {}) if isinstance(growth_block, dict) else {}
+        )
+        growth_as_of = None
+        if isinstance(fundamental_context, dict):
+            growth_as_of = fundamental_context.get("as_of") or fundamental_context.get(
+                "as_of_date"
+            )
+        growth_non_null: Dict[str, Any] = {}
+        if isinstance(growth_data, dict):
+            growth_non_null = {k: v for k, v in growth_data.items() if v is not None}
+        if growth_non_null or growth_as_of:
+            from src.report_language import (
+                get_fundamental_snapshot_heading,
+                get_fundamental_snapshot_disclaimer,
+                get_fundamental_snapshot_table_header,
+                get_report_labels,
+            )
+
+            _labels = get_report_labels(report_language)
+            metric_label, value_label = get_fundamental_snapshot_table_header(
+                report_language
+            )
+
+            def _pct(v: Any) -> str:
+                if v is None:
+                    return "N/A"
+                try:
+                    return f"{float(v):.2f}%"
+                except (TypeError, ValueError):
+                    return "N/A"
+
+            heading = get_fundamental_snapshot_heading(report_language, growth_as_of)
+            disclaimer = get_fundamental_snapshot_disclaimer(
+                report_language, growth_as_of
+            )
+            prompt += f"""
+### {heading}
+| {metric_label} | {value_label} |
+|------|------|
+| {_labels.get("revenue_yoy_label", "营收同比")} | {_pct(growth_non_null.get("revenue_yoy"))} |
+| {_labels.get("net_profit_yoy_label", "净利同比")} | {_pct(growth_non_null.get("net_profit_yoy"))} |
+| {_labels.get("roe_label", "ROE")} | {_pct(growth_non_null.get("roe"))} |
+| {_labels.get("gross_margin_label", "毛利率")} | {_pct(growth_non_null.get("gross_margin"))} |
+
+> {disclaimer}
+"""
+
         capital_flow_block = (
             fundamental_context.get("capital_flow", {})
             if isinstance(fundamental_context, dict)

@@ -37,7 +37,7 @@ class TushareSupplyChainProvider:
             logger.warning(f"[TushareSupplyChainProvider] init failed: {e}")
 
     def get_supplier_customer(
-        self, stock_code: str, year: int = 2023
+        self, stock_code: str, year: Optional[int] = None
     ) -> Dict[str, List[str]]:
         """
         Get top 5 suppliers and customers.
@@ -49,6 +49,10 @@ class TushareSupplyChainProvider:
         Returns:
             Dict with 'suppliers' and 'customers' lists
         """
+        if year is None:
+            from data_provider.supply_chain import latest_fiscal_year
+
+            year = latest_fiscal_year()
         if self._pro is None:
             return {"suppliers": [], "customers": []}
 

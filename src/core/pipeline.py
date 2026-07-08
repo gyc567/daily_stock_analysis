@@ -485,6 +485,7 @@ class StockAnalysisPipeline:
                     payload=fundamental_context,
                     source_chain=fundamental_context.get("source_chain", []),
                     coverage=fundamental_context.get("coverage", {}),
+                    as_of_date=fundamental_context.get("as_of"),
                 )
             except Exception as e:
                 logger.debug(f"{stock_name}({code}) 基本面快照写入失败: {e}")

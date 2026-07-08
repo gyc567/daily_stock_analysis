@@ -61,12 +61,14 @@ class TestFundamentalContext(unittest.TestCase):
             "source_chain": [],
             "errors": [],
         }
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=None), \
-                patch(
-                    "data_provider.yfinance_fundamental_adapter.YfinanceFundamentalAdapter.get_fundamental_bundle",
-                    return_value=empty_bundle,
-                ):
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(manager, "get_realtime_quote", return_value=None),
+            patch(
+                "data_provider.yfinance_fundamental_adapter.YfinanceFundamentalAdapter.get_fundamental_bundle",
+                return_value=empty_bundle,
+            ),
+        ):
             ctx = manager.get_fundamental_context("AAPL")
         self.assertEqual(ctx["market"], "us")
         self.assertEqual(ctx["status"], "not_supported")
@@ -112,12 +114,14 @@ class TestFundamentalContext(unittest.TestCase):
                     "currency": "USD",
                 },
                 "dividend": {
-                    "events": [{
-                        "event_date": "2026-05-11",
-                        "ex_dividend_date": "2026-05-11",
-                        "cash_dividend_per_share": 0.27,
-                        "is_pre_tax": True,
-                    }],
+                    "events": [
+                        {
+                            "event_date": "2026-05-11",
+                            "ex_dividend_date": "2026-05-11",
+                            "cash_dividend_per_share": 0.27,
+                            "is_pre_tax": True,
+                        }
+                    ],
                     "ttm_event_count": 4,
                     "ttm_cash_dividend_per_share": 1.05,
                     "ttm_dividend_yield_pct": 0.36,
@@ -130,12 +134,14 @@ class TestFundamentalContext(unittest.TestCase):
             "source_chain": ["growth:yfinance.info"],
             "errors": [],
         }
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
-                patch(
-                    "data_provider.yfinance_fundamental_adapter.YfinanceFundamentalAdapter.get_fundamental_bundle",
-                    return_value=bundle,
-                ):
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(manager, "get_realtime_quote", return_value=quote),
+            patch(
+                "data_provider.yfinance_fundamental_adapter.YfinanceFundamentalAdapter.get_fundamental_bundle",
+                return_value=bundle,
+            ),
+        ):
             ctx = manager.get_fundamental_context("AAPL")
         self.assertEqual(ctx["market"], "us")
         # Offshore status only considers valuation/growth/earnings (capital_flow
@@ -148,16 +154,21 @@ class TestFundamentalContext(unittest.TestCase):
         growth_data = ctx["growth"].get("data") or {}
         self.assertEqual(growth_data.get("revenue_yoy"), 16.5)
         self.assertEqual(growth_data.get("roe"), 141.4)
-        financial_report = (ctx["earnings"].get("data") or {}).get("financial_report") or {}
+        financial_report = (ctx["earnings"].get("data") or {}).get(
+            "financial_report"
+        ) or {}
         self.assertEqual(financial_report.get("currency"), "USD")
         self.assertEqual(financial_report.get("revenue"), 1.11e11)
         dividend = (ctx["earnings"].get("data") or {}).get("dividend") or {}
         self.assertEqual(dividend.get("ttm_cash_dividend_per_share"), 1.05)
         self.assertEqual(dividend.get("ttm_dividend_yield_pct"), 0.36)
-        self.assertEqual(ctx.get("belong_boards"), [
-            {"name": "Technology", "type": "行业"},
-            {"name": "Consumer Electronics", "type": "概念"},
-        ])
+        self.assertEqual(
+            ctx.get("belong_boards"),
+            [
+                {"name": "Technology", "type": "行业"},
+                {"name": "Consumer Electronics", "type": "概念"},
+            ],
+        )
 
     def test_etf_market_downgrades_to_partial_or_not_supported(self) -> None:
         manager = DataFetcherManager(fetchers=[])
@@ -184,12 +195,19 @@ class TestFundamentalContext(unittest.TestCase):
             "source_chain": [],
             "errors": [],
         }
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
-                patch(
-                    "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
-                    return_value=bundle,
-                ):
+        # The fallback adapter spawns an iFinD daemon thread on first
+        # use; disable it here so the test does not hang on a real
+        # network call.
+        unavailable_adapter = SimpleNamespace(available=False)
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(manager, "get_realtime_quote", return_value=quote),
+            patch(
+                "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
+                return_value=bundle,
+            ),
+            patch.object(manager, "_tushare_ifind_adapter", unavailable_adapter),
+        ):
             ctx = manager.get_fundamental_context("159915")
         self.assertEqual(ctx["market"], "cn")
         self.assertIn(ctx["status"], ("partial", "not_supported"))
@@ -206,12 +224,18 @@ class TestFundamentalContext(unittest.TestCase):
         tushare = _DummyFetcher(
             "TushareFetcher",
             priority=1,
-            rankings=([{"name": "半导体", "change_pct": 1.0}], [{"name": "消费", "change_pct": -1.0}]),
+            rankings=(
+                [{"name": "半导体", "change_pct": 1.0}],
+                [{"name": "消费", "change_pct": -1.0}],
+            ),
         )
         efinance = _DummyFetcher(
             "EfinanceFetcher",
             priority=0,
-            rankings=([{"name": "地产", "change_pct": 2.0}], [{"name": "煤炭", "change_pct": -2.0}]),
+            rankings=(
+                [{"name": "地产", "change_pct": 2.0}],
+                [{"name": "煤炭", "change_pct": -2.0}],
+            ),
         )
         manager = DataFetcherManager(fetchers=[efinance, tushare, akshare])
         top, bottom = manager.get_sector_rankings(1)
@@ -234,18 +258,35 @@ class TestFundamentalContext(unittest.TestCase):
             circ_mv=7.0e10,
             source=SimpleNamespace(value="tencent"),
         )
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
-                patch("data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle", return_value={
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(manager, "get_realtime_quote", return_value=quote),
+            patch(
+                "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
+                return_value={
                     "growth": {"revenue_yoy": 10.1, "net_profit_yoy": 8.5},
                     "earnings": {"forecast_summary": "预增"},
                     "institution": {"institution_holding_change": 1.2},
                     "source_chain": ["growth:akshare"],
                     "errors": [],
-                }), \
-                patch.object(manager, "get_capital_flow_context", return_value={"status": "partial", "source_chain": []}), \
-                patch.object(manager, "get_dragon_tiger_context", return_value={"status": "partial", "source_chain": []}), \
-                patch.object(manager, "get_board_context", return_value={"status": "partial", "source_chain": []}):
+                },
+            ),
+            patch.object(
+                manager,
+                "get_capital_flow_context",
+                return_value={"status": "partial", "source_chain": []},
+            ),
+            patch.object(
+                manager,
+                "get_dragon_tiger_context",
+                return_value={"status": "partial", "source_chain": []},
+            ),
+            patch.object(
+                manager,
+                "get_board_context",
+                return_value={"status": "partial", "source_chain": []},
+            ),
+        ):
             ctx = manager.get_fundamental_context("600519", budget_seconds=1.5)
         self.assertEqual(ctx["market"], "cn")
         self.assertIn("valuation", ctx)
@@ -253,7 +294,9 @@ class TestFundamentalContext(unittest.TestCase):
         self.assertIn("capital_flow", ctx)
         self.assertIn("dragon_tiger", ctx)
 
-    def test_fundamental_context_derives_ttm_dividend_yield_from_quote_price(self) -> None:
+    def test_fundamental_context_derives_ttm_dividend_yield_from_quote_price(
+        self,
+    ) -> None:
         manager = DataFetcherManager(fetchers=[])
         cfg = SimpleNamespace(
             enable_fundamental_pipeline=True,
@@ -270,32 +313,58 @@ class TestFundamentalContext(unittest.TestCase):
             circ_mv=7.0e10,
             source=SimpleNamespace(value="tencent"),
         )
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
-                patch("data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle", return_value={
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(manager, "get_realtime_quote", return_value=quote),
+            patch(
+                "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
+                return_value={
                     "status": "partial",
                     "growth": {},
                     "earnings": {
                         "dividend": {
                             "ttm_cash_dividend_per_share": 2.5,
                             "ttm_event_count": 1,
-                            "events": [{"event_date": "2026-01-01", "cash_dividend_per_share": 2.5}],
+                            "events": [
+                                {
+                                    "event_date": "2026-01-01",
+                                    "cash_dividend_per_share": 2.5,
+                                }
+                            ],
                         }
                     },
                     "institution": {},
                     "source_chain": [],
                     "errors": [],
-                }), \
-                patch.object(manager, "get_capital_flow_context", return_value={"status": "not_supported", "source_chain": []}), \
-                patch.object(manager, "get_dragon_tiger_context", return_value={"status": "not_supported", "source_chain": []}), \
-                patch.object(manager, "get_board_context", return_value={"status": "not_supported", "source_chain": []}):
+                },
+            ),
+            patch.object(
+                manager,
+                "get_capital_flow_context",
+                return_value={"status": "not_supported", "source_chain": []},
+            ),
+            patch.object(
+                manager,
+                "get_dragon_tiger_context",
+                return_value={"status": "not_supported", "source_chain": []},
+            ),
+            patch.object(
+                manager,
+                "get_board_context",
+                return_value={"status": "not_supported", "source_chain": []},
+            ),
+        ):
             ctx = manager.get_fundamental_context("600519", budget_seconds=1.5)
 
         dividend_payload = ctx["earnings"]["data"]["dividend"]
-        self.assertAlmostEqual(dividend_payload["ttm_dividend_yield_pct"], 5.0, places=6)
+        self.assertAlmostEqual(
+            dividend_payload["ttm_dividend_yield_pct"], 5.0, places=6
+        )
         self.assertIn("yield_formula", dividend_payload)
 
-    def test_fundamental_context_dividend_yield_keeps_null_when_price_invalid(self) -> None:
+    def test_fundamental_context_dividend_yield_keeps_null_when_price_invalid(
+        self,
+    ) -> None:
         manager = DataFetcherManager(fetchers=[])
         cfg = SimpleNamespace(
             enable_fundamental_pipeline=True,
@@ -312,24 +381,46 @@ class TestFundamentalContext(unittest.TestCase):
             circ_mv=7.0e10,
             source=SimpleNamespace(value="tencent"),
         )
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
-                patch("data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle", return_value={
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(manager, "get_realtime_quote", return_value=quote),
+            patch(
+                "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
+                return_value={
                     "status": "partial",
                     "growth": {},
                     "earnings": {
                         "dividend": {
                             "ttm_cash_dividend_per_share": 1.2,
-                            "events": [{"event_date": "2026-01-01", "cash_dividend_per_share": 1.2}],
+                            "events": [
+                                {
+                                    "event_date": "2026-01-01",
+                                    "cash_dividend_per_share": 1.2,
+                                }
+                            ],
                         }
                     },
                     "institution": {},
                     "source_chain": [],
                     "errors": [],
-                }), \
-                patch.object(manager, "get_capital_flow_context", return_value={"status": "not_supported", "source_chain": []}), \
-                patch.object(manager, "get_dragon_tiger_context", return_value={"status": "not_supported", "source_chain": []}), \
-                patch.object(manager, "get_board_context", return_value={"status": "not_supported", "source_chain": []}):
+                },
+            ),
+            patch.object(
+                manager,
+                "get_capital_flow_context",
+                return_value={"status": "not_supported", "source_chain": []},
+            ),
+            patch.object(
+                manager,
+                "get_dragon_tiger_context",
+                return_value={"status": "not_supported", "source_chain": []},
+            ),
+            patch.object(
+                manager,
+                "get_board_context",
+                return_value={"status": "not_supported", "source_chain": []},
+            ),
+        ):
             ctx = manager.get_fundamental_context("600519", budget_seconds=1.5)
 
         dividend_payload = ctx["earnings"]["data"]["dividend"]
@@ -364,25 +455,50 @@ class TestFundamentalContext(unittest.TestCase):
 
         def _capital_flow_side_effect(_stock_code: str, budget_seconds: float = 0.0):
             budgets["capital_flow"] = budget_seconds
-            return {"status": "not_supported", "source_chain": [], "errors": [], "data": {}}
+            return {
+                "status": "not_supported",
+                "source_chain": [],
+                "errors": [],
+                "data": {},
+            }
 
         def _dragon_tiger_side_effect(_stock_code: str, budget_seconds: float = 0.0):
             budgets["dragon_tiger"] = budget_seconds
-            return {"status": "not_supported", "source_chain": [], "errors": [], "data": {}}
+            return {
+                "status": "not_supported",
+                "source_chain": [],
+                "errors": [],
+                "data": {},
+            }
 
         def _boards_side_effect(_stock_code: str, budget_seconds: float = 0.0):
             budgets["boards"] = budget_seconds
-            return {"status": "not_supported", "source_chain": [], "errors": [], "data": {}}
+            return {
+                "status": "not_supported",
+                "source_chain": [],
+                "errors": [],
+                "data": {},
+            }
 
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
-                patch(
-                    "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
-                    return_value=bundle,
-                ), \
-                patch.object(manager, "get_capital_flow_context", side_effect=_capital_flow_side_effect), \
-                patch.object(manager, "get_dragon_tiger_context", side_effect=_dragon_tiger_side_effect), \
-                patch.object(manager, "get_board_context", side_effect=_boards_side_effect):
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(manager, "get_realtime_quote", return_value=quote),
+            patch(
+                "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
+                return_value=bundle,
+            ),
+            patch.object(
+                manager,
+                "get_capital_flow_context",
+                side_effect=_capital_flow_side_effect,
+            ),
+            patch.object(
+                manager,
+                "get_dragon_tiger_context",
+                side_effect=_dragon_tiger_side_effect,
+            ),
+            patch.object(manager, "get_board_context", side_effect=_boards_side_effect),
+        ):
             manager.get_fundamental_context("600519")
 
         self.assertGreater(budgets.get("capital_flow", 0.0), 0.0)
@@ -458,12 +574,14 @@ class TestFundamentalContext(unittest.TestCase):
             "source_chain": [],
             "errors": [],
         }
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "get_realtime_quote", return_value=quote), \
-                patch(
-                    "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
-                    return_value=bundle,
-                ):
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(manager, "get_realtime_quote", return_value=quote),
+            patch(
+                "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_fundamental_bundle",
+                return_value=bundle,
+            ),
+        ):
             ctx = manager.get_fundamental_context("600519")
 
         self.assertEqual(ctx["coverage"].get("valuation"), "partial")
@@ -487,8 +605,14 @@ class TestFundamentalContext(unittest.TestCase):
             fundamental_fetch_timeout_seconds=0.8,
             fundamental_retry_max=1,
         )
-        with patch("src.config.get_config", return_value=cfg), \
-                patch.object(manager, "_get_sector_rankings_with_meta", return_value=([], [], [], "all failed")):
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch.object(
+                manager,
+                "_get_sector_rankings_with_meta",
+                return_value=([], [], [], "all failed"),
+            ),
+        ):
             ctx = manager.get_board_context("600519", budget_seconds=0.5)
         self.assertEqual(ctx["status"], "failed")
         self.assertEqual(ctx["data"], {})
@@ -502,17 +626,19 @@ class TestFundamentalContext(unittest.TestCase):
             fundamental_fetch_timeout_seconds=0.8,
             fundamental_retry_max=1,
         )
-        with patch("src.config.get_config", return_value=cfg), \
-                patch(
-                    "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_capital_flow",
-                    return_value={
-                        "status": "not_supported",
-                        "stock_flow": {},
-                        "sector_rankings": {"top": [], "bottom": []},
-                        "source_chain": [],
-                        "errors": [],
-                    },
-                ):
+        with (
+            patch("src.config.get_config", return_value=cfg),
+            patch(
+                "data_provider.fundamental_adapter.AkshareFundamentalAdapter.get_capital_flow",
+                return_value={
+                    "status": "not_supported",
+                    "stock_flow": {},
+                    "sector_rankings": {"top": [], "bottom": []},
+                    "source_chain": [],
+                    "errors": [],
+                },
+            ),
+        ):
             ctx = manager.get_capital_flow_context("600519", budget_seconds=0.5)
         self.assertEqual(ctx["status"], "not_supported")
 
@@ -549,7 +675,9 @@ class TestFundamentalContext(unittest.TestCase):
             {"name": "消费", "code": "BK0475", "type": "概念"},
         )
 
-    def test_get_belong_boards_supports_extended_name_aliases_in_dict_payload(self) -> None:
+    def test_get_belong_boards_supports_extended_name_aliases_in_dict_payload(
+        self,
+    ) -> None:
         fetcher = _DummyBoardFetcher(
             "EfinanceFetcher",
             priority=0,
@@ -576,8 +704,12 @@ class TestFundamentalContext(unittest.TestCase):
         for value in (None, np.nan, "", "  ", "null", "NaN", " n/a "):
             self.assertTrue(DataFetcherManager._is_missing_board_value(value))
         self.assertFalse(DataFetcherManager._is_missing_board_value("白酒"))
-        self.assertFalse(DataFetcherManager._has_meaningful_payload(np.array([None, np.nan])))
-        self.assertTrue(DataFetcherManager._has_meaningful_payload(np.array([None, "白酒"])))
+        self.assertFalse(
+            DataFetcherManager._has_meaningful_payload(np.array([None, np.nan]))
+        )
+        self.assertTrue(
+            DataFetcherManager._has_meaningful_payload(np.array([None, "白酒"]))
+        )
 
     def test_missing_value_helpers_log_expected_pd_isna_fallback(self) -> None:
         sentinel = object()
@@ -590,7 +722,9 @@ class TestFundamentalContext(unittest.TestCase):
         self.assertIn("[board_value] pd.isna fallback", joined_logs)
         self.assertIn("[fundamental_payload] pd.isna fallback", joined_logs)
 
-    def test_missing_value_helpers_propagate_array_protocol_pd_isna_errors(self) -> None:
+    def test_missing_value_helpers_propagate_array_protocol_pd_isna_errors(
+        self,
+    ) -> None:
         class _ArrayProtocolErrorPayload:
             def __array__(self):
                 raise ValueError("boom")

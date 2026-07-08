@@ -15,7 +15,10 @@ from typing import Any, Dict, List, Optional
 
 from src.analyzer import AnalysisResult
 from src.config import get_config
-from src.market_phase_summary import format_public_market_status_line, format_public_phase_pack_excerpt
+from src.market_phase_summary import (
+    format_public_market_status_line,
+    format_public_phase_pack_excerpt,
+)
 from src.report_language import (
     get_localized_stock_name,
     get_report_labels,
@@ -49,13 +52,69 @@ def _clean_sniper_value(val: Any) -> str:
     if not s or s == "N/A":
         return s or "N/A"
     prefixes = [
-        "理想买入点：", "次优买入点：", "止损位：", "目标位：",
-        "理想买入点:", "次优买入点:", "止损位:", "目标位:",
-        "Ideal Entry:", "Secondary Entry:", "Stop Loss:", "Target:",
+        "理想买入点：",
+        "次优买入点：",
+        "止损位：",
+        "目标位：",
+        "理想买入点:",
+        "次优买入点:",
+        "止损位:",
+        "目标位:",
+        "Ideal Entry:",
+        "Secondary Entry:",
+        "Stop Loss:",
+        "Target:",
     ]
     for prefix in prefixes:
         if s.startswith(prefix):
-            return s[len(prefix):]
+            return s[len(prefix) :]
+
+
+def _is_stale(as_of: Optional[str], current_year: Optional[int] = None) -> bool:
+    """A snapshot is stale when the as-of year is more than one calendar
+    year behind ``current_year``. Mirrors the heuristic used by
+    ``DataFetcherManager._detect_payload_staleness`` so the UI badge
+    matches the data layer's verdict.
+    """
+    if not isinstance(as_of, str) or len(as_of) < 4:
+        return False
+    try:
+        year = int(as_of[:4])
+    except ValueError:
+        return False
+    if current_year is None:
+        from datetime import datetime as _dt
+
+        current_year = _dt.now().year
+    return year < (current_year - 1)
+
+
+def data_freshness_line(
+    as_of: Optional[str],
+    language: Optional[str] = None,
+    current_year: Optional[int] = None,
+) -> str:
+    """Render a one-line badge describing the data freshness.
+
+    Returns the empty string when ``as_of`` is missing so the template
+    can drop the row entirely.
+    """
+    text = (as_of or "").strip()
+    if not text:
+        return ""
+    is_stale_flag = _is_stale(text, current_year=current_year)
+    if (language or "").startswith("en"):
+        return (
+            f"⚠ Data is anchored to **{text}** — content may be "
+            f"stale. Treat with caution."
+            if is_stale_flag
+            else f"📅 Data anchored to **{text}**."
+        )
+    return (
+        f"⚠ 数据截至 **{text}**，可能已陈旧，请结合最新公告判断。"
+        if is_stale_flag
+        else f"📅 数据截至 **{text}**。"
+    )
     return s
 
 
@@ -110,7 +169,11 @@ def render(
     report_language = normalize_report_language(
         (extra_context or {}).get("report_language")
         or next(
-            (getattr(result, "report_language", None) for result in results if getattr(result, "report_language", None)),
+            (
+                getattr(result, "report_language", None)
+                for result in results
+                if getattr(result, "report_language", None)
+            ),
             None,
         )
         or getattr(get_config(), "report_language", "zh")
@@ -121,20 +184,30 @@ def render(
     sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
     sorted_enriched = []
     for r in sorted_results:
-        st, se, _ = get_signal_level(r.operation_advice, r.sentiment_score, report_language)
+        st, se, _ = get_signal_level(
+            r.operation_advice, r.sentiment_score, report_language
+        )
         rn = get_localized_stock_name(r.name, r.code, report_language)
-        sorted_enriched.append({
-            "result": r,
-            "signal_text": st,
-            "signal_emoji": se,
-            "stock_name": _escape_md(rn),
-            "localized_operation_advice": localize_operation_advice(r.operation_advice, report_language),
-            "localized_trend_prediction": localize_trend_prediction(r.trend_prediction, report_language),
-        })
+        sorted_enriched.append(
+            {
+                "result": r,
+                "signal_text": st,
+                "signal_emoji": se,
+                "stock_name": _escape_md(rn),
+                "localized_operation_advice": localize_operation_advice(
+                    r.operation_advice, report_language
+                ),
+                "localized_trend_prediction": localize_trend_prediction(
+                    r.trend_prediction, report_language
+                ),
+            }
+        )
 
     buy_count = sum(1 for r in results if getattr(r, "decision_type", "") == "buy")
     sell_count = sum(1 for r in results if getattr(r, "decision_type", "") == "sell")
-    hold_count = sum(1 for r in results if getattr(r, "decision_type", "") in ("hold", ""))
+    hold_count = sum(
+        1 for r in results if getattr(r, "decision_type", "") in ("hold", "")
+    )
     show_llm_model = bool(getattr(get_config(), "report_show_llm_model", True))
     models_used: List[str] = []
     if show_llm_model:
@@ -148,12 +221,18 @@ def render(
 
     def failed_checks(checklist: List[str]) -> List[str]:
         return [c for c in (checklist or []) if c.startswith("❌") or c.startswith("⚠️")]
+        return (
+            f"⚠ 数据截至 **{text}**，可能已陈旧，请结合最新公告判断。"
+            if is_stale_flag
+            else f"📅 数据截至 **{text}**。"
+        )
 
     def phase_pack_excerpt(result: AnalysisResult) -> str:
         return format_public_phase_pack_excerpt(
             getattr(result, "market_phase_summary", None),
             getattr(result, "analysis_context_pack_overview", None),
-            source=getattr(result, "analysis_visibility_source", None) or "evaluator_snapshot",
+            source=getattr(result, "analysis_visibility_source", None)
+            or "evaluator_snapshot",
             report_language=report_language,
         )
 
@@ -168,11 +247,30 @@ def render(
                     return line
         return ""
 
+    # Per-result data freshness: derive as_of from the fundamental
+    # context attached to the AnalysisResult (set by the pipeline when
+    # the iFinD / Tushare fallback adapter stamps the as-of date).
+    enriched_with_freshness = []
+    for entry in sorted_enriched:
+        result = entry["result"]
+        as_of_date = None
+        ctx = getattr(result, "fundamental_context", None)
+        if isinstance(ctx, dict):
+            as_of_date = ctx.get("as_of") or ctx.get("as_of_date")
+        enriched_with_freshness.append(
+            {
+                **entry,
+                "as_of_date": as_of_date,
+                "is_stale_fundamental": _is_stale(as_of_date),
+                "data_freshness_badge": data_freshness_line(as_of_date),
+            }
+        )
+
     context: Dict[str, Any] = {
         "report_date": report_date,
         "report_timestamp": report_timestamp,
         "results": sorted_results,
-        "enriched": sorted_enriched,  # Sorted by sentiment_score desc
+        "enriched": enriched_with_freshness,  # Sorted by sentiment_score desc
         "summary_only": summary_only,
         "buy_count": buy_count,
         "sell_count": sell_count,
@@ -186,6 +284,7 @@ def render(
         "clean_sniper": _clean_sniper_value,
         "failed_checks": failed_checks,
         "phase_pack_excerpt": phase_pack_excerpt,
+        "data_freshness_line": data_freshness_line,
         "history_by_code": {},
         "get_chip_unavailable_reason": get_chip_unavailable_reason,
         "is_chip_structure_unavailable": is_chip_structure_unavailable,

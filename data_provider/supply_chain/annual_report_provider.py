@@ -20,7 +20,7 @@ class AnnualReportProvider:
         self._cache: Dict[str, str] = {}
 
     def get_annual_report_text(
-        self, stock_code: str, year: int = 2023
+        self, stock_code: str, year: Optional[int] = None
     ) -> Optional[str]:
         """
         Get annual report text for a stock.
@@ -32,11 +32,17 @@ class AnnualReportProvider:
         Returns:
             Annual report text or None
         """
-        cache_key = f"{stock_code}_{year}"
+        if year is None:
+            from data_provider.supply_chain import latest_fiscal_year
+
+            fiscal_year = latest_fiscal_year()
+        else:
+            fiscal_year = year
+        cache_key = f"{stock_code}_{fiscal_year}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        text = self._fetch_from_cninfo(stock_code, year)
+        text = self._fetch_from_cninfo(stock_code, fiscal_year)
         if text:
             self._cache[cache_key] = text
 

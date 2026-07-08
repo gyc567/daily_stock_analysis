@@ -15,7 +15,9 @@
 """
 
 import logging
+import os
 import random
+import re
 import time
 from threading import BoundedSemaphore, RLock, Thread
 from abc import ABC, abstractmethod
@@ -32,7 +34,10 @@ from src.services.run_diagnostics import (
     record_provider_run_started,
 )
 from .fundamental_adapter import AkshareFundamentalAdapter
+from .ifind_fundamental_adapter import IfindFetcher, IfindSource
+from .tushare_ifind_fundamental_adapter import TushareIfindFundamentalAdapter
 from .yfinance_fundamental_adapter import YfinanceFundamentalAdapter
+from .mx_data_adapter import MXSource, _cn_period_to_yyyymmdd
 from .realtime_types import CircuitBreaker
 
 # 配置日志
@@ -670,6 +675,28 @@ class DataFetcherManager:
             self._init_default_fetchers()
         self._fundamental_adapter = AkshareFundamentalAdapter()
         self._yfinance_fundamental_adapter = YfinanceFundamentalAdapter()
+        # Tushare / iFinD fallback used when the AkShare primary bundle is empty
+        # or carries stale fallback text (e.g. 2020-era forecast strings). It
+        # is fail-open and never raises; ``available`` is False when neither
+        # Tushare token nor iFinD endpoint is configured.
+        try:
+            tushare_token = os.getenv("TUSHARE_TOKEN")
+        except Exception:  # noqa: BLE001
+            tushare_token = None
+        # The iFinD fallback creates a daemon thread + MCP session on
+        # first use. Only spin it up when both endpoint and token are
+        # configured; tests that do not mock ``_tushare_ifind_adapter``
+        # get a no-op adapter and stay network-free.
+        ifind_source: Optional[Any] = None
+        try:
+            if os.getenv("IFIND_MCP_TOKEN") and os.getenv("IFIND_MCP_ENDPOINT"):
+                ifind_source = IfindSource(fetcher=IfindFetcher.get_instance())
+        except Exception:  # noqa: BLE001
+            ifind_source = None
+        self._tushare_ifind_adapter = TushareIfindFundamentalAdapter(
+            ifind_source=ifind_source, tushare_token=tushare_token
+        )
+        self._mx_source = MXSource()
         self._tickflow_fetcher = None
         self._tickflow_api_key: Optional[str] = None
         self._tickflow_lock = RLock()
@@ -2852,6 +2879,200 @@ class DataFetcherManager:
             return fallback_status
         return "partial"
 
+    _YEAR_PATTERN = re.compile(r"(?<![0-9])(20\d{2})(?![0-9])")
+    _STALENESS_MAX_YEARS_LOOKBACK = 1
+    _STALENESS_MIN_HITS = 1
+
+    @classmethod
+    def _detect_payload_staleness(
+        cls, payload: Any, current_year: Optional[int] = None
+    ) -> bool:
+        """
+        Heuristically detect stale fundamental payload.
+
+        A payload is considered stale when the most recent 4-digit year appearing
+        inside string values is older than ``current_year - lookback``. This
+        catches cases like ``earnings.forecast_summary="预计2020年1-3月..."`` where
+        the block otherwise looks "ok" because the text is non-empty.
+
+        When the caller passes a result context (a dict containing an
+        explicit ``as_of`` field written by the data layer) we use that
+        authoritative value instead of guessing from a possibly-truncated
+        text snippet. Falls back to the text-year scan otherwise.
+
+        Returns False for empty payloads (let other rules decide).
+        """
+        # Prefer the explicit as_of when the caller passes a result
+        # context. This is the path used by the block-level
+        # ``_downgrade_for_staleness`` calls below.
+        if isinstance(payload, dict) and "as_of" in payload:
+            as_of_year = cls._parse_as_of_year(payload.get("as_of"))
+            if as_of_year is not None:
+                if current_year is None:
+                    current_year = datetime.now(timezone.utc).year
+                threshold = current_year - cls._STALENESS_MAX_YEARS_LOOKBACK
+                return as_of_year < threshold
+        if not cls._has_meaningful_payload(payload):
+            return False
+        if current_year is None:
+            current_year = datetime.now(timezone.utc).year
+        threshold = current_year - cls._STALENESS_MAX_YEARS_LOOKBACK
+        latest = cls._scan_latest_year(payload)
+        if latest is None:
+            return False
+        return latest < threshold
+
+    @staticmethod
+    def _parse_as_of_year(as_of: Any) -> Optional[int]:
+        """Extract a 4-digit year from an ``as_of`` string.
+
+        Accepts ``YYYY-MM-DD`` and ``YYYYMMDD``. Returns None for
+        anything else; the caller is expected to fall back to the text
+        year scan in that case.
+        """
+        if not isinstance(as_of, str):
+            return None
+        text = as_of.strip()
+        if len(text) >= 4 and text[:4].isdigit():
+            try:
+                return int(text[:4])
+            except ValueError:
+                return None
+        return None
+
+    @classmethod
+    def _scan_latest_year(cls, payload: Any) -> Optional[int]:
+        latest: Optional[int] = None
+        if isinstance(payload, str):
+            for match in cls._YEAR_PATTERN.finditer(payload):
+                year = int(match.group(1))
+                if latest is None or year > latest:
+                    latest = year
+            return latest
+        if isinstance(payload, dict):
+            for value in payload.values():
+                candidate = cls._scan_latest_year(value)
+                if candidate is not None and (latest is None or candidate > latest):
+                    latest = candidate
+            return latest
+        if isinstance(payload, (list, tuple, set)):
+            for value in payload:
+                candidate = cls._scan_latest_year(value)
+                if candidate is not None and (latest is None or candidate > latest):
+                    latest = candidate
+            return latest
+        if isinstance(payload, pd.DataFrame):
+            for cell in payload.to_numpy().flat:
+                candidate = cls._scan_latest_year(cell)
+                if candidate is not None and (latest is None or candidate > latest):
+                    latest = candidate
+            return latest
+        if isinstance(payload, (pd.Series, pd.Index)):
+            for value in payload.tolist():
+                candidate = cls._scan_latest_year(value)
+                if candidate is not None and (latest is None or candidate > latest):
+                    latest = candidate
+            return latest
+        return latest
+
+    @classmethod
+    def _downgrade_for_staleness(cls, status: str, payload: Any) -> str:
+        if status != "ok":
+            return status
+        if cls._detect_payload_staleness(payload):
+            return "partial"
+        return status
+
+    @staticmethod
+    def _derive_as_of_date(
+        result_ctx: Dict[str, Any],
+    ) -> Optional[str]:
+        """Compute the as-of date (``YYYY-MM-DD``) for a result context.
+
+        The result context may carry an explicit ``as_of`` (set by the
+        iFinD / Tushare fallback adapter) which we normalise to
+        ``YYYY-MM-DD`` (the adapter emits ``YYYY1231``). When that is
+        missing we scan the block payloads for the most recent 4-digit
+        year and anchor it to ``YYYY-12-31``. Returns ``None`` when no
+        year can be derived at all.
+        """
+        explicit = result_ctx.get("as_of") if isinstance(result_ctx, dict) else None
+        if isinstance(explicit, str) and explicit:
+            text = explicit.strip()
+            if len(text) == 8 and text.isdigit():
+                # ``YYYYMMDD`` -> ``YYYY-MM-DD``
+                return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+            if len(text) >= 7 and text[4:5] == "-" and text[6:7].isdigit():
+                return text[:10]
+        latest_year: Optional[int] = None
+        for block_name in ("earnings", "growth", "institution", "valuation"):
+            block = result_ctx.get(block_name) if isinstance(result_ctx, dict) else None
+            if not isinstance(block, dict):
+                continue
+            data = block.get("data")
+            if isinstance(data, dict) and data:
+                year = DataFetcherManager._scan_latest_year(data)
+                if year is not None and (latest_year is None or year > latest_year):
+                    latest_year = year
+        if latest_year is None:
+            return None
+        return f"{latest_year}-12-31"
+
+    @staticmethod
+    def _is_growth_block_thin(payload: Dict[str, Any]) -> bool:
+        """A growth block is "thin" when all four anchor fields are missing
+        or None. We only fall back to Tushare / iFinD in that case.
+        """
+        if not isinstance(payload, dict):
+            return True
+        keys = ("revenue_yoy", "net_profit_yoy", "roe", "gross_margin")
+        return all(payload.get(k) is None for k in keys)
+
+    @staticmethod
+    def _is_earnings_block_thin(payload: Dict[str, Any]) -> bool:
+        """Earnings block is thin when both forecast/quick report summaries
+        are absent and no financial_report payload exists.
+        """
+        if not isinstance(payload, dict):
+            return True
+        if payload.get("forecast_summary"):
+            return False
+        if payload.get("quick_report_summary"):
+            return False
+        if isinstance(payload.get("financial_report"), dict):
+            return False
+        if isinstance(payload.get("dividend"), dict):
+            return False
+        return True
+
+    @staticmethod
+    def _is_institution_block_thin(payload: Dict[str, Any]) -> bool:
+        if not isinstance(payload, dict):
+            return True
+        return (
+            payload.get("institution_holding_change") is None
+            and payload.get("top10_holder_change") is None
+        )
+
+    @staticmethod
+    def _is_block_stale_for_fallback(payload: Dict[str, Any]) -> bool:
+        """Check if a fundamental block's text content references old years.
+
+        Returns True when text fields (forecast_summary, quick_report_summary,
+        financial_report dates) contain a 4-digit year older than the current
+        year minus lookback threshold. Used to trigger fallback when the
+        primary bundle returned data that is technically non-empty but clearly
+        stale (e.g. "预计2020年1-3月..." in 2025).
+        """
+        if not isinstance(payload, dict):
+            return False
+        current_year = datetime.now(timezone.utc).year
+        threshold = current_year - DataFetcherManager._STALENESS_MAX_YEARS_LOOKBACK
+        latest = DataFetcherManager._scan_latest_year(payload)
+        if latest is None:
+            return False
+        return latest < threshold
+
     @staticmethod
     def _should_cache_fundamental_context(context: Any) -> bool:
         if not isinstance(context, dict):
@@ -3071,6 +3292,9 @@ class DataFetcherManager:
             valuation_payload,
             "partial" if quote_payload is not None else "not_supported",
         )
+        valuation_status = self._downgrade_for_staleness(
+            valuation_status, valuation_payload
+        )
         if (
             valuation_status == "partial"
             and valuation_err
@@ -3145,8 +3369,12 @@ class DataFetcherManager:
         growth_status = self._infer_block_status(
             growth_payload, str(bundle_payload.get("status", "not_supported"))
         )
+        growth_status = self._downgrade_for_staleness(growth_status, growth_payload)
         earnings_status = self._infer_block_status(
             earnings_payload, str(bundle_payload.get("status", "not_supported"))
+        )
+        earnings_status = self._downgrade_for_staleness(
+            earnings_status, earnings_payload
         )
 
         result_ctx["growth"] = self._build_fundamental_block(
@@ -3217,6 +3445,7 @@ class DataFetcherManager:
         else:
             result_ctx["status"] = "ok"
 
+        result_ctx["as_of"] = self._derive_as_of_date(result_ctx)
         result_ctx["elapsed_ms"] = int((time.time() - start_ts) * 1000)
         if cache_ttl > 0 and self._should_cache_fundamental_context(result_ctx):
             with self._fundamental_cache_lock:
@@ -3373,6 +3602,9 @@ class DataFetcherManager:
             valuation_payload,
             "partial" if quote_payload is not None else "not_supported",
         )
+        valuation_status = self._downgrade_for_staleness(
+            valuation_status, valuation_payload
+        )
         if (
             valuation_status == "partial"
             and valuation_err
@@ -3462,6 +3694,185 @@ class DataFetcherManager:
         else:
             institution_payload = dict(institution_payload)
 
+        # Fallback to Tushare / iFinD when the AkShare bundle came back empty
+        # or stale. We only fill in fields that are missing on the primary
+        # path; if AkShare already returned a value we trust it. The fallback
+        # is fail-open and is skipped when the adapter is unavailable or the
+        # AkShare data already looks healthy.
+        if self._tushare_ifind_adapter.available and (
+            self._is_growth_block_thin(growth_payload)
+            or self._is_earnings_block_thin(earnings_payload)
+            or self._is_institution_block_thin(institution_payload)
+            or self._is_block_stale_for_fallback(earnings_payload)
+        ):
+            # The fallback runs in a worker thread via ``_run_with_retry``
+            # so a hung iFinD server does not block the rest of the
+            # pipeline. We cap the wall clock with the existing
+            # ``fetch_timeout``; the adapter's internal ThreadPoolExecutor
+            # fans out across anchors inside that budget. ``remaining_seconds``
+            # is decremented so subsequent stages (capital_flow, etc.)
+            # still get a slice.
+            fallback_budget = max(
+                min(8.0, fetch_timeout),
+                max(remaining_seconds - 4.0, 0.0),
+            )
+            if fallback_budget > 0:
+                _fallback_start = time.time()
+                fallback_bundle, _fallback_err, _fallback_ms = self._run_with_retry(
+                    lambda: self._tushare_ifind_adapter.get_fundamental_bundle(
+                        stock_code
+                    ),
+                    fallback_budget,
+                    "fundamental_fallback_tushare_ifind",
+                )
+                _consume_budget(_fallback_ms)
+                if isinstance(fallback_bundle, dict):
+                    fb_growth = (
+                        fallback_bundle.get("growth", {})
+                        if isinstance(fallback_bundle.get("growth"), dict)
+                        else {}
+                    )
+                    fb_earnings = (
+                        fallback_bundle.get("earnings", {})
+                        if isinstance(fallback_bundle.get("earnings"), dict)
+                        else {}
+                    )
+                    fb_institution = (
+                        fallback_bundle.get("institution", {})
+                        if isinstance(fallback_bundle.get("institution"), dict)
+                        else {}
+                    )
+                    fallback_chain = self._normalize_source_chain(
+                        fallback_bundle.get("source_chain", []),
+                        "fundamental_fallback_tushare_ifind",
+                        str(fallback_bundle.get("status", "not_supported")),
+                        _fallback_ms,
+                    )
+                    for key, value in fb_growth.items():
+                        if value is not None and growth_payload.get(key) is None:
+                            growth_payload[key] = value
+                    for key, value in fb_earnings.items():
+                        if value is not None and earnings_payload.get(key) is None:
+                            earnings_payload[key] = value
+                    for key, value in fb_institution.items():
+                        if value is not None and institution_payload.get(key) is None:
+                            institution_payload[key] = value
+                    # Carry the iFinD/Tushare-reported as_of to the result
+                    # context. The bundle's "as_of" is the only authoritative
+                    # signal we have when AkShare returned no text period.
+                    fb_as_of = fallback_bundle.get("as_of")
+                    if isinstance(fb_as_of, str) and fb_as_of:
+                        result_ctx.setdefault("as_of", fb_as_of)
+                    # Bubble the fallback source chain into the bundle_chain
+                    # so downstream block chain still carries provenance.
+                    if isinstance(bundle_chain, list):
+                        bundle_chain.extend(fallback_chain)
+                    fb_errors = fallback_bundle.get("errors", []) or []
+                    if fb_errors:
+                        # Surface fallback failures as non-fatal hints; do not
+                        # trip the bundle into "failed" status.
+                        pass
+
+# MX fallback for growth fields still missing after primary + Tushare/iFinD.
+        # MX is an official API (东方财富妙想 Skills Hub) that is more stable than
+        # AkShare scraping. We only query when growth is still thin because MX
+        # does not carry text summaries or institution holdings.
+        #
+        # Strategy: do ONE batch query (query_financials) so we get both the
+        # latest report期 from ``headName[0]`` AND the financial values in a
+        # single HTTP call (控配额). Per-field read() is fallback for retries.
+        if self._mx_source.available and self._is_growth_block_thin(growth_payload):
+            mx_budget = max(0.0, min(6.0, remaining_seconds - 2.0))
+            if mx_budget > 0:
+                _mx_start = time.time()
+                _mx_filled = False
+                _mx_period_raw: Optional[str] = None
+                _mx_bundle: Optional[Dict[str, Any]] = None
+                # Batch query (capped at 1 HTTP for budget discipline)
+                try:
+                    _mx_bundle = self._mx_source._client.query_financials(  # type: ignore[attr-defined]
+                        stock_code, None
+                    )
+                    if isinstance(_mx_bundle, dict):
+                        _mx_period_raw = _mx_bundle.get("_mx_period")
+                        # Direct field mapping: growth anchors → MX label keywords
+                        # MX labels carry both absolute (营业收入) and 同比增长率 columns.
+                        # Use _pick_growth_value for 同比 fields, _pick_value for absolute.
+                        from data_provider.mx_data_adapter import (
+                            _pick_value as _mx_pick_value,
+                            _pick_growth_value as _mx_pick_growth,
+                        )
+
+                        for _dst_field, _keywords, _picker in (
+                            (
+                                "revenue_yoy",
+                                ["营业收入", "营业总收入", "营收"],
+                                _mx_pick_growth,
+                            ),
+                            (
+                                "net_profit_yoy",
+                                ["归属母公司股东的净利润", "归母净利润", "净利润"],
+                                _mx_pick_growth,
+                            ),
+                            (
+                                "roe",
+                                ["净资产收益率ROE(加权)", "净资产收益率", "ROE"],
+                                _mx_pick_value,
+                            ),
+                            (
+                                "gross_margin",
+                                ["毛利率", "销售毛利率"],
+                                _mx_pick_value,
+                            ),
+                        ):
+                            if growth_payload.get(_dst_field) is not None:
+                                continue
+                            _v = _picker(_mx_bundle, _keywords)
+                            if _v is not None:
+                                growth_payload[_dst_field] = _v
+                                _mx_filled = True
+                except Exception:  # noqa: BLE001 — fail-open
+                    _mx_bundle = None
+
+                # If batch query missed any field, fall back to per-field read()
+                for _mx_field in (
+                    "revenue_yoy",
+                    "net_profit_yoy",
+                    "roe",
+                    "gross_margin",
+                ):
+                    if growth_payload.get(_mx_field) is None:
+                        try:
+                            _mx_ar = self._mx_source.read(stock_code, _mx_field)
+                            if _mx_ar is not None and _mx_ar.value is not None:
+                                growth_payload[_mx_field] = _mx_ar.value
+                                _mx_filled = True
+                                if _mx_ar.period and not _mx_period_raw:
+                                    _mx_period_raw = _mx_ar.period
+                        except Exception:  # noqa: BLE001 — fail-open
+                            pass
+
+                _mx_ms = int((time.time() - _mx_start) * 1000)
+                _consume_budget(_mx_ms)
+                if _mx_filled:
+                    if isinstance(bundle_chain, list):
+                        bundle_chain.append(
+                            {
+                                "provider": "fundamental_fallback_mx",
+                                "result": "ok",
+                                "duration_ms": _mx_ms,
+                            }
+                        )
+                    # Carry MX report period as authoritative as_of (overrides
+                    # text-scan fallback that may pick up stale "2020" snippets
+                    # from earnings forecast strings).
+                    mx_period_norm = _cn_period_to_yyyymmdd(_mx_period_raw)
+                    if mx_period_norm:
+                        # Normalize YYYYMMDD → YYYY-MM-DD for downstream consumers
+                        result_ctx["as_of"] = (
+                            f"{mx_period_norm[:4]}-{mx_period_norm[4:6]}-{mx_period_norm[6:8]}"
+                        )
+
         # Derive TTM dividend yield from already-fetched quote price; avoid extra quote calls.
         earnings_extra_errors: List[str] = []
         dividend_payload = earnings_payload.get("dividend")
@@ -3512,9 +3923,16 @@ class DataFetcherManager:
         institution_errors = list(adapter_errors)
 
         growth_status = self._infer_block_status(growth_payload, bundle_status)
+        growth_status = self._downgrade_for_staleness(growth_status, growth_payload)
         earnings_status = self._infer_block_status(earnings_payload, bundle_status)
+        earnings_status = self._downgrade_for_staleness(
+            earnings_status, earnings_payload
+        )
         institution_status = self._infer_block_status(
             institution_payload, bundle_status
+        )
+        institution_status = self._downgrade_for_staleness(
+            institution_status, institution_payload
         )
 
         result_ctx["growth"] = self._build_fundamental_block(
@@ -3635,6 +4053,7 @@ class DataFetcherManager:
         else:
             result_ctx["status"] = "ok"
 
+        result_ctx["as_of"] = self._derive_as_of_date(result_ctx)
         result_ctx["elapsed_ms"] = int((time.time() - start_ts) * 1000)
         if cache_ttl > 0 and self._should_cache_fundamental_context(result_ctx):
             with self._fundamental_cache_lock:

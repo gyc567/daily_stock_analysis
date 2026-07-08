@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -152,6 +153,41 @@ def _pick_growth_value(bundle: Dict[str, Any], keywords: List[str]) -> Optional[
     return None
 
 
+# MX 中文报告期 → YYYYMMDD（用于 as_of 透传）
+_PERIOD_RE = re.compile(r"(20\d{2})\s*(年\s*)?(一季报|中报|三季报|年报|年度|半年报)?")
+_PERIOD_TO_MONTHDAY = {
+    "一季报": "0331",
+    "中报": "0630",
+    "半年报": "0630",
+    "三季报": "0930",
+    "年报": "1231",
+    "年度": "1231",
+}
+
+
+def _cn_period_to_yyyymmdd(period: Any) -> Optional[str]:
+    """把 MX 中文报告期（如 ``'2026一季报'`` / ``'2025年报'``）转成 ``YYYYMMDD``。
+
+    返回 ``YYYYMMDD``（8 位紧凑格式），与 iFinD/Tushare adapter 的 ``as_of`` 格式一致。
+    必须包含「一季报/中报/半年报/三季报/年报/年度」其中一个报告期标识，否则返回 None。
+    """
+    if not isinstance(period, str):
+        return None
+    s = period.strip()
+    m = _PERIOD_RE.search(s)
+    if not m:
+        return None
+    year = int(m.group(1))
+    kind = m.group(3)
+    if kind and kind in _PERIOD_TO_MONTHDAY:
+        return f"{year}{_PERIOD_TO_MONTHDAY[kind]}"
+    if "年报" in s or "年度" in s:
+        return f"{year}1231"
+    if "中报" in s or "半年报" in s:
+        return f"{year}0630"
+    return None
+
+
 # ------------------------------------------------------------------
 # HTTP + 解析（移植自 mx_api.py，纯函数化便于单测）
 # ------------------------------------------------------------------
@@ -183,7 +219,14 @@ def _post(
 
 
 def _extract_first_table_row(result: Any) -> Dict[str, Any]:
-    """从 MX query 响应提取首个表格的「指标→值」映射（取最新值）。best-effort。"""
+    """从 MX query 响应提取首个表格的「指标→值」映射（取最新值）。best-effort。
+
+    MX 妙想 ``dataTableDTOList[0].table.headName`` 列顺序为「最新→最旧」，
+    例如 ``['2026一季报', '2025年报', '2025三季报', '2025中报', '2025一季报', '2024年报']``。
+    因此 ``values[0]`` 对应最新报告期，``values[-1]`` 对应最旧报告期。
+
+    同步透出 ``_mx_period``（最新列名）供上层 fallback 推导 ``as_of``。
+    """
     if not isinstance(result, dict) or result.get("error"):
         return {}
     if result.get("status") not in (0, None):
@@ -202,13 +245,19 @@ def _extract_first_table_row(result: Any) -> Dict[str, Any]:
     if isinstance(name_map, list):  # 退化成 index map
         name_map = {str(i): v for i, v in enumerate(name_map)}
 
-    out: Dict[str, Any] = {"_mx_entity": dto.get("entityName") or ""}
+    head_name = table.get("headName") or []
+    head_first = head_name[0] if isinstance(head_name, list) and head_name else None
+
+    out: Dict[str, Any] = {
+        "_mx_entity": dto.get("entityName") or "",
+        "_mx_period": head_first,
+    }
     for key, values in table.items():
         if key == "headName":
             continue
         label = name_map.get(key) or name_map.get(str(key)) or str(key)
         if isinstance(values, list) and values:
-            out[str(label)] = values[-1]  # 取最新（最后一列）
+            out[str(label)] = values[0]  # MX headName 最新→最旧，取首列 = 最新
         else:
             out[str(label)] = values
     return out

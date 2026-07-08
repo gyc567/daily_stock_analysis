@@ -12,6 +12,7 @@ import logging
 import os
 from typing import cast, Dict, Any, Optional, List
 
+from data_provider.supply_chain import latest_fiscal_year
 from src.scoring import (
     aggregate_framework,
     calculate_bayesian,
@@ -714,18 +715,20 @@ class ResearchScoringService:
         return enriched
 
     def get_supply_chain_from_tushare(
-        self, stock_code: str, year: int = 2023
+        self, stock_code: str, year: Optional[int] = None
     ) -> Dict[str, List[str]]:
         """
         Get supplier/customer data from Tushare Pro.
 
         Args:
             stock_code: Stock code
-            year: Report year
+            year: Report year (defaults to latest available fiscal year)
 
         Returns:
             Dict with 'suppliers' and 'customers' lists
         """
+        if year is None:
+            year = latest_fiscal_year()
         self._init_data_providers()
 
         if self._tushare_supply_chain is None:

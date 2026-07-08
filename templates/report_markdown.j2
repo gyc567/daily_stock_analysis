@@ -9,7 +9,7 @@
 ## 📊 {{ labels.summary_heading }}
 
 {% for e in enriched %}
-{{ e.signal_emoji }} **{{ e.stock_name }}({{ e.result.code }})**: {{ e.localized_operation_advice }} | {{ labels.score_label }} {{ e.result.sentiment_score }} | {{ e.localized_trend_prediction }}
+{{ e.signal_emoji }} **{{ e.stock_name }}({{ e.result.code }})**: {{ e.localized_operation_advice }} | {{ labels.score_label }} {{ e.result.sentiment_score }} | {{ e.localized_trend_prediction }}{% if e.is_stale_fundamental %} · ⚠{{ e.as_of_date }}{% endif %}
 {% endfor %}
 
 ---
@@ -24,6 +24,9 @@
 
 ## {{ e.signal_emoji }} {{ e.stock_name }} ({{ result.code }})
 
+{% if e.data_freshness_badge %}
+{{ e.data_freshness_badge }}
+{% endif %}
 {% if intel %}
 ### 📰 {{ labels.info_heading }}
 
