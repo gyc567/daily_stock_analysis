@@ -68,6 +68,7 @@ def _clean_sniper_value(val: Any) -> str:
     for prefix in prefixes:
         if s.startswith(prefix):
             return s[len(prefix) :]
+    return s
 
 
 def _is_stale(as_of: Optional[str], current_year: Optional[int] = None) -> bool:

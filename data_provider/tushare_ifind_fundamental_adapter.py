@@ -24,7 +24,7 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from .ifind_fundamental_adapter import IfindSource
 
@@ -115,7 +115,10 @@ class TushareIfindFundamentalAdapter:
         if df is None or len(df) == 0:
             return None
         try:
-            return df.iloc[0].to_dict()
+            raw = df.iloc[0].to_dict()
+            # pandas ``Series.to_dict()`` returns ``dict[Hashable, Any]``;
+            # narrow to ``Dict[str, Any]`` for the declared return type.
+            return cast(Dict[str, Any], raw) if isinstance(raw, dict) else None
         except Exception:  # noqa: BLE001
             return None
 
