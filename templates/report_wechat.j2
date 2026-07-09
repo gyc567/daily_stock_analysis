@@ -20,6 +20,9 @@
 
 ### {{ e.signal_emoji }} **{{ e.signal_text }}** | {{ e.stock_name }}({{ result.code }})
 
+{% if e.data_freshness_badge %}
+{{ e.data_freshness_badge }}
+{% endif %}
 {% set one_sentence = core.get('one_sentence', result.analysis_summary) if core else result.analysis_summary %}
 {% if one_sentence %}
 📌 **{{ one_sentence[:80] }}**

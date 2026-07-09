@@ -265,7 +265,10 @@ class TestExtractFirstTableRow(unittest.TestCase):
                 }
             },
         }
-        self.assertEqual(_extract_first_table_row(r), {"_mx_entity": "", "PE": "99"})
+        out = _extract_first_table_row(r)
+        self.assertEqual(out["_mx_entity"], "")
+        self.assertEqual(out["PE"], "99")
+        self.assertIn("_mx_period", out)  # always emitted (may be None)
 
     def test_non_dict_returns_empty(self):
         self.assertEqual(_extract_first_table_row("not a dict"), {})

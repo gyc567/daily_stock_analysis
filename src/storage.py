@@ -262,15 +262,24 @@ class FundamentalSnapshot(Base):
     payload = Column(Text, nullable=False)
     source_chain = Column(Text)
     coverage = Column(Text)
+    # Date the snapshot's data is anchored to (``YYYY-MM-DD``). NULL when
+    # the source did not report an explicit period (legacy rows). The
+    # staleness detector in ``data_provider.base`` reads this column
+    # before falling back to the in-payload text year scan.
+    as_of_date = Column(String(10), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
         Index("ix_fundamental_snapshot_query_code", "query_id", "code"),
         Index("ix_fundamental_snapshot_created", "created_at"),
+        Index("ix_fundamental_snapshot_as_of", "as_of_date"),
     )
 
     def __repr__(self) -> str:
-        return f"<FundamentalSnapshot(query_id={self.query_id}, code={self.code})>"
+        return (
+            f"<FundamentalSnapshot(query_id={self.query_id}, "
+            f"code={self.code}, as_of_date={self.as_of_date})>"
+        )
 
 
 class AnalysisHistory(Base):
@@ -2057,9 +2066,14 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         payload: Optional[Dict[str, Any]],
         source_chain: Optional[Any] = None,
         coverage: Optional[Any] = None,
+        as_of_date: Optional[str] = None,
     ) -> int:
         """
         保存基本面快照（P0 write-only）。失败不抛异常，返回写入条数 0/1。
+
+        ``as_of_date`` is the data anchor (``YYYY-MM-DD``). Pass ``None`` for
+        legacy callers; the column is NULL-able and the staleness detector
+        will fall back to text-year scan.
         """
         if not query_id or not code or payload is None:
             return 0
@@ -2074,6 +2088,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                         payload=self._safe_json_dumps(payload),
                         source_chain=self._safe_json_dumps(source_chain or []),
                         coverage=self._safe_json_dumps(coverage or {}),
+                        as_of_date=as_of_date,
                     )
                 )
                 return 1
