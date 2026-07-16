@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -29,6 +30,7 @@ _DEFAULT_LOCK_TIMEOUT_SECONDS = 7200  # 2 hours
 # Per-task in-process guards
 _task_locks: dict[str, threading.Lock] = {}
 _task_running: dict[str, bool] = {}
+_task_running_start: dict[str, float] = {}
 
 
 def _get_task_lock(task_name: str) -> threading.Lock:
@@ -43,6 +45,10 @@ def _get_task_running(task_name: str) -> bool:
 
 def _set_task_running(task_name: str, value: bool) -> None:
     _task_running[task_name] = value
+    if value:
+        _task_running_start[task_name] = time.time()
+    else:
+        _task_running_start.pop(task_name, None)
 
 
 @dataclass
@@ -139,17 +145,41 @@ def acquire_task_lock(
 
     with lock_guard:
         if _get_task_running(task_name):
-            return None
+            running_since = _task_running_start.get(task_name, 0)
+            if running_since and time.time() - running_since > timeout_seconds:
+                logger.warning(
+                    "进程内锁 [%s] 已超时（运行 %.1fs > %ds），强制清理",
+                    task_name,
+                    time.time() - running_since,
+                    timeout_seconds,
+                )
+                _set_task_running(task_name, False)
+            else:
+                return None
 
         lock_path = task_lock_path(config, task_name)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
 
         if fcntl is not None:
-            handle = open(lock_path, "a+", encoding="utf-8")
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except (BlockingIOError, OSError):
-                handle.close()
+            for attempt in range(2):
+                handle = open(lock_path, "a+", encoding="utf-8")
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except (BlockingIOError, OSError):
+                    handle.close()
+                    if _is_stale_lock(lock_path, timeout_seconds):
+                        logger.info(
+                            "检测到过期的 %s.lock，尝试清理后重试。",
+                            task_name,
+                        )
+                        try:
+                            lock_path.unlink()
+                            continue
+                        except OSError:
+                            pass
+                    return None
+                break
+            else:
                 return None
             uses_flock = True
         else:  # pragma: no cover - Windows without fcntl

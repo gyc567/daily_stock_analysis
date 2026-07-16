@@ -1021,7 +1021,7 @@ class Config:
         True  # 是否将大盘环境摘要用于个股分析 Prompt 与保守护栏
     )
     # 多任务调度：自选股分析和大盘复盘分别配置时间
-    watchlist_analysis_time: str = ""  # 自选股分析时间（HH:MM 格式，为空则不启用）
+    watchlist_analysis_time: str = ""  # 自选股分析时间（HH:MM 格式，多个时间用逗号分隔，为空则不启用）
     market_review_time: str = ""  # 大盘复盘时间（HH:MM 格式，为空则不启用）
     # 大盘复盘市场区域：cn(A股)、hk(港股)、us(美股)、both(三市场)，us 适合仅关注美股的用户
     market_review_region: str = "cn"

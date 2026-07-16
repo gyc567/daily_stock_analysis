@@ -26,6 +26,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+TASK_TIMEOUT_SECONDS = 7200  # 2 hours
+
 
 class GracefulShutdown:
     """
@@ -97,6 +99,11 @@ class Scheduler:
             str, Callable[..., Any]
         ] = {}  # 多任务调度：name -> callback
         self._background_tasks: List[Dict[str, Any]] = []
+        self._running_named_tasks: set[str] = set()
+        self._named_task_threads: Dict[str, threading.Thread] = {}
+        self._named_task_start_time: Dict[str, float] = {}
+        self._single_task_running: bool = False
+        self._single_task_start_time: float = 0.0
         self._running = False
 
     def set_daily_task(
@@ -187,25 +194,51 @@ class Scheduler:
             logger.info("更新后的下次执行时间: %s", self._get_next_run_time())
 
     def _safe_run_task(self) -> None:
-        """安全执行任务（带异常捕获）"""
+        """在后台线程中执行单任务模式，不阻塞调度器主循环。"""
         if self._task_callback is None:
             return
 
-        try:
-            logger.info("=" * 50)
-            logger.info(
-                f"定时任务开始执行 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            logger.info("=" * 50)
+        if self._single_task_running:
+            elapsed = time.time() - self._single_task_start_time
+            if elapsed > TASK_TIMEOUT_SECONDS:
+                logger.warning(
+                    "单任务已超时（运行 %.1fs > %ds），清理守卫后重新执行",
+                    elapsed,
+                    TASK_TIMEOUT_SECONDS,
+                )
+                self._single_task_running = False
+            else:
+                logger.info("单任务已在执行中，跳过本次触发。")
+                return
 
-            self._task_callback()
+        self._single_task_running = True
+        self._single_task_start_time = time.time()
 
-            logger.info(
-                f"定时任务执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
+        def _wrapped() -> None:
+            try:
+                logger.info("=" * 50)
+                logger.info(
+                    f"定时任务开始执行 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                logger.info("=" * 50)
 
-        except Exception as e:
-            logger.exception(f"定时任务执行失败: {e}")
+                self._task_callback()
+
+                logger.info(
+                    f"定时任务执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+            except Exception as e:
+                logger.exception(f"定时任务执行失败: {e}")
+            finally:
+                self._single_task_running = False
+                self._single_task_start_time = 0.0
+
+        thread = threading.Thread(
+            target=_wrapped,
+            daemon=True,
+            name="scheduler-single-task",
+        )
+        thread.start()
 
     def add_daily_task(
         self,
@@ -266,29 +299,61 @@ class Scheduler:
         logger.info("已取消每日定时任务 [%s]", name)
 
     def _safe_run_named_task(self, name: str) -> None:
-        """安全执行指定名称的任务（带异常捕获）"""
+        """在后台线程中执行指定名称的任务，不阻塞调度器主循环。"""
         callback = self._daily_task_callbacks.get(name)
         if callback is None:
             return
 
-        try:
-            logger.info("=" * 50)
-            logger.info(
-                "定时任务 [%s] 开始执行 - %s",
-                name,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            )
-            logger.info("=" * 50)
+        if name in self._running_named_tasks:
+            elapsed = time.time() - self._named_task_start_time.get(name, 0)
+            if elapsed > TASK_TIMEOUT_SECONDS:
+                logger.warning(
+                    "定时任务 [%s] 已超时（运行 %.1fs > %ds），清理守卫后重新执行",
+                    name,
+                    elapsed,
+                    TASK_TIMEOUT_SECONDS,
+                )
+                self._running_named_tasks.discard(name)
+                self._named_task_threads.pop(name, None)
+                self._named_task_start_time.pop(name, None)
+            else:
+                logger.info("定时任务 [%s] 已在执行中，跳过本次触发。", name)
+                return
 
-            callback()
+        self._running_named_tasks.add(name)
+        self._named_task_start_time[name] = time.time()
 
-            logger.info(
-                "定时任务 [%s] 执行完成 - %s",
-                name,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            )
-        except Exception as e:
-            logger.exception("定时任务 [%s] 执行失败: %s", name, e)
+        def _wrapped() -> None:
+            try:
+                logger.info("=" * 50)
+                logger.info(
+                    "定时任务 [%s] 开始执行 - %s",
+                    name,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
+                logger.info("=" * 50)
+
+                callback()
+
+                logger.info(
+                    "定时任务 [%s] 执行完成 - %s",
+                    name,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
+            except Exception as e:
+                logger.exception("定时任务 [%s] 执行失败: %s", name, e)
+            finally:
+                self._running_named_tasks.discard(name)
+                self._named_task_threads.pop(name, None)
+                self._named_task_start_time.pop(name, None)
+
+        thread = threading.Thread(
+            target=_wrapped,
+            daemon=True,
+            name=f"scheduler-task-{name}",
+        )
+        self._named_task_threads[name] = thread
+        thread.start()
 
     def add_background_task(
         self,

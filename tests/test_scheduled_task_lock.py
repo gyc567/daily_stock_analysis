@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tests for src/core/scheduled_task_lock.py."""
 
+import fcntl as fcntl_module
 import json
 import os
 import threading
@@ -129,6 +130,96 @@ class TestCleanupStaleLocks:
         cleaned = cleanup_stale_locks(mock_config, timeout_seconds=3600)
         assert "stale_task" in cleaned
         assert not lock_path.exists()
+
+
+class TestStaleLockRetry:
+    """Test fix: acquire_task_lock retries after cleaning stale locks."""
+
+    def test_retry_after_stale_lock_cleanup(self, mock_config):
+        """When a stale lock file blocks acquisition, it should be cleaned and retried."""
+        from src.core.scheduled_task_lock import (
+            acquire_task_lock,
+            release_task_lock,
+            _is_stale_lock,
+            task_lock_path,
+        )
+
+        lock_path = task_lock_path(mock_config, "stale_retry_test")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write stale metadata (dead PID)
+        lock_path.write_text(
+            json.dumps({
+                "pid": 999999,
+                "task_name": "stale_retry_test",
+                "started_at": "2020-01-01T00:00:00",
+            }),
+            encoding="utf-8",
+        )
+
+        # Make the file "old" so it's clearly stale
+        old_time = time.time() - 100000
+        os.utime(str(lock_path), (old_time, old_time))
+
+        # Hold a real flock from another thread (simulating a stale lock holder)
+        held = threading.Event()
+        ready = threading.Event()
+
+        def hold_flock():
+            fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
+            fcntl_module.flock(fd, fcntl_module.LOCK_EX)
+            ready.set()
+            held.wait(timeout=10)
+            fcntl_module.flock(fd, fcntl_module.LOCK_UN)
+            os.close(fd)
+
+        holder = threading.Thread(target=hold_flock, daemon=True)
+        holder.start()
+        ready.wait(timeout=5)
+
+        # Now the lock file has stale metadata but a real held flock.
+        # acquire_task_lock should detect staleness, clean up, and retry.
+        token = acquire_task_lock(mock_config, "stale_retry_test", timeout_seconds=3600)
+        held.set()
+        holder.join(timeout=5)
+
+        assert token is not None, "acquire_task_lock should succeed after stale cleanup + retry"
+        assert token.task_name == "stale_retry_test"
+        release_task_lock(token)
+
+    def test_valid_lock_still_blocks(self, mock_config):
+        """When a non-stale lock exists, acquire should still return None."""
+        from src.core.scheduled_task_lock import (
+            acquire_task_lock,
+            release_task_lock,
+        )
+
+        # Acquire a valid lock
+        token1 = acquire_task_lock(mock_config, "valid_block_test")
+        assert token1 is not None
+
+        # Second attempt should fail (not stale)
+        token2 = acquire_task_lock(mock_config, "valid_block_test")
+        assert token2 is None
+
+        release_task_lock(token1)
+
+    def test_inprocess_lock_recovers_after_timeout(self, mock_config):
+        """When the in-process guard has exceeded timeout, acquire_task_lock should
+        clean it up and acquire successfully."""
+        from src.core.scheduled_task_lock import (
+            acquire_task_lock,
+            release_task_lock,
+            _set_task_running,
+        )
+
+        # Set the in-process guard to "running" with a very old start time
+        _set_task_running("inproc_timeout_test", True)
+
+        # acquire_task_lock with 0-second timeout should detect and recover
+        token = acquire_task_lock(mock_config, "inproc_timeout_test", timeout_seconds=0)
+        assert token is not None, "should recover from timed-out in-process guard"
+        release_task_lock(token)
 
 
 class TestDifferentTaskNames:

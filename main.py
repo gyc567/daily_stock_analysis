@@ -1363,16 +1363,26 @@ def main() -> int:
                     finally:
                         release_task_lock(lock_token)
 
-                daily_tasks.append(
-                    {
-                        "name": "watchlist_analysis",
-                        "task": watchlist_analysis_task,
-                        "schedule_time": watchlist_analysis_time,
-                        "run_immediately": should_run_immediately,
-                    }
-                )
+                # 支持逗号分隔的多个时间点
+                watchlist_times = [
+                    t.strip()
+                    for t in watchlist_analysis_time.split(",")
+                    if t.strip()
+                ]
+                for idx, wt in enumerate(watchlist_times):
+                    slot_name = f"watchlist_analysis_{wt.replace(':', '_')}"
+                    daily_tasks.append(
+                        {
+                            "name": slot_name,
+                            "task": watchlist_analysis_task,
+                            "schedule_time": wt,
+                            "run_immediately": should_run_immediately
+                            if idx == 0
+                            else False,
+                        }
+                    )
                 logger.info(
-                    "已注册自选股分析定时任务，执行时间: %s", watchlist_analysis_time
+                    "已注册自选股分析定时任务，执行时间: %s", watchlist_times
                 )
 
             if market_review_time:
