@@ -39,6 +39,13 @@ reportUnknownVariableType = false
 reportUnknownMemberType = false
 reportMissingTypeArgument = true
 reportImplicitStringConcatenation = false
+# Several packages expose names via module-level ``__getattr__`` lazy
+# imports (e.g. ``src.agent``, ``src.services``, ``src.agent.skills``).
+# pyright cannot trace ``__getattr__`` and therefore reports each
+# ``__all__`` entry as missing. Disabling ``reportUnsupportedDunderAll``
+# lets those packages keep their lazy-import contract while keeping the
+# rest of the strict rules in place.
+reportUnsupportedDunderAll = false
 
 [tool.mypy]
 python_version = "3.11"

@@ -214,6 +214,13 @@ class Scheduler:
         self._single_task_running = True
         self._single_task_start_time = time.time()
 
+        task_callback = self._task_callback
+        if task_callback is None:
+            self._single_task_running = False
+            self._single_task_start_time = 0.0
+            logger.warning("定时任务回调未注册，跳过本次执行")
+            return
+
         def _wrapped() -> None:
             try:
                 logger.info("=" * 50)
@@ -222,7 +229,7 @@ class Scheduler:
                 )
                 logger.info("=" * 50)
 
-                self._task_callback()
+                task_callback()
 
                 logger.info(
                     f"定时任务执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
