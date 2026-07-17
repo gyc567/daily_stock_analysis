@@ -565,7 +565,7 @@ def _extract_raw_data_from_context(
     valuation/growth/earnings 字段映射、以及基于日线 + 实时价推算
     ma250 偏离 / 52周高点距离 / 量能趋势 / 趋势持续月份。
     """
-    raw_data = {}
+    raw_data: Dict[str, Any] = {}
 
     # ---- legacy: context["fundamental"] (顶层) ----
     if context.get("fundamental"):
@@ -740,9 +740,9 @@ def _enrich_raw_data_from_llm_output(
     # 估值分位：极少出现但留作扩展位
     if "pe_percentile" not in raw_data:
         for k in ("pe_percentile", "valuation_percentile", "pe_quantile"):
-            v = data_perspective.get(k)
-            if isinstance(v, (int, float)):
-                raw_data["pe_percentile"] = float(v)
+            pe_v = data_perspective.get(k)
+            if isinstance(pe_v, (int, float)):
+                raw_data["pe_percentile"] = float(pe_v)
                 break
 
 
