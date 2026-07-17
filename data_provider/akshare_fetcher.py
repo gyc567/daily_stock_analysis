@@ -1773,9 +1773,46 @@ class AkshareFetcher(BaseFetcher):
             )
             import time as _time
 
+            # P3-2 fix (2026-07-17): Eastmoney's push2his.eastmoney.com
+            # often closes the connection mid-request (RemoteDisconnected)
+            # when the system has a SOCKS proxy in env (all_proxy=
+            # socks://...). The HTTP proxy at 127.0.0.1:7890 works better.
+            # We temporarily strip SOCKS env, retry up to 3 times with
+            # exponential backoff, and prefer the HTTP proxy if set.
+            df = None
             api_start = _time.time()
-
-            df = ak.stock_cyq_em(symbol=stock_code)
+            _saved_env: Dict[str, str] = {}
+            _socks_keys = (
+                "all_proxy",
+                "ALL_PROXY",
+                "SOCKS_PROXY",
+                "socks_proxy",
+            )
+            try:
+                for _k in _socks_keys:
+                    if _k in os.environ:
+                        _saved_env[_k] = os.environ[_k]
+                        del os.environ[_k]
+                for _attempt in range(3):
+                    try:
+                        df = ak.stock_cyq_em(symbol=stock_code)
+                        if df is not None and not df.empty:
+                            break
+                    except Exception as _exc:
+                        logger.warning(
+                            f"[chip retry] ak.stock_cyq_em {stock_code} "
+                            f"attempt {_attempt + 1}/3 failed: "
+                            f"{type(_exc).__name__}: {_exc}"
+                        )
+                        if _attempt < 2:
+                            _time.sleep(0.5 * (2**_attempt))
+                        else:
+                            raise
+            finally:
+                for _k, _v in _saved_env.items():
+                    os.environ[_k] = _v
+            if df is None:
+                return None
 
             api_elapsed = _time.time() - api_start
 
