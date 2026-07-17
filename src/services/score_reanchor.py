@@ -112,69 +112,34 @@ def _clamp(score: int) -> int:
 
 
 def extract_reanchor_inputs(
-    raw: Dict[str, Any],
+    raw: Any,
 ) -> Dict[str, Any]:
     """Pull the factors the LLM *did* report from the parsed JSON."""
     if not isinstance(raw, dict):
         raw = {}
 
-    dash: Dict[str, Any] = (
-        raw.get("dashboard") if isinstance(raw.get("dashboard"), dict) else {}
-    )
-    dp: Dict[str, Any] = (
-        dash.get("data_perspective")
-        if isinstance(dash.get("data_perspective"), dict)
-        else {}
-    )
-    intel: Dict[str, Any] = (
-        dash.get("intelligence") if isinstance(dash.get("intelligence"), dict) else {}
-    )
+    def _nested_dict(parent: Any, key: str) -> Dict[str, Any]:
+        v = parent.get(key)
+        return v if isinstance(v, dict) else {}
 
-    is_bullish = _coerce_bool((dp.get("trend_status") or {}).get("is_bullish"))
-    bias_ma5 = _coerce_float((dp.get("price_position") or {}).get("bias_ma5"))
-    volume_status = (dp.get("volume_analysis") or {}).get("volume_status")
-    chip_health = (dp.get("chip_structure") or {}).get("chip_health")
+    dash: Dict[str, Any] = _nested_dict(raw, "dashboard")
+    dp: Dict[str, Any] = _nested_dict(dash, "data_perspective")
+    intel: Dict[str, Any] = _nested_dict(dash, "intelligence")
+
+    is_bullish = _coerce_bool(_nested_dict(dp.get("trend_status") or {}, "is_bullish"))
+    bias_ma5 = _coerce_float(_nested_dict(dp, "price_position").get("bias_ma5"))
+    volume_status = _nested_dict(dp, "volume_analysis").get("volume_status")
+    chip_health = _nested_dict(dp, "chip_structure").get("chip_health")
     risk_alerts = intel.get("risk_alerts")
     risk_count = len(risk_alerts) if isinstance(risk_alerts, list) else 0
 
+    ctx_snapshot: Dict[str, Any] = _nested_dict(raw, "context_snapshot")
     pe_ratio: Optional[float] = _coerce_float(raw.get("pe_ratio"))
     if pe_ratio is None:
-        ctx_snapshot: Dict[str, Any] = (
-            raw.get("context_snapshot")
-            if isinstance(raw.get("context_snapshot"), dict)
-            else {}
-        )
         pe_ratio = _coerce_float(ctx_snapshot.get("pe_ratio"))
 
     market_high_risk = False
-    ctx_snapshot = (
-        raw.get("context_snapshot")
-        if isinstance(raw.get("context_snapshot"), dict)
-        else {}
-    )
     risk_tags = ctx_snapshot.get("risk_tags") or []
-    if isinstance(risk_tags, list):
-        market_high_risk = any(
-            isinstance(t, str) and t.lower() in ("high_risk", "market_cooling")
-            for t in risk_tags
-        )
-    intel = (
-        dash.get("intelligence") if isinstance(dash.get("intelligence"), dict) else {}
-    )
-
-    is_bullish = _coerce_bool((dp.get("trend_status") or {}).get("is_bullish"))
-    bias_ma5 = _coerce_float((dp.get("price_position") or {}).get("bias_ma5"))
-    volume_status = (dp.get("volume_analysis") or {}).get("volume_status")
-    chip_health = (dp.get("chip_structure") or {}).get("chip_health")
-    risk_alerts = intel.get("risk_alerts")
-    risk_count = len(risk_alerts) if isinstance(risk_alerts, list) else 0
-
-    pe_ratio = _coerce_float(raw.get("pe_ratio"))
-    if pe_ratio is None:
-        pe_ratio = _coerce_float((raw.get("context_snapshot") or {}).get("pe_ratio"))
-
-    market_high_risk = False
-    risk_tags = (raw.get("context_snapshot") or {}).get("risk_tags") or []
     if isinstance(risk_tags, list):
         market_high_risk = any(
             isinstance(t, str) and t.lower() in ("high_risk", "market_cooling")
@@ -285,10 +250,12 @@ def reanchor_score(
         adjustments.append({"factor": "market_risk", "value": "high", "delta": -5})
 
     new_score = _clamp(score)
-    original_score = None
+    original_score: Optional[int] = None
     if isinstance(raw, dict):
         try:
-            original_score = int(raw.get("sentiment_score"))
+            raw_score = raw.get("sentiment_score")
+            if raw_score is not None and not isinstance(raw_score, bool):
+                original_score = int(raw_score)
         except (TypeError, ValueError):
             original_score = None
 

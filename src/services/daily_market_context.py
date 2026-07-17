@@ -731,8 +731,8 @@ def _sanitize_market_summary(summary: str, *, max_chars: int = 800) -> str:
     """Strip LLM leakage patterns from a stored market summary before re-injection.
 
     LLM-generated market review text often contains:
-    - <think>...</think> style reasoning blocks (left over from thinking models)
-    - Markdown code fences (\`\`\`json / \`\`\`)
+    - ``think`` style reasoning blocks (left over from thinking models)
+    - Markdown code fences (```json / ```)
     - Re-emitted JSON dashboard fragments
     - Re-emitted JSON closing braces that look like a fresh LLM response
 

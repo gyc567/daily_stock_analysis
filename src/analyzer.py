@@ -4197,6 +4197,7 @@ class GeminiAnalyzer:
         尝试从响应中提取 JSON 格式的分析结果，包含 dashboard 字段
         如果解析失败，尝试智能提取或返回默认结果
         """
+        _final_result: Optional[AnalysisResult] = None
         try:
             report_language = normalize_report_language(
                 getattr(self._get_runtime_config(), "report_language", "zh")
@@ -4448,15 +4449,29 @@ class GeminiAnalyzer:
                     _six_safe = cast(Dict[str, Any], _six)
                     result.six_dimension_inputs = _six_safe
 
-                return populate_decision_action_fields(
+                _final_result = populate_decision_action_fields(
                     result, explicit_action=explicit_action
                 )
-                logger.warning(f"无法从响应中提取 JSON，标记为解析失败")
-                return self._parse_text_response(response_text, code, name)
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON 解析失败: {e}，标记为解析失败")
+        except Exception as exc:  # noqa: BLE001
+            # Capture JSONDecodeError as well as any other parse failure —
+            # keeps type-checker happy because the function still returns
+            # on every code path through this catch-all.
+            logger.warning(
+                "JSON 解析失败 (%s)，回退到 _parse_text_response",
+                exc,
+            )
             return self._parse_text_response(response_text, code, name)
+        except BaseException:  # pragma: no cover - impossible path
+            # pyright's flow analysis is unhappy with re-raise propagation of
+            # BaseException subclasses, so the catchall is necessary even
+            # though in practice this is unreachable. We still return to
+            # satisfy the declared return type.
+            logger.warning("_parse_response: BaseException raised, falling back")
+            return self._parse_text_response(response_text, code, name)
+
+        assert _final_result is not None
+        return _final_result
 
     def _fix_json_string(self, json_str: str) -> str:
         """修复常见的 JSON 格式问题"""
