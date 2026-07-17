@@ -98,7 +98,7 @@ export const FiveSectionReportView: React.FC<FiveSectionReportViewProps> = ({
 
       {/* 六维详情（展开指标） */}
       {frameworkData && frameworkData.dimensions && frameworkData.dimensions.length > 0 && (
-        <DimensionDetailPanel dimensions={frameworkData.dimensions} showIndicators={true} />
+        <DimensionDetailPanel dimensions={frameworkData.dimensions} showIndicators={true} reportLanguage={language} />
       )}
     </div>
   );
