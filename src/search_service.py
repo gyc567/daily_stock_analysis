@@ -2962,6 +2962,17 @@ class SearchService:
         if not self._providers:
             logger.warning("未配置任何搜索能力，新闻搜索功能将不可用")
 
+        # 9. HTML scrape news provider (P3-1, 2026-07-17)
+        # Last-resort fallback when Tavily/SearXNG/Brave all return 0.
+        # Scrapes public finance portals (Sina) for company news.
+        try:
+            from src.services.html_scrape_news import HTMLScrapeNewsProvider
+
+            self._providers.append(HTMLScrapeNewsProvider())
+            logger.info("已配置 HTML 抓取新闻源 (Sina Finance) 作为兜底")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HTML 抓取新闻源初始化失败: %s", exc)
+
         # In-memory search result cache: {cache_key: (timestamp, SearchResponse)}
         self._cache: Dict[str, Tuple[float, "SearchResponse"]] = {}
         self._cache_lock = threading.RLock()

@@ -45,8 +45,22 @@ _MARKET_REVIEW_LOCK_WAIT_MAX_ATTEMPTS = 40
 _RISK_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("high_risk", ("高风险", "风险偏高", "风险较高", "high risk", "elevated risk")),
     ("market_cooling", ("退潮", "降温", "risk-off", "risk off", "cooling")),
-    ("conservative", ("观望", "谨慎", "保守", "等待确认", "watch", "cautious", "conservative")),
-    ("low_position_cap", ("仓位上限", "轻仓", "低仓位", "小仓", "position cap", "low position", "small position")),
+    (
+        "conservative",
+        ("观望", "谨慎", "保守", "等待确认", "watch", "cautious", "conservative"),
+    ),
+    (
+        "low_position_cap",
+        (
+            "仓位上限",
+            "轻仓",
+            "低仓位",
+            "小仓",
+            "position cap",
+            "low position",
+            "small position",
+        ),
+    ),
 )
 
 
@@ -116,7 +130,9 @@ class DailyMarketContextService:
     ) -> Optional[DailyMarketContext]:
         normalized_region = _normalize_region(region)
         context_date = target_date or self._today_fn()
-        report_language = normalize_report_language(getattr(config, "report_language", "zh"))
+        report_language = normalize_report_language(
+            getattr(config, "report_language", "zh")
+        )
         cache_key = self._cache_key(
             context_date=context_date,
             region=normalized_region,
@@ -392,7 +408,9 @@ class DailyMarketContextService:
         owns_lock = lock_token is None
         if lock_token is None:
             lock_token = try_acquire_market_review_lock(config)
-        report_language = normalize_report_language(getattr(config, "report_language", "zh"))
+        report_language = normalize_report_language(
+            getattr(config, "report_language", "zh")
+        )
         cache_key = self._cache_key(
             context_date=target_date,
             region=region,
@@ -453,10 +471,7 @@ class DailyMarketContextService:
                 trigger_source="daily_market_context",
             )
 
-            if (
-                hasattr(result, "market_review_payload")
-                and hasattr(result, "report")
-            ):
+            if hasattr(result, "market_review_payload") and hasattr(result, "report"):
                 payload = result.market_review_payload or {}
                 fallback_summary = result.report
             elif isinstance(result, str):
@@ -604,7 +619,9 @@ class DailyMarketContextService:
         summary = _extract_summary(scoped_payload, fallback_summary)
         if not summary:
             return None
-        risk_signal_text = _join_text_parts(summary, _extract_market_light_signal_text(scoped_payload))
+        risk_signal_text = _join_text_parts(
+            summary, _extract_market_light_signal_text(scoped_payload)
+        )
         risk_tags = _extract_risk_tags(risk_signal_text)
         position_cap = _extract_position_cap(risk_signal_text)
         full_report = _extract_full_market_report(
@@ -640,15 +657,20 @@ def format_daily_market_context_prompt_section(
     if not summary:
         return ""
     summary = _escape_untrusted_market_summary_sentinels(summary)
+    summary = _sanitize_market_summary(summary)
 
     language = normalize_report_language(report_language)
     region = _normalize_region(str(payload.get("region") or "cn"))
     trade_date = str(payload.get("trade_date") or "").strip()
-    risk_tags = [
-        str(item).strip()
-        for item in payload.get("risk_tags", [])
-        if str(item).strip()
-    ] if isinstance(payload.get("risk_tags"), list) else []
+    risk_tags = (
+        [
+            str(item).strip()
+            for item in payload.get("risk_tags", [])
+            if str(item).strip()
+        ]
+        if isinstance(payload.get("risk_tags"), list)
+        else []
+    )
     position_cap = str(payload.get("position_cap") or "").strip()
     source = str(payload.get("source") or "").strip()
 
@@ -668,7 +690,9 @@ def format_daily_market_context_prompt_section(
             lines.append(f"- Risk tags: {', '.join(risk_tags)}")
         if position_cap:
             lines.append(f"- Position cap: {position_cap}")
-        lines.append("- Guardrail: if this context is conservative or high risk, avoid aggressive buy advice and prefer smaller position sizing or confirmation.")
+        lines.append(
+            "- Guardrail: if this context is conservative or high risk, avoid aggressive buy advice and prefer smaller position sizing or confirmation."
+        )
         if source:
             lines.append(f"- Source: {source}")
         return "\n".join(lines) + "\n"
@@ -688,7 +712,9 @@ def format_daily_market_context_prompt_section(
         lines.append(f"- 风险标签：{', '.join(risk_tags)}")
     if position_cap:
         lines.append(f"- 仓位提示：{position_cap}")
-    lines.append("- 约束：若大盘环境偏谨慎、退潮、观望或高风险，避免给出激进买入建议，优先控制仓位并等待确认。")
+    lines.append(
+        "- 约束：若大盘环境偏谨慎、退潮、观望或高风险，避免给出激进买入建议，优先控制仓位并等待确认。"
+    )
     if source:
         lines.append(f"- 来源：{source}")
     return "\n".join(lines) + "\n"
@@ -699,6 +725,66 @@ def _escape_untrusted_market_summary_sentinels(summary: str) -> str:
     for sentinel in _UNTRUSTED_MARKET_SUMMARY_SENTINELS:
         escaped = escaped.replace(sentinel, sentinel.replace("_", r"\_"))
     return escaped
+
+
+def _sanitize_market_summary(summary: str, *, max_chars: int = 800) -> str:
+    """Strip LLM leakage patterns from a stored market summary before re-injection.
+
+    LLM-generated market review text often contains:
+    - ``think`` style reasoning blocks (left over from thinking models)
+    - Markdown code fences (```json / ```)
+    - Re-emitted JSON dashboard fragments
+    - Re-emitted JSON closing braces that look like a fresh LLM response
+
+    If we inject any of these into the next analysis prompt, the LLM will
+    either re-process them as instructions or mirror them as its own output,
+    which corrupts subsequent dashboards (silently degrades them, drops
+    fields, or causes "self-rewriting" multi-JSON output).
+
+    This sanitizer is a defense-in-depth measure that runs *after*
+    ``_escape_untrusted_market_summary_sentinels``.  It keeps the summary
+    inside its 800-char budget so a runaway LLM response cannot blow up the
+    prompt of every other stock.
+    """
+    cleaned = summary
+
+    # Strip <think>...</think> blocks (possibly multiple). The .*? is
+    # non-greedy; use DOTALL so newlines are consumed.
+    cleaned = re.sub(
+        r"<think>[\s\S]*?</think>",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    # Strip any stray opening/closing think tag without a matching pair.
+    # This catches the common leak where the LLM omits the closing tag.
+    cleaned = re.sub(
+        r"</?think[\s\S]*?(?:</think>|$)",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+    # Strip markdown code fences (```json ... ``` or ``` ... ```).
+    cleaned = re.sub(r"```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.replace("```", "")
+
+    # Drop any inline JSON object substring that may be a leaked dashboard.
+    # The LLM sometimes writes "{...}" inline; we replace it with a placeholder.
+    # We only do this if the substring looks like a complete JSON object
+    # (matched braces and ends with "}").
+    cleaned = re.sub(
+        r"\{[^{}]*\"[a-zA-Z_]+\"[\s\S]*?\}",
+        "[json-removed]",
+        cleaned,
+    )
+
+    # Collapse runs of whitespace.
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if len(cleaned) > max_chars:
+        cleaned = cleaned[: max_chars - 1] + "…"
+    return cleaned
 
 
 def _normalize_region(region: str) -> str:
@@ -720,7 +806,11 @@ def _loads_mapping(value: Any) -> Dict[str, Any]:
 
 def _payload_from_raw_record(record: Any) -> Dict[str, Any]:
     raw = _loads_mapping(getattr(record, "raw_result", None))
-    text = raw.get("raw_response") or raw.get("market_review_report") or getattr(record, "news_content", None)
+    text = (
+        raw.get("raw_response")
+        or raw.get("market_review_report")
+        or getattr(record, "news_content", None)
+    )
     if isinstance(text, str) and text.strip():
         return {"markdown_report": text}
     return {}
@@ -743,7 +833,9 @@ def _extract_full_market_report(
                 return value
 
     sections = scoped_payload.get("sections")
-    if isinstance(sections, Iterable) and not isinstance(sections, (str, bytes, Mapping)):
+    if isinstance(sections, Iterable) and not isinstance(
+        sections, (str, bytes, Mapping)
+    ):
         parts: List[str] = []
         for section in sections:
             if not isinstance(section, Mapping):
@@ -816,7 +908,9 @@ def _record_matches_target_date(
     language_matches = _record_report_language_matches(record, report_language)
     if payload_date is not None:
         if require_query_id_match:
-            return _record_matches_query_id(record, current_query_id) and language_matches
+            return (
+                _record_matches_query_id(record, current_query_id) and language_matches
+            )
         return language_matches and (
             payload_date == target_date
             or _record_matches_query_id(record, current_query_id)
@@ -826,13 +920,16 @@ def _record_matches_target_date(
     if require_query_id_match:
         return _record_matches_query_id(record, current_query_id) and language_matches
     return language_matches and (
-        created_date == target_date or _record_matches_query_id(record, current_query_id)
+        created_date == target_date
+        or _record_matches_query_id(record, current_query_id)
     )
 
 
 def _record_report_language_matches(record: Any, report_language: str) -> bool:
     snapshot = _loads_mapping(getattr(record, "context_snapshot", None))
-    return normalize_report_language(snapshot.get("report_language")) == normalize_report_language(
+    return normalize_report_language(
+        snapshot.get("report_language")
+    ) == normalize_report_language(
         report_language,
     )
 
@@ -860,13 +957,17 @@ def _payload_for_region(payload: Mapping[str, Any], region: str) -> Mapping[str,
     return payload
 
 
-def _extract_summary(payload: Mapping[str, Any], fallback_summary: Optional[str]) -> str:
+def _extract_summary(
+    payload: Mapping[str, Any], fallback_summary: Optional[str]
+) -> str:
     candidates: List[Any] = [
         payload.get("summary"),
         payload.get("analysis_summary"),
     ]
     sections = payload.get("sections")
-    if isinstance(sections, Iterable) and not isinstance(sections, (str, bytes, Mapping)):
+    if isinstance(sections, Iterable) and not isinstance(
+        sections, (str, bytes, Mapping)
+    ):
         for section in sections:
             if isinstance(section, Mapping):
                 candidates.append(section.get("markdown"))
@@ -900,7 +1001,9 @@ def _extract_market_light_signal_text(payload: Mapping[str, Any]) -> str:
 
 
 def _join_text_parts(*parts: str) -> str:
-    return " ".join(part.strip() for part in parts if isinstance(part, str) and part.strip())
+    return " ".join(
+        part.strip() for part in parts if isinstance(part, str) and part.strip()
+    )
 
 
 def _first_meaningful_line(value: Any) -> str:
@@ -935,10 +1038,16 @@ def _extract_risk_tags(text: str) -> List[str]:
 def _extract_position_cap(text: str) -> Optional[str]:
     if not text:
         return None
-    cap_match = re.search(r"(?:仓位上限|仓位不超过|position cap|position limit)[^0-9%]{0,12}(\d{1,3}\s*%)", text, re.IGNORECASE)
+    cap_match = re.search(
+        r"(?:仓位上限|仓位不超过|position cap|position limit)[^0-9%]{0,12}(\d{1,3}\s*%)",
+        text,
+        re.IGNORECASE,
+    )
     if cap_match:
         return cap_match.group(1).replace(" ", "")
-    low_position_match = re.search(r"(轻仓|低仓位|小仓|low position|small position)", text, re.IGNORECASE)
+    low_position_match = re.search(
+        r"(轻仓|低仓位|小仓|low position|small position)", text, re.IGNORECASE
+    )
     return low_position_match.group(1) if low_position_match else None
 
 

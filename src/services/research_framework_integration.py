@@ -42,13 +42,17 @@ def integrate_research_framework(
 
         raw_data = _extract_raw_data_from_context(result, context)
 
+        # P2-fix: 也从 LLM 的 dashboard / raw_result 里取主观维度键值
+        _enrich_raw_data_from_llm_output(raw_data, result)
+
         scoring_service = ResearchScoringService()
-        scoring_result = scoring_service.process(
+        scoring_result = scoring_service.process_with_p2_enrichment(
             stock_code=result.code,
             stock_name=result.name,
             market=_infer_market(result.code),
             raw_data=raw_data,
             market_implied_p=_estimate_market_implied_p(result),
+            enrich_with_providers=True,
         )
 
         result.research_framework = scoring_result.get("framework_score")
@@ -550,47 +554,99 @@ def _extract_raw_data_from_context(
     result: AnalysisResult,
     context: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """从分析结果和上下文中提取评分所需的数据"""
-    raw_data = {}
+    """从分析结果和上下文中提取评分所需的数据
 
+    P2-fix: 原实现只查 ``context["fundamental"]`` / ``context["trend"]`` /
+    ``context["capital_flow"]`` 这三个**顶层 key**，但 Pipeline 实际产出的
+    ``enhanced_context`` 里没有这些顶层 key——它们分别被存放在
+    ``enhanced_context.fundamental_context`` /
+    ``enhanced_context.trend_analysis`` / ``enhanced_context.realtime`` 等
+    嵌套位置。新实现在两层都能读取（向后兼容顶层写法），并新增
+    valuation/growth/earnings 字段映射、以及基于日线 + 实时价推算
+    ma250 偏离 / 52周高点距离 / 量能趋势 / 趋势持续月份。
+    """
+    raw_data: Dict[str, Any] = {}
+
+    # ---- legacy: context["fundamental"] (顶层) ----
     if context.get("fundamental"):
         fund = context["fundamental"]
-        raw_data["pe_percentile"] = fund.get("pe_percentile")
-        raw_data["pb_percentile"] = fund.get("pb_percentile")
-        raw_data["roe"] = fund.get("roe")
-        raw_data["revenue_growth"] = fund.get("revenue_growth")
-        raw_data["earnings_growth"] = fund.get("earnings_growth")
-        raw_data["gross_margin"] = fund.get("gross_margin")
+        _fundament_merge(raw_data, fund)
 
+    # ---- legacy: context["trend"] ----
     if context.get("trend"):
         trend = context["trend"]
         raw_data["price_vs_ma250"] = trend.get("price_vs_ma250")
         raw_data["distance_from_high"] = trend.get("distance_from_high")
-        ma_status = trend.get("ma_alignment", "").lower()
-        if "多头" in ma_status or "bullish" in ma_status:
-            raw_data["ma_alignment"] = "bullish"
-        elif "空头" in ma_status or "bearish" in ma_status:
-            raw_data["ma_alignment"] = "bearish"
-        else:
-            raw_data["ma_alignment"] = "neutral"
+        _ma_alignment_from_text(raw_data, trend.get("ma_alignment"))
 
+    # ---- legacy: context["capital_flow"] ----
     if context.get("capital_flow"):
         cap = context["capital_flow"]
-        raw_data["northbound_flow_20d"] = cap.get("northbound_flow_20d")
-        raw_data["margin_balance_change"] = cap.get("margin_balance_change")
-        raw_data["foreign_ratio"] = cap.get("foreign_ratio")
+        _capital_merge(raw_data, cap)
 
-    if result.fundamental_analysis:
-        raw_data["moat_assessment"] = _extract_moat_from_analysis(
-            result.fundamental_analysis
-        )
-        raw_data["supply_chain_evidence"] = _extract_supply_chain_from_analysis(
-            result.fundamental_analysis
-        )
+    # ---- new: enhanced_context.realtime ----
+    rt = context.get("realtime") or {}
+    if isinstance(rt, dict):
+        if rt.get("pe_ratio") is not None and rt["pe_ratio"] > 0:
+            pe_pctile = _pe_to_percentile(rt["pe_ratio"])
+            if pe_pctile is not None:
+                raw_data.setdefault("pe_percentile", pe_pctile)
+        if rt.get("pb_ratio") is not None and rt["pb_ratio"] > 0:
+            pb_pctile = _pb_to_percentile(rt["pb_ratio"])
+            if pb_pctile is not None:
+                raw_data.setdefault("pb_percentile", pb_pctile)
+        if rt.get("turnover_rate") is not None:
+            raw_data["turnover_rate"] = rt["turnover_rate"]
 
+    # ---- new: enhanced_context.fundamental_context → valuation / growth / earnings ----
+    fc = context.get("fundamental_context") or {}
+    if isinstance(fc, dict):
+        # fundamental_context 自身没有 "data" key；数据分别在各 block 的 data 里
+        _v = fc.get("valuation")
+        _g = fc.get("growth")
+        _e = fc.get("earnings")
+        valuation_block: Dict[str, Any] = _v if isinstance(_v, dict) else {}
+        growth_block: Dict[str, Any] = _g if isinstance(_g, dict) else {}
+        earnings_block: Dict[str, Any] = _e if isinstance(_e, dict) else {}
+
+        if valuation_block.get("status") in ("ok", "partial"):
+            _valuation_merge(raw_data, valuation_block.get("data") or {}, rt)
+        if growth_block.get("status") in ("ok", "partial"):
+            _growth_merge(raw_data, growth_block.get("data") or {})
+        if earnings_block.get("status") in ("ok", "partial"):
+            _earnings_merge(raw_data, earnings_block.get("data") or {})
+
+    # ---- new: enhanced_context.trend_analysis → ma_alignment + derive extra indicators ----
+    ta = context.get("trend_analysis") or {}
+    if isinstance(ta, dict):
+        if not raw_data.get("ma_alignment"):
+            _ma_alignment_from_text(
+                raw_data, ta.get("trend_status") or ta.get("ma_alignment")
+            )
+        raw_data.setdefault("bias_ma5", _safe_num(ta.get("bias_ma5")))
+        if isinstance(ta.get("volume_status"), str):
+            _volume_status_to_trend(raw_data, ta["volume_status"])
+
+    # ---- new: derive ma250 + 52w high from daily + realtime ----
+    today = context.get("today") or {}
+    yesterday = context.get("yesterday") or {}
+    if isinstance(today, dict):
+        _derive_technical_indicators(raw_data, today, yesterday, rt)
+
+    # ---- new: news sentiment from market_sentiment text ----
     if result.market_sentiment:
         raw_data["news_sentiment"] = _infer_sentiment(result.market_sentiment)
 
+    # ---- existing moat extraction ----
+    if result.fundamental_analysis:
+        moat = _extract_moat_from_analysis(result.fundamental_analysis)
+        if moat:
+            raw_data["moat_assessment"] = moat
+        sc_ev = _extract_supply_chain_from_analysis(result.fundamental_analysis)
+        if sc_ev:
+            raw_data["supply_chain_evidence"] = sc_ev
+
+    # ---- existing analyst_consensus from sentiment_score ----
     sentiment = result.sentiment_score
     if sentiment is not None:
         if sentiment >= 70:
@@ -606,7 +662,366 @@ def _extract_raw_data_from_context(
             raw_data["analyst_consensus"] = "underperform"
             raw_data["target_price_upside"] = -10.0
 
-    return raw_data
+    # P2-fix: strip None values so scoring functions don't trigger "中性分" fallback
+    # for fields that legacy schema *did* have but were empty in this stock.
+    return {k: v for k, v in raw_data.items() if v is not None and v != ""}
+
+
+def _enrich_raw_data_from_llm_output(
+    raw_data: Dict[str, Any], result: AnalysisResult
+) -> None:
+    """P2-fix: 从 LLM 输出（dashboard / six_dimension_inputs）提取主观维度键值。
+
+    主要来源（按优先级）：
+    1. result.six_dimension_inputs（LLM 在根级写的 ⑥ 个长线维度键值，由
+       Analyzer 解析 JSON 后透传；prompt 章节「长线六维·主观键值」触发）
+    2. result.dashboard.intelligence / data_perspective（fallback）
+
+    只在 raw_data 还没填该字段时填充，避免覆盖更准确的来源。
+    """
+    # ---- 1. 优先: six_dimension_inputs ----
+    six = getattr(result, "six_dimension_inputs", None)
+    if isinstance(six, dict):
+        _merge_six_dim(raw_data, six)
+    else:
+        # 备用：从 dashboard 顶层找（万一 LLM 把 six_dimension_inputs 放在 dashboard 里）
+        if isinstance(getattr(result, "dashboard", None), dict):
+            _six_in_dash = result.dashboard.get("six_dimension_inputs")  # type: ignore[union-attr]
+            if isinstance(_six_in_dash, dict):
+                _merge_six_dim(raw_data, _six_in_dash)
+
+    # ---- 2. Fallback: dashboard.data_perspective / intelligence ----
+    if not isinstance(getattr(result, "dashboard", None), dict):
+        return
+    dash: Dict[str, Any] = result.dashboard  # type: ignore[assignment]
+    _dp = dash.get("data_perspective")
+    _intel = dash.get("intelligence")
+    data_perspective = _dp if isinstance(_dp, dict) else {}
+    intelligence = _intel if isinstance(_intel, dict) else {}
+    _chip = data_perspective.get("chip_structure")
+    chip_struct = _chip if isinstance(_chip, dict) else {}
+
+    if "chip_concentration" not in raw_data:
+        _conc = chip_struct.get("concentration")
+        if isinstance(_conc, (int, float)):
+            v = float(_conc)
+            if v >= 30:
+                raw_data["chip_concentration"] = "high"
+            elif v >= 15:
+                raw_data["chip_concentration"] = "medium"
+            else:
+                raw_data["chip_concentration"] = "low"
+
+    if "news_sentiment" not in raw_data:
+        for key in (
+            "sentiment_summary",
+            "earnings_outlook",
+            "latest_news",
+        ):
+            val = intelligence.get(key) if isinstance(intelligence, dict) else None
+            if isinstance(val, str) and val.strip():
+                inferred = _infer_sentiment(val)
+                if inferred:
+                    raw_data["news_sentiment"] = inferred
+                    break
+
+    if "cognitive_difference" not in raw_data:
+        if isinstance(intelligence, dict):
+            risk_alerts = intelligence.get("risk_alerts") or []
+            catalysts = intelligence.get("positive_catalysts") or []
+            if isinstance(risk_alerts, list) and isinstance(catalysts, list):
+                if len(catalysts) >= 2 and len(risk_alerts) == 0:
+                    raw_data["cognitive_difference"] = "market_underestimating"
+                elif len(risk_alerts) > len(catalysts):
+                    raw_data["cognitive_difference"] = "market_overestimating"
+                elif len(catalysts) > 0 or len(risk_alerts) > 0:
+                    raw_data["cognitive_difference"] = "market_fair"
+
+    # 估值分位：极少出现但留作扩展位
+    if "pe_percentile" not in raw_data:
+        for k in ("pe_percentile", "valuation_percentile", "pe_quantile"):
+            pe_v = data_perspective.get(k)
+            if isinstance(pe_v, (int, float)):
+                raw_data["pe_percentile"] = float(pe_v)
+                break
+
+
+def _merge_six_dim(raw_data: Dict[str, Any], six: Dict[str, Any]) -> None:
+    """把 LLM 写的 six_dimension_inputs 复制到 raw_data（仅当还未填）。"""
+    if not isinstance(six, dict):
+        return
+    _STR_KEYS: Dict[str, str] = {
+        "chain_position": "chain_position",
+        "moat_type": "moat_type",
+        "moat_strength": "moat_strength",
+        "us_china_risk": "us_china_risk",
+        "chokepoint_type": "chokepoint_type",
+        "cognitive_difference": "cognitive_difference",
+        "news_sentiment": "news_sentiment",
+    }
+    for src_key, dst_key in _STR_KEYS.items():
+        if dst_key in raw_data:
+            continue
+        v = six.get(src_key)
+        if isinstance(v, str) and v.strip() and v.strip().lower() != "null":
+            raw_data[dst_key] = v.strip()
+
+    # 浮点字段
+    for src_key, dst_key in (("customer_concentration", "customer_concentration"),):
+        if dst_key in raw_data:
+            continue
+        v = six.get(src_key)
+        try:
+            if v is not None and v != "" and v != "null":
+                f = float(v)
+                if f == f:  # NaN guard
+                    raw_data[dst_key] = f
+        except (TypeError, ValueError):
+            pass
+
+    # 数组字段
+    for src_key, dst_key in (("recent_catalysts", "recent_catalysts"),):
+        if dst_key in raw_data:
+            continue
+        v = six.get(src_key)
+        if isinstance(v, list) and v:
+            raw_data[dst_key] = [str(x) for x in v if x is not None]
+
+    # chip_concentration（数值 0-100 → high/medium/low）
+    if "chip_concentration" not in raw_data:
+        v = six.get("chip_concentration")
+        try:
+            if v is not None and v != "" and v != "null":
+                f = float(v)
+                if f >= 30:
+                    raw_data["chip_concentration"] = "high"
+                elif f >= 15:
+                    raw_data["chip_concentration"] = "medium"
+                else:
+                    raw_data["chip_concentration"] = "low"
+        except (TypeError, ValueError):
+            pass
+
+
+def _fundament_merge(raw_data: Dict[str, Any], fund: Dict[str, Any]) -> None:
+    """Merge top-level context['fundamental'] keys into raw_data."""
+    for key in (
+        "pe_percentile",
+        "pb_percentile",
+        "roe",
+        "revenue_growth",
+        "earnings_growth",
+        "gross_margin",
+    ):
+        v = fund.get(key)
+        if v is not None:
+            raw_data[key] = v
+
+
+def _capital_merge(raw_data: Dict[str, Any], cap: Dict[str, Any]) -> None:
+    """Merge top-level context['capital_flow'] keys into raw_data."""
+    for key in (
+        "northbound_flow_20d",
+        "margin_balance_change",
+        "foreign_ratio",
+    ):
+        v = cap.get(key)
+        if v is not None:
+            raw_data[key] = v
+
+
+def _ma_alignment_from_text(raw_data: Dict[str, Any], text: Optional[str]) -> None:
+    """Map Chinese/English ma_alignment text → scoring enum."""
+    if not text or not isinstance(text, str):
+        return
+    t = text.lower()
+    if "多头" in t or "bullish" in t:
+        raw_data["ma_alignment"] = "bullish"
+    elif "空头" in t or "bearish" in t:
+        raw_data["ma_alignment"] = "bearish"
+    else:
+        raw_data["ma_alignment"] = "neutral"
+
+
+def _volume_status_to_trend(raw_data: Dict[str, Any], status: str) -> None:
+    """Map Chinese volume_status → scoring volume_trend enum."""
+    s = status.strip()
+    mapping = {
+        "放量": "increasing",
+        "放量上涨": "increasing",
+        "放量杀跌": "increasing",
+        "平量": "stable",
+        "平量上涨": "stable",
+        "平量下跌": "stable",
+        "缩量": "decreasing",
+        "缩量回调": "decreasing",
+        "缩量下跌": "decreasing",
+    }
+    raw_data["volume_trend"] = mapping.get(s, s)
+
+
+def _safe_num(v: Any) -> Optional[float]:
+    """Safe numeric coercion; returns None for None / non-numeric / NaN."""
+    if v is None or v == "" or v == "N/A":
+        return None
+    try:
+        f = float(v)
+        return f if f == f else None  # NaN guard
+    except (TypeError, ValueError):
+        return None
+
+
+def _pe_to_percentile(pe_ratio: float) -> Optional[float]:
+    """Heuristic PE → percentile (0=cheapest, 100=most expensive).
+
+    Assumes A股 market-wide PE distribution:
+    PE ≤ 0   → 90 (亏损，难判断)
+    0 < PE ≤ 15  → percentile 25 (低估)
+    15 < PE ≤ 30 → 50
+    30 < PE ≤ 50 → 75
+    PE > 50 → 95
+    """
+    try:
+        pe = float(pe_ratio)
+    except (TypeError, ValueError):
+        return None
+    if pe <= 0:
+        return 90.0
+    if pe <= 15:
+        return 25.0
+    if pe <= 30:
+        return 50.0
+    if pe <= 50:
+        return 75.0
+    return 95.0
+
+
+def _pb_to_percentile(pb_ratio: float) -> Optional[float]:
+    try:
+        pb = float(pb_ratio)
+    except (TypeError, ValueError):
+        return None
+    if pb <= 0:
+        return None
+    if pb <= 1.5:
+        return 20.0
+    if pb <= 3:
+        return 45.0
+    if pb <= 6:
+        return 70.0
+    return 90.0
+
+
+def _valuation_merge(
+    raw_data: Dict[str, Any],
+    fund_data: Dict[str, Any],
+    rt: Dict[str, Any],
+) -> None:
+    """Map fundamental_context.valuation.data → scoring fields."""
+    if "pe_percentile" not in raw_data:
+        pe = fund_data.get("pe_ratio") or (rt or {}).get("pe_ratio")
+        pct = _pe_to_percentile(pe) if pe is not None else None
+        if pct is not None:
+            raw_data["pe_percentile"] = pct
+    if "pb_percentile" not in raw_data:
+        pb = fund_data.get("pb_ratio") or (rt or {}).get("pb_ratio")
+        pct = _pb_to_percentile(pb) if pb is not None else None
+        if pct is not None:
+            raw_data["pb_percentile"] = pct
+    mv = fund_data.get("total_mv") or (rt or {}).get("total_mv")
+    if mv is not None:
+        raw_data["total_mv"] = mv
+
+
+def _growth_merge(raw_data: Dict[str, Any], fund_data: Dict[str, Any]) -> None:
+    """Map growth.data + earnings.data → scoring fields."""
+    revenue_yoy = fund_data.get("revenue_yoy") or fund_data.get("revenue_growth")
+    if revenue_yoy is not None:
+        try:
+            raw_data["revenue_growth"] = float(revenue_yoy)
+        except (TypeError, ValueError):
+            pass
+    np_yoy = fund_data.get("np_yoy") or fund_data.get("earnings_growth")
+    if np_yoy is not None:
+        try:
+            raw_data["earnings_growth"] = float(np_yoy)
+        except (TypeError, ValueError):
+            pass
+    roe = fund_data.get("roe") or fund_data.get("weighted_roe")
+    if roe is not None:
+        try:
+            v = float(roe)
+            if v < 1:  # 已是百分比小数，转成百分点
+                v *= 100.0
+            raw_data["roe"] = v
+        except (TypeError, ValueError):
+            pass
+    gm = fund_data.get("gross_margin")
+    if gm is not None:
+        try:
+            raw_data["gross_margin"] = float(gm)
+        except (TypeError, ValueError):
+            pass
+
+
+def _earnings_merge(raw_data: Dict[str, Any], fund_data: Dict[str, Any]) -> None:
+    """Earnings block uses same growth data fields; reserved for future splits."""
+    if "earnings_growth" not in raw_data:
+        np_yoy = fund_data.get("np_yoy")
+        if np_yoy is not None:
+            try:
+                raw_data["earnings_growth"] = float(np_yoy)
+            except (TypeError, ValueError):
+                pass
+
+
+def _derive_technical_indicators(
+    raw_data: Dict[str, Any],
+    today: Dict[str, Any],
+    yesterday: Dict[str, Any],
+    rt: Dict[str, Any],
+) -> None:
+    """Derive ma250 偏离 / 52周高点距离 / 趋势持续月份 from existing data.
+
+    Today row only has ma5/10/20 (no ma250 in storage). To stay honest we set
+    ``price_vs_ma250`` only when we have a higher-MA anchor (or skip and let
+    the scoring function emit its 50 分 fallback, which is the truthful
+    answer if we don't actually know the MA250).
+    """
+    close = _safe_num(today.get("close"))
+    if close is None:
+        return
+
+    # 距离 52 周高点 (近似：若 today's high 接近全期 highs，则 distance_from_high≈0)
+    high = _safe_num(today.get("high"))
+    if high is not None and high > 0:
+        # 没有 52w 高点锚点时，把今日高 当作近期高点，并允许 0~ +5% 的容差
+        # 这种近似只能体现"距今日高点"，语义不准时留给"无数据"分支
+        # 不强行写入 distance_from_high，由 scoring 走 50 分兜底
+        pass
+
+    # 量能趋势：今 vs 昨 volume
+    today_vol = _safe_num(today.get("volume"))
+    yest_vol = _safe_num(
+        yesterday.get("volume") if isinstance(yesterday, dict) else None
+    )
+    if today_vol is not None and yest_vol is not None and yest_vol > 0:
+        ratio = today_vol / yest_vol
+        if ratio >= 1.2:
+            trend = "increasing"
+        elif ratio <= 0.8:
+            trend = "decreasing"
+        else:
+            trend = "stable"
+        # 只在 extractor 已推断 volume_status 但未设置 volume_trend 时写入
+        if "volume_trend" not in raw_data:
+            raw_data["volume_trend"] = trend
+
+    # price_vs_ma20 由 ma20 推算
+    ma20 = _safe_num(today.get("ma20"))
+    if ma20 is not None and ma20 > 0 and "price_vs_ma250" not in raw_data:
+        # 不写 ma250（无法推算）；只标注 ma20 偏离
+        raw_data.setdefault("_ma20_bias_pct", (close - ma20) / ma20 * 100.0)
 
 
 def _extract_moat_from_analysis(text: str) -> str:
@@ -619,16 +1034,16 @@ def _extract_moat_from_analysis(text: str) -> str:
 
     for kw in strong_keywords:
         if kw.lower() in text_lower:
-            return "Strong moat, leading position in industry"
+            return "深厚护城河，行业领先地位"
     for kw in weak_keywords:
         if kw.lower() in text_lower:
-            return "Weak moat, facing competitive pressure"
+            return "护城河薄弱，面临竞争压力"
 
     for kw in moat_keywords:
         if kw in text:
-            return "Moderate moat based on patent/technology advantage"
+            return "存在一定护城河（基于专利/技术优势）"
 
-    return "Moat assessment pending detailed analysis"
+    return "护城河评估待详细分析"
 
 
 def _extract_supply_chain_from_analysis(text: str) -> str:

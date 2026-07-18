@@ -505,6 +505,59 @@ def get_fixed_litellm_temperature(
     )
 
 
+def get_first_chunk_timeout() -> float:
+    """Return the first-chunk timeout in seconds for streamed LLM calls.
+
+    P0-2 fix: when a stream fails to deliver its first chunk within this
+    window we treat the response as a "fake SSE" and fall back to a
+    non-stream retry (which guarantees usage capture).
+    """
+    try:
+        config = get_config()
+        return float(config.llm_stream_first_chunk_timeout)
+    except Exception:
+        return 10.0
+
+
+def get_idle_chunk_timeout() -> float:
+    """Return the idle-chunk timeout in seconds for streamed LLM calls.
+
+    P0-2 fix: when the gap between two consecutive chunks exceeds this
+    window, the consumer raises so the caller can recover.
+    """
+    try:
+        config = get_config()
+        return float(config.llm_stream_idle_chunk_timeout)
+    except Exception:
+        return 30.0
+
+
+def get_min_response_chars() -> int:
+    """Return the minimum plausible response size for a streamed LLM call.
+
+    P0-2 fix: responses shorter than this are treated as a "fake success"
+    and trigger a non-stream retry.
+    """
+    try:
+        config = get_config()
+        return int(config.llm_stream_min_response_chars)
+    except Exception:
+        return 200
+
+
+def get_stream_response_timeout() -> float:
+    """Return the hard cap (seconds) for a single streamed LLM call.
+
+    Used by callers that need to bound the entire consume loop, not just
+    the per-chunk gap.
+    """
+    try:
+        config = get_config()
+        return float(config.llm_stream_response_timeout)
+    except Exception:
+        return 90.0
+
+
 def normalize_litellm_temperature(
     model: str,
     temperature: Optional[float],
@@ -710,8 +763,12 @@ class Config:
         default_factory=list
     )  # Cross-model fallback list
 
-    # Unified temperature for all LLM calls (LLM_TEMPERATURE); legacy per-provider temps are fallback only
-    llm_temperature: float = 0.7
+    # Unified temperature for all LLM calls (LLM_TEMPERATURE); legacy per-provider temps are fallback only.
+    # C fix (2026-07-17): default lowered from 0.7 → 0.2 to reduce
+    # cross-run score drift on thinking models (MiniMax-M3 was producing
+    # ±13 score deltas across runs with identical input). 0.2 still allows
+    # a small amount of variation while making repeated analyses converge.
+    llm_temperature: float = 0.2
 
     # --- Multi-channel LLM config (new) ---
     # LITELLM_CONFIG: path to a standard litellm_config.yaml file (most powerful)
@@ -955,6 +1012,14 @@ class Config:
     )
     report_history_compare_n: int = 0  # History comparison count (0 = disabled)
 
+    # LLM stream safety rails (P0-2 fix). When a streamed LLM response fails
+    # to deliver a chunk within these windows, the consumer raises and the
+    # caller falls back to a non-stream retry (which guarantees usage capture).
+    llm_stream_first_chunk_timeout: float = 10.0  # seconds before first chunk
+    llm_stream_idle_chunk_timeout: float = 30.0  # seconds between chunks
+    llm_stream_min_response_chars: int = 200  # short responses are "fake SSE"
+    llm_stream_response_timeout: float = 90.0  # hard cap per LLM call
+
     # PushPlus 推送配置
     pushplus_token: Optional[str] = None  # PushPlus Token
     pushplus_topic: Optional[str] = None  # PushPlus 群组编码（一对多推送）
@@ -1021,7 +1086,9 @@ class Config:
         True  # 是否将大盘环境摘要用于个股分析 Prompt 与保守护栏
     )
     # 多任务调度：自选股分析和大盘复盘分别配置时间
-    watchlist_analysis_time: str = ""  # 自选股分析时间（HH:MM 格式，多个时间用逗号分隔，为空则不启用）
+    watchlist_analysis_time: str = (
+        ""  # 自选股分析时间（HH:MM 格式，多个时间用逗号分隔，为空则不启用）
+    )
     market_review_time: str = ""  # 大盘复盘时间（HH:MM 格式，为空则不启用）
     # 大盘复盘市场区域：cn(A股)、hk(港股)、us(美股)、both(三市场)，us 适合仅关注美股的用户
     market_review_region: str = "cn"
@@ -1909,6 +1976,34 @@ class Config:
                 1,
                 field_name="REPORT_INTEGRITY_RETRY",
                 minimum=0,
+            ),
+            llm_stream_first_chunk_timeout=parse_env_float(
+                os.getenv("LLM_STREAM_FIRST_CHUNK_TIMEOUT"),
+                10.0,
+                field_name="LLM_STREAM_FIRST_CHUNK_TIMEOUT",
+                minimum=1.0,
+                maximum=300.0,
+            ),
+            llm_stream_idle_chunk_timeout=parse_env_float(
+                os.getenv("LLM_STREAM_IDLE_CHUNK_TIMEOUT"),
+                30.0,
+                field_name="LLM_STREAM_IDLE_CHUNK_TIMEOUT",
+                minimum=1.0,
+                maximum=600.0,
+            ),
+            llm_stream_min_response_chars=parse_env_int(
+                os.getenv("LLM_STREAM_MIN_RESPONSE_CHARS"),
+                200,
+                field_name="LLM_STREAM_MIN_RESPONSE_CHARS",
+                minimum=10,
+                maximum=20000,
+            ),
+            llm_stream_response_timeout=parse_env_float(
+                os.getenv("LLM_STREAM_RESPONSE_TIMEOUT"),
+                90.0,
+                field_name="LLM_STREAM_RESPONSE_TIMEOUT",
+                minimum=10.0,
+                maximum=600.0,
             ),
             report_history_compare_n=parse_env_int(
                 os.getenv("REPORT_HISTORY_COMPARE_N"),
