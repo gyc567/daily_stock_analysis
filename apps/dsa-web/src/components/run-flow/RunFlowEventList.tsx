@@ -6,9 +6,9 @@ import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import type { UiTextKey } from '../../i18n/uiText';
 import type { RunFlowEvent } from '../../types/runFlow';
 import {
-  compactText,
   formatDateTime,
   formatMetadataValue,
+  getRunFlowEventTypeLabel,
   getRunFlowSeverityLabel,
   RUN_FLOW_SEVERITY_STYLE,
 } from './utils';
@@ -122,7 +122,9 @@ export const RunFlowEventList: React.FC<RunFlowEventListProps> = ({
                 <span className="text-xs text-muted-text">
                   {formatDateTime(event.timestamp, language, t)}
                 </span>
-                <span className="font-mono text-[11px] text-muted-text">{compactText(event.type, 28)}</span>
+                <span className="font-mono text-[11px] text-muted-text">
+                  {getRunFlowEventTypeLabel(event.type, language)}
+                </span>
               </div>
               <p className="mt-2 text-sm font-medium text-foreground">{event.title}</p>
               {event.message ? (

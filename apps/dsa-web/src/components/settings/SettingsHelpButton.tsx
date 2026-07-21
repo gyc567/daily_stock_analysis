@@ -221,9 +221,12 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
                 <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-text">
+                      {language === 'en' ? 'Configuration key' : '配置键'}
+                    </p>
+                    <p className="mt-1 font-mono text-[11px] text-muted-text">
                       {fieldKey}
                     </p>
-                    <h2 id={titleId} className="mt-1 text-lg font-semibold text-foreground">
+                    <h2 id={titleId} className="mt-2 text-lg font-semibold text-foreground">
                       {help.title || title}
                     </h2>
                     {help.summary ? (

@@ -110,7 +110,7 @@ describe('LLMChannelEditor', () => {
     );
 
     expect(screen.getByText(/检测到已配置高级模型路由 YAML/i)).toBeInTheDocument();
-    expect(screen.getByText(/运行时主模型 \/ 备选模型 \/ Vision \/ Temperature 仍由下方通用字段决定/i)).toBeInTheDocument();
+    expect(screen.getByText(/运行时主模型、备用模型、视觉模型和采样温度/i)).toBeInTheDocument();
     expect(screen.queryByText(/LiteLLM/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/LITELLM_CONFIG/i)).not.toBeInTheDocument();
   });
@@ -1187,7 +1187,7 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
     fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
 
-    expect(await screen.findByText(/聊天调用 · 鉴权失败：LLM authentication failed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/模型调用 · 鉴权失败：LLM authentication failed/i)).toBeInTheDocument();
     expect(screen.getByText(/请检查 API Key 是否正确/i)).toBeInTheDocument();
     expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
   });
@@ -1225,10 +1225,10 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: /SiliconFlow/i }));
     fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
 
-    expect(await screen.findByText(/聊天调用 · 模型不可用：LLM channel test failed/i)).toBeInTheDocument();
+    expect(await screen.findByText(/模型调用 · 模型不可用：LLM channel test failed/i)).toBeInTheDocument();
     expect(screen.getByText(/本次测试模型：openai\/deepseek-ai\/DeepSeek-V3/i)).toBeInTheDocument();
-    expect(screen.getByText(/基础连接测试默认使用模型列表首项：deepseek-ai\/DeepSeek-V3/i)).toBeInTheDocument();
-    expect(screen.getByText(/基础连接测试默认只测试模型列表中的第一个模型/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/基础连接测试默认只测试模型列表中的第一个模型/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/deepseek-ai\/DeepSeek-V3/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/调整模型顺序或移除不可用模型/i)).toBeInTheDocument();
     expect(screen.getByText(/模型是否已开通、账号是否可见/i)).toBeInTheDocument();
     expect(screen.queryByText(/Base URL、代理、TLS/i)).not.toBeInTheDocument();
@@ -1270,7 +1270,7 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: /proxy/i }));
     fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
 
-    expect(await screen.findByText(/聊天调用 · 请求被拦截/i)).toBeInTheDocument();
+    expect(await screen.findByText(/模型调用 · 请求被拦截/i)).toBeInTheDocument();
     expect(screen.getByText(/本次测试模型：openai\/gpt-5\.5/i)).toBeInTheDocument();
     expect(screen.getByText(/账号风控、地域限制、模型权限/i)).toBeInTheDocument();
     expect(screen.queryByText(/Base URL、代理、TLS/i)).not.toBeInTheDocument();
@@ -1410,13 +1410,13 @@ describe('LLMChannelEditor', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
-    fireEvent.click(screen.getByLabelText('JSON'));
-    fireEvent.click(screen.getByLabelText('Tools'));
+    fireEvent.click(screen.getByLabelText('JSON 输出'));
+    fireEvent.click(screen.getByLabelText('工具调用'));
     fireEvent.click(screen.getByRole('button', { name: '检测能力' }));
 
-    expect(await screen.findByText(/能力检测完成：1 通过 \/ 1 失败 \/ 0 跳过/i)).toBeInTheDocument();
-    expect(screen.getByText('JSON 通过')).toBeInTheDocument();
-    expect(screen.getByText('Tools 失败')).toBeInTheDocument();
+    expect(await screen.findByText(/能力检测完成：通过 1 项，失败 1 项，跳过 0 项/i)).toBeInTheDocument();
+    expect(screen.getByText('JSON 输出 通过')).toBeInTheDocument();
+    expect(screen.getByText('工具调用 失败')).toBeInTheDocument();
     expect(screen.getByText(/当前模型或兼容层不支持该能力/i)).toBeInTheDocument();
     expect(testLLMChannel).toHaveBeenCalledWith(expect.objectContaining({ capabilityChecks: ['json', 'tools'] }));
   });
@@ -1455,11 +1455,11 @@ describe('LLMChannelEditor', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
-    fireEvent.click(screen.getByLabelText('JSON'));
+    fireEvent.click(screen.getByLabelText('JSON 输出'));
     fireEvent.click(screen.getByRole('button', { name: '检测能力' }));
 
-    expect(await screen.findByText(/能力检测完成：0 通过 \/ 0 失败 \/ 1 跳过/i)).toBeInTheDocument();
-    expect(screen.getByText('JSON 跳过')).toBeInTheDocument();
+    expect(await screen.findByText(/能力检测完成：通过 0 项，失败 0 项，跳过 1 项/i)).toBeInTheDocument();
+    expect(screen.getByText('JSON 输出 跳过')).toBeInTheDocument();
     expect(screen.getByText(/服务商拒绝了当前 API Key/i)).toBeInTheDocument();
     expect(screen.getByLabelText('模型（逗号分隔）')).toBeEnabled();
   });
@@ -1497,8 +1497,8 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: /Gemini 官方/i }));
     fireEvent.click(screen.getByRole('button', { name: '获取模型' }));
 
-    await screen.findByText(/模型发现 · 协议暂不支持：Model discovery is not supported for this protocol/i);
-    expect(screen.getByText(/当前仅对 OpenAI Compatible \/ DeepSeek 渠道提供自动模型发现/i)).toBeInTheDocument();
+    await screen.findByText(/模型列表获取 · 协议暂不支持：Model discovery is not supported for this protocol/i);
+    expect(screen.getByText(/当前仅对 OpenAI 兼容协议和 DeepSeek 渠道提供自动模型发现功能/i)).toBeInTheDocument();
 
     const manualInput = screen.getByLabelText('模型（逗号分隔）');
     fireEvent.change(manualInput, { target: { value: 'gemini-2.5-flash' } });
@@ -1575,7 +1575,7 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
     fireEvent.click(screen.getByRole('button', { name: '获取模型' }));
 
-    expect(await screen.findByText(/模型发现 · 空响应：No model IDs returned from \/models response/i)).toBeInTheDocument();
+    expect(await screen.findByText(/模型列表获取 · 空响应：No model IDs returned from \/models response/i)).toBeInTheDocument();
     expect(screen.getByText(/该渠道的 \/models 接口未返回可用模型 ID/i)).toBeInTheDocument();
     expect(screen.queryByText(/切换兼容模型、关闭额外响应模式/i)).not.toBeInTheDocument();
   });

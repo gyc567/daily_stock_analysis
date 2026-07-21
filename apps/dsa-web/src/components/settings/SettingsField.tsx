@@ -5,19 +5,24 @@ import type { ConfigValidationIssue, SystemConfigFieldSchema, SystemConfigItem }
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { getSettingsHelpContent } from '../../locales/settingsHelp';
 import { getFieldDescriptionZh, getFieldOptionLabel, getFieldTitleZh } from '../../utils/systemConfigI18n';
+import { SETTINGS_TEXT } from '../../locales/settingsText';
 import type { UiLanguage, UiTextKey } from '../../i18n/uiText';
 import { cn } from '../../utils/cn';
 import { SettingsHelpButton } from './SettingsHelpButton';
 
 function normalizeSelectOptions(key: string, options: SystemConfigFieldSchema['options'] = [], locale: UiLanguage) {
+  const fallbackText = SETTINGS_TEXT[locale];
   return options.map((option) => {
     if (typeof option === 'string') {
-      return { value: option, label: getFieldOptionLabel(key, option, undefined, locale) };
+      const label = getFieldOptionLabel(key, option, undefined, locale);
+      const resolved = label === option ? `${fallbackText.unknownOption} (${option})` : label;
+      return { value: option, label: resolved };
     }
 
+    const label = getFieldOptionLabel(key, option.value, option.label, locale);
     return {
       ...option,
-      label: getFieldOptionLabel(key, option.value, option.label, locale),
+      label: label === option.value ? `${fallbackText.unknownOption} (${option.value})` : label,
     };
   });
 }

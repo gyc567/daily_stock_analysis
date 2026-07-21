@@ -73,11 +73,11 @@ describe('RunFlowGraph', () => {
 
     expect(screen.getByText('入口')).toBeInTheDocument();
     expect(screen.getByText('数据来源')).toBeInTheDocument();
-    expect(screen.getAllByText('降级回退').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('已回退').length).toBeGreaterThan(0);
     expect(screen.getByText('降级输入')).toBeInTheDocument();
     expect(screen.getByTestId('run-flow-node-news')).toHaveTextContent('开始');
     expect(screen.getByTestId('run-flow-node-news')).toHaveTextContent('2026');
-    expect(screen.getByRole('button', { name: '新闻舆情 节点，状态 降级回退' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新闻舆情 节点，状态 已回退' })).toBeInTheDocument();
     const marker = container.querySelector('marker');
     expect(marker).toHaveAttribute('markerWidth', '4');
     expect(marker).toHaveAttribute('markerHeight', '4');
@@ -86,7 +86,7 @@ describe('RunFlowGraph', () => {
     fireEvent.mouseEnter(screen.getByTestId('run-flow-node-news'));
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '新闻舆情 节点，状态 降级回退' }));
+    fireEvent.click(screen.getByRole('button', { name: '新闻舆情 节点，状态 已回退' }));
 
     expect(onSelectNode).toHaveBeenCalledWith(expect.objectContaining({ id: 'news' }));
   });

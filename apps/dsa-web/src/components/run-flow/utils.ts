@@ -147,3 +147,61 @@ export const formatMetadataValue = (value: unknown): string => {
     return compactText(String(value), 120);
   }
 };
+
+const EVENT_TYPE_LABELS: Record<'zh' | 'en', Record<string, string>> = {
+  zh: {
+    task_created: '任务创建',
+    task_started: '任务开始',
+    task_completed: '任务完成',
+    task_failed: '任务失败',
+    task_cancelled: '任务取消',
+    task_timeout: '任务超时',
+    data_fetch: '数据获取',
+    data_fetched: '数据已就绪',
+    data_failed: '数据获取失败',
+    provider_fallback: '数据源降级',
+    analysis_started: '分析开始',
+    analysis_completed: '分析完成',
+    analysis_failed: '分析失败',
+    analysis_degraded: '分析降级',
+    model_call: '模型调用',
+    model_completed: '模型完成',
+    model_failed: '模型失败',
+    notification_sent: '通知已发送',
+    notification_failed: '通知失败',
+    retry: '重试',
+    fallback: '降级或回退',
+  },
+  en: {
+    task_created: 'Task created',
+    task_started: 'Task started',
+    task_completed: 'Task completed',
+    task_failed: 'Task failed',
+    task_cancelled: 'Task cancelled',
+    task_timeout: 'Task timeout',
+    data_fetch: 'Data fetch',
+    data_fetched: 'Data ready',
+    data_failed: 'Data fetch failed',
+    provider_fallback: 'Data source fallback',
+    analysis_started: 'Analysis started',
+    analysis_completed: 'Analysis completed',
+    analysis_failed: 'Analysis failed',
+    analysis_degraded: 'Analysis degraded',
+    model_call: 'Model call',
+    model_completed: 'Model completed',
+    model_failed: 'Model failed',
+    notification_sent: 'Notification sent',
+    notification_failed: 'Notification failed',
+    retry: 'Retry',
+    fallback: 'Fallback',
+  },
+};
+
+export const getRunFlowEventTypeLabel = (type: string | null | undefined, language: 'zh' | 'en'): string => {
+  const safeType = (type || '').trim();
+  if (!safeType) {
+    return language === 'en' ? 'Other event' : '其他事件';
+  }
+  const labels = EVENT_TYPE_LABELS[language];
+  return labels[safeType] ?? safeType;
+};

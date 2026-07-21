@@ -94,9 +94,9 @@ const STOP_LOSS_MODE_OPTIONS = [
 ];
 
 const MARKET_REGION_OPTIONS = [
-  { value: 'cn', label: 'A 股（cn）' },
-  { value: 'hk', label: '港股（hk）' },
-  { value: 'us', label: '美股（us）' },
+  { value: 'cn', label: 'A 股' },
+  { value: 'hk', label: '港股' },
+  { value: 'us', label: '美股' },
 ];
 
 const MARKET_LIGHT_STATUS_OPTIONS: Array<{ value: MarketLightStatus; label: string }> = [

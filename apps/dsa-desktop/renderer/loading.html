@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -13,8 +13,8 @@
         --text: #172033;
         --muted: #5e6a7e;
         --accent: #0ea5c6;
-        --danger-bg: rgba(225, 29, 72, 0.08);
-        --danger-border: rgba(225, 29, 72, 0.32);
+        --danger-bg: rgba(225, 29, 76, 0.08);
+        --danger-border: rgba(225, 29, 76, 0.32);
         --danger-text: #b91c3c;
       }
 
@@ -28,80 +28,88 @@
           --accent: #38bdf8;
           --danger-bg: rgba(239, 68, 68, 0.08);
           --danger-border: rgba(239, 68, 68, 0.4);
-          --danger-text: #fecaca;
+          --danger-text: #fca5a5;
         }
       }
 
-      * {
-        box-sizing: border-box;
-      }
-
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
       body {
         margin: 0;
-        font-family: "Fira Sans", "IBM Plex Sans", "Segoe UI", sans-serif;
-        background: radial-gradient(circle at top left, var(--bg-secondary), var(--bg) 55%);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+          "Helvetica Neue", Arial, sans-serif;
+        background:
+          radial-gradient(ellipse at top, var(--bg-secondary) 0%, var(--bg) 60%);
         color: var(--text);
-        height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
+        padding: 24px;
       }
 
       .panel {
-        width: min(640px, 90vw);
+        width: min(440px, 100%);
         background: var(--panel);
-        border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+        backdrop-filter: blur(20px);
         border-radius: 16px;
-        padding: 32px 36px;
-        box-shadow: 0 30px 80px rgba(15, 23, 42, 0.18);
-        backdrop-filter: blur(18px);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        padding: 32px 28px;
+        text-align: center;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
       }
 
       .title {
-        font-size: 24px;
-        margin: 0 0 8px;
-        letter-spacing: 0.4px;
+        margin: 0 0 6px;
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
       }
 
       .subtitle {
         margin: 0 0 24px;
-        color: var(--muted);
         font-size: 14px;
+        color: var(--muted);
       }
 
       .status {
         display: flex;
         align-items: center;
-        gap: 12px;
+        justify-content: center;
+        gap: 8px;
         font-size: 14px;
-        color: var(--muted);
-      }
-
-      .error {
-        margin-top: 16px;
-        padding: 12px 14px;
-        border-radius: 10px;
-        background: var(--danger-bg);
-        border: 1px solid var(--danger-border);
-        color: var(--danger-text);
-        font-size: 12px;
-        line-height: 1.5;
-        display: none;
+        color: var(--text);
+        margin-bottom: 16px;
       }
 
       .dot {
         width: 10px;
         height: 10px;
-        border-radius: 50%;
+        border-radius: 999px;
         background: var(--accent);
-        box-shadow: 0 0 12px rgba(56, 189, 248, 0.8);
-        animation: pulse 1.5s ease-in-out infinite;
+        box-shadow: 0 0 12px var(--accent);
+        animation: pulse 1.6s ease-in-out infinite;
       }
 
       .tips {
         margin-top: 20px;
         font-size: 12px;
         color: rgba(148, 163, 184, 0.8);
+      }
+
+      .error {
+        display: none;
+        margin-top: 20px;
+        padding: 12px 14px;
+        text-align: left;
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: var(--danger-bg);
+        border: 1px solid var(--danger-border);
+        border-radius: 8px;
+        color: var(--danger-text);
       }
 
       @keyframes pulse {
@@ -119,12 +127,12 @@
   <body>
     <div class="panel">
       <h1 class="title">Daily Stock Analysis</h1>
-      <p class="subtitle">Launching local analysis service</p>
+      <p class="subtitle">正在启动本地分析服务</p>
       <div class="status">
         <span class="dot"></span>
-        <span>Preparing backend and loading UI...</span>
+        <span>正在准备后端并加载界面…</span>
       </div>
-      <p class="tips">If this takes long, check your API keys and network connectivity.</p>
+      <p class="tips">如果等待时间较长，请检查 API 密钥与网络连接。</p>
       <div class="error" id="errorBox"></div>
     </div>
     <script>
@@ -134,7 +142,14 @@
         if (!error) return;
         const box = document.getElementById('errorBox');
         if (!box) return;
-        box.textContent = `Error: ${decodeURIComponent(error)}`;
+        const label = document.createElement('div');
+        label.textContent = '本地服务启动失败，请查看桌面端日志后重试：';
+        label.style.fontWeight = '600';
+        label.style.marginBottom = '6px';
+        const detail = document.createElement('div');
+        detail.textContent = decodeURIComponent(error);
+        box.appendChild(label);
+        box.appendChild(detail);
         box.style.display = 'block';
       })();
     </script>

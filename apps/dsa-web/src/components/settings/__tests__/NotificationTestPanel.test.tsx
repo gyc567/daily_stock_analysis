@@ -59,7 +59,7 @@ describe('NotificationTestPanel', () => {
       timeoutSeconds: 20,
     })));
     expect(await screen.findByText('测试成功')).toBeInTheDocument();
-    expect(screen.getByText('HTTP 200')).toBeInTheDocument();
+    expect(screen.getByText('HTTP 状态码 200')).toBeInTheDocument();
     expect(screen.getByText('https://example.com/hook?token=***')).toBeInTheDocument();
   });
 
@@ -193,9 +193,9 @@ describe('NotificationTestPanel', () => {
 
     expect(await screen.findByText('测试成功')).toBeInTheDocument();
     expect(screen.getByText(/部分成功/)).toBeInTheDocument();
-    expect(screen.getAllByText('HTTP 500').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('HTTP 200')).toBeInTheDocument();
-    expect(screen.getByText('http_500')).toHaveClass('text-warning');
+    expect(screen.getAllByText('HTTP 状态码 500').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('HTTP 状态码 200')).toBeInTheDocument();
+    expect(screen.getByText('HTTP 错误')).toHaveClass('text-warning');
     expect(screen.getByText('https://example.com/hook?token=***')).toBeInTheDocument();
   });
 
@@ -232,7 +232,7 @@ describe('NotificationTestPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /发送测试/ }));
 
     expect(await screen.findByText('测试失败')).toBeInTheDocument();
-    const timeoutEntries = screen.getAllByText('timeout');
+    const timeoutEntries = screen.getAllByText('请求超时');
     expect(timeoutEntries[0]).toBeInTheDocument();
     expect(screen.getByText('https://qyapi.example.com/cgi-bin/webhook/send?key=***')).toBeInTheDocument();
     expect(timeoutEntries[0]).toHaveClass('text-warning');
