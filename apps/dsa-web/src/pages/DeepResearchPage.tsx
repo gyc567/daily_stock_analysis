@@ -142,11 +142,12 @@ export function DeepResearchPage() {
           历史报告
         </h2>
         <button
+          type="button"
           onClick={loadHistory}
           className="text-muted-text transition-colors hover:text-secondary-text"
-          title="刷新"
+          aria-label="刷新历史报告"
         >
-          <RefreshCw className={cn('h-4 w-4', historyLoading && 'animate-spin')} />
+          <RefreshCw className={cn('h-4 w-4', historyLoading && 'animate-spin')} aria-hidden="true" />
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-2">
@@ -191,10 +192,10 @@ export function DeepResearchPage() {
                   void handleDelete(item.id);
                 }
               }}
+              aria-label={`删除历史报告：${item.stock_name || item.stock_code || item.id}`}
               className="ml-2 flex-shrink-0 rounded p-1 text-muted-text opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
-              title="删除"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
             </span>
           </button>
         ))}

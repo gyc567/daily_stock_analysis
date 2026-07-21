@@ -1741,6 +1741,20 @@ textarea {
   line-height: 1;
 }
 
+.home-related-board-list {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.home-related-board-list::-webkit-scrollbar {
+  height: 6px;
+}
+
+.home-related-board-list::-webkit-scrollbar-thumb {
+  background: hsl(var(--border) / 0.6);
+  border-radius: 999px;
+}
+
 .home-strategy-card {
   --home-strategy-tone: hsl(var(--primary));
   background: linear-gradient(180deg, hsl(0 0% 100% / 0.94), hsl(214 36% 97% / 0.98));

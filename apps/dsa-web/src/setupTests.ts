@@ -63,3 +63,15 @@ if (!hasLocalStorage) {
     value: new MemoryStorageMock(),
   });
 }
+
+import { afterEach } from 'vitest';
+
+afterEach(() => {
+  try {
+    if (typeof globalThis.localStorage !== 'undefined') {
+      globalThis.localStorage.clear();
+    }
+  } catch {
+    /* jsdom storage may be inaccessible in some environments */
+  }
+});

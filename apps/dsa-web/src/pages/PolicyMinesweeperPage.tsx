@@ -406,7 +406,7 @@ export function PolicyMinesweeperPage() {
                       return (
                         <span
                           key={key}
-                          title={ok === undefined ? '未知' : ok ? '成功' : '失败/降级'}
+                          aria-label={ok === undefined ? `${label}：状态未知` : ok ? `${label}：成功` : `${label}：失败或降级`}
                           className={cn(
                         ok ? 'text-emerald-400' : ok === false ? 'text-amber-400' : 'opacity-50',
                           )}

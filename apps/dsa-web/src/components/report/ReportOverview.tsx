@@ -124,10 +124,24 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 {meta.stockCode}
               </span>
               {marketPhaseLabel && (
-                <Badge variant="info" className="gap-1.5 shadow-none">{marketPhaseLabel}</Badge>
+                <Badge
+                  variant="info"
+                  className="gap-1.5 shadow-none"
+                  role="img"
+                  aria-label={marketPhaseLabel}
+                >
+                  {marketPhaseLabel}
+                </Badge>
               )}
               {partialBarLabel && (
-                <Badge variant="warning" className="shadow-none">{partialBarLabel}</Badge>
+                <Badge
+                  variant="warning"
+                  className="shadow-none"
+                  role="img"
+                  aria-label={partialBarLabel}
+                >
+                  {partialBarLabel}
+                </Badge>
               )}
             </div>
             <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-text">
@@ -185,9 +199,13 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
 
         {/* 关联板块 */}
         {relatedBoards.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-subtle/50">
+          <section
+            role="region"
+            aria-label={text.relatedBoards}
+            className="mt-3 pt-3 border-t border-subtle/50"
+          >
             <h3 className="text-xs font-medium uppercase tracking-wide text-muted-text mb-2">{text.relatedBoards}</h3>
-            <div className="flex flex-wrap gap-2">
+            <div className="home-related-board-list flex flex-nowrap gap-2 overflow-x-auto">
               {relatedBoards.map((board, index) => {
                 const boardName = normalizeBoardName(board.name);
                 const signal = boardSignals.get(boardName);
@@ -213,7 +231,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 );
               })}
             </div>
-          </div>
+          </section>
         )}
       </Card>
     </div>
