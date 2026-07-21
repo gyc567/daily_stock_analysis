@@ -1,7 +1,13 @@
 import type React from 'react';
 import { FileText, Loader2, Trash2 } from 'lucide-react';
+import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { cn } from '../../utils/cn';
 import type { KnowledgeDocumentItem } from '../../api/knowledgeBase';
+import {
+  KNOWLEDGE_DOCUMENT_LIST_TEXT,
+  KNOWLEDGE_SOURCE_TYPE_LABELS,
+  formatKnowledgeText,
+} from '../../locales/knowledgeText';
 
 interface KnowledgeDocumentListProps {
   documents: KnowledgeDocumentItem[];
@@ -20,11 +26,15 @@ export const KnowledgeDocumentList: React.FC<KnowledgeDocumentListProps> = ({
   onDelete,
   className = '',
 }) => {
+  const { language } = useUiLanguage();
+  const text = KNOWLEDGE_DOCUMENT_LIST_TEXT[language];
+  const sourceTypeLabels = KNOWLEDGE_SOURCE_TYPE_LABELS[language];
+
   if (loading) {
     return (
       <div className={cn('flex items-center gap-2 py-8 text-muted-text', className)}>
         <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
-        <span>加载中...</span>
+        <span>{text.loading}</span>
       </div>
     );
   }
@@ -33,8 +43,8 @@ export const KnowledgeDocumentList: React.FC<KnowledgeDocumentListProps> = ({
     return (
       <div className={cn('py-8 text-center text-muted-text', className)}>
         <FileText className="mx-auto mb-2 h-10 w-10 opacity-50" aria-hidden="true" />
-        <p>暂无文档</p>
-        <p className="mt-1 text-xs">上传文件或粘贴文本创建文档</p>
+        <p>{text.emptyTitle}</p>
+        <p className="mt-1 text-xs">{text.emptyHint}</p>
       </div>
     );
   }
@@ -65,9 +75,13 @@ export const KnowledgeDocumentList: React.FC<KnowledgeDocumentListProps> = ({
             <div className="min-w-0 flex-1">
               <h3 className="truncate font-medium text-foreground">{doc.title}</h3>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-text">
-                <span className="rounded bg-white/5 px-1.5 py-0.5">{doc.source_type}</span>
+                <span className="rounded bg-white/5 px-1.5 py-0.5">
+                  {sourceTypeLabels[doc.source_type] ?? text.unknownSourceType}
+                </span>
                 <span>·</span>
-                <span>{doc.chunk_count} chunks</span>
+                <span>
+                  {formatKnowledgeText(text.chunksCount, { count: doc.chunk_count })}
+                </span>
                 <span>·</span>
                 <span>{new Date(doc.created_at).toLocaleDateString()}</span>
               </div>
@@ -82,7 +96,9 @@ export const KnowledgeDocumentList: React.FC<KnowledgeDocumentListProps> = ({
                     </span>
                   ))}
                   {doc.tags.length > 5 && (
-                    <span className="text-xs text-muted-text">+{doc.tags.length - 5}</span>
+                    <span className="text-xs text-muted-text">
+                      {formatKnowledgeText(text.tagOverflow, { count: doc.tags.length - 5 })}
+                    </span>
                   )}
                 </div>
               )}
@@ -93,7 +109,7 @@ export const KnowledgeDocumentList: React.FC<KnowledgeDocumentListProps> = ({
                 e.stopPropagation();
                 onDelete(doc.id);
               }}
-              aria-label={`删除文档: ${doc.title}`}
+              aria-label={formatKnowledgeText(text.deleteAria, { title: doc.title })}
               className="rounded p-2 text-muted-text opacity-0 transition-all hover:bg-white/5 hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />

@@ -242,7 +242,7 @@ describe('AlertRuleList', () => {
     expect(screen.getAllByText('大盘市场').length).toBeGreaterThan(0);
     expect(screen.getAllByText('大盘红绿灯状态').length).toBeGreaterThan(0);
     expect(screen.getByText('红灯 / 黄灯')).toBeInTheDocument();
-    expect(screen.getByText('Score 下降 >= 15')).toBeInTheDocument();
+    expect(screen.getByText('评分下降不少于 15')).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('规则类型'), { target: { value: 'market_light_score_drop' } });
 

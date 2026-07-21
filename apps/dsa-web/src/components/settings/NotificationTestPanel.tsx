@@ -11,19 +11,25 @@ import type {
 } from '../../types/systemConfig';
 import { ApiErrorAlert, Badge, Button, InlineAlert, Input, Select } from '../common';
 import { SettingsSectionCard } from './SettingsSectionCard';
+import {
+  SETTINGS_TEXT,
+  formatSettingsText,
+  getNotificationChannelDisplayName,
+  getNotificationErrorCodeLabel,
+} from '../../locales/settingsText';
 
 function getChannelOptions(language: 'zh' | 'en'): Array<{ value: NotificationTestChannel; label: string }> {
   return [
-    { value: 'wechat', label: language === 'en' ? 'WeCom' : '企业微信' },
-    { value: 'feishu', label: language === 'en' ? 'Feishu Webhook' : '飞书 Webhook' },
+    { value: 'wechat', label: getNotificationChannelDisplayName('wechat', language) },
+    { value: 'feishu', label: getNotificationChannelDisplayName('feishu', language) },
     { value: 'telegram', label: 'Telegram' },
-    { value: 'email', label: language === 'en' ? 'Email' : '邮件' },
+    { value: 'email', label: getNotificationChannelDisplayName('email', language) },
     { value: 'pushover', label: 'Pushover' },
     { value: 'ntfy', label: 'ntfy' },
     { value: 'gotify', label: 'Gotify' },
     { value: 'pushplus', label: 'PushPlus' },
-    { value: 'serverchan3', label: 'ServerChan3' },
-    { value: 'custom', label: language === 'en' ? 'Custom Webhook' : '自定义 Webhook' },
+    { value: 'serverchan3', label: getNotificationChannelDisplayName('serverchan3', language) },
+    { value: 'custom', label: getNotificationChannelDisplayName('custom', language) },
     { value: 'discord', label: 'Discord' },
     { value: 'slack', label: 'Slack' },
     { value: 'astrbot', label: 'AstrBot' },
@@ -167,15 +173,21 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
             message={(
               <span>
                 {result.message}
-                {typeof result.latencyMs === 'number' ? ` · ${result.latencyMs} ms` : ''}
-                {result.errorCode ? ` · ${result.errorCode}` : ''}
+                {typeof result.latencyMs === 'number'
+                  ? ` · ${formatSettingsText(SETTINGS_TEXT[language].testNotifications.durationMs, { ms: result.latencyMs })}`
+                  : ''}
+                {result.errorCode
+                  ? ` · ${SETTINGS_TEXT[language].testNotifications.errorCodePrefix}：${getNotificationErrorCodeLabel(result.errorCode, language)}`
+                  : ''}
               </span>
             )}
           />
 
           {result.attempts.length ? (
             <div className="space-y-2">
-              {result.attempts.map((attempt, index) => (
+              {result.attempts.map((attempt, index) => {
+                const channelLabel = getNotificationChannelDisplayName(attempt.channel, language);
+                return (
                 <div
                   key={`${attempt.channel}-${index}-${attempt.target || 'target'}`}
                   className="rounded-xl border settings-border bg-background/35 px-4 py-3"
@@ -187,28 +199,43 @@ export const NotificationTestPanel: React.FC<NotificationTestPanelProps> = ({
                           {attempt.success ? t('common.success') : t('common.failure')}
                         </Badge>
                         <span className="text-sm font-medium text-foreground">
-                          Attempt {index + 1}
+                          {formatSettingsText(
+                            SETTINGS_TEXT[language].testNotifications.attemptPrefix,
+                            { index: index + 1 },
+                          )}
                         </span>
                         {typeof attempt.httpStatus === 'number' ? (
-                          <span className="text-xs text-muted-text">HTTP {attempt.httpStatus}</span>
+                          <span className="text-xs text-muted-text">
+                            {formatSettingsText(
+                              SETTINGS_TEXT[language].testNotifications.httpStatus,
+                              { code: attempt.httpStatus },
+                            )}
+                          </span>
                         ) : null}
                         {typeof attempt.latencyMs === 'number' ? (
-                          <span className="text-xs text-muted-text">{attempt.latencyMs} ms</span>
+                          <span className="text-xs text-muted-text">
+                            {formatSettingsText(SETTINGS_TEXT[language].testNotifications.durationMs, { ms: attempt.latencyMs })}
+                          </span>
                         ) : null}
                       </div>
                       <p className="mt-2 break-all text-xs leading-5 text-muted-text">
-                        {attempt.target || attempt.channel}
+                        {attempt.target
+                          || formatSettingsText(
+                            SETTINGS_TEXT[language].testNotifications.targetFallback,
+                            { channel: channelLabel },
+                          )}
                       </p>
                     </div>
                     {attempt.errorCode ? (
                       <Badge variant={attempt.retryable ? 'warning' : 'default'}>
-                        {attempt.errorCode}
+                        {getNotificationErrorCodeLabel(attempt.errorCode, language)}
                       </Badge>
                     ) : null}
                   </div>
                   <p className="mt-2 text-xs leading-5 text-secondary-text">{attempt.message}</p>
                 </div>
-              ))}
+                );
+              })}
             </div>
           ) : null}
         </div>

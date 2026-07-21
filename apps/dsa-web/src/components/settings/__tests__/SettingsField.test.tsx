@@ -320,8 +320,8 @@ describe('SettingsField', () => {
       </>
     );
 
-    expect(screen.getByLabelText('压缩触发阈值（tokens）')).toBeInTheDocument();
-    expect(screen.getByLabelText('原文保护轮次')).toBeInTheDocument();
+    expect(screen.getByLabelText('压缩触发阈值（Token 数）')).toBeInTheDocument();
+    expect(screen.getByLabelText('原文保护轮数')).toBeInTheDocument();
     expect(screen.getByText(/估算历史 token 超过该值时触发摘要/)).toHaveTextContent('留空则跟随当前上下文压缩策略 profile 默认值');
     expect(screen.getByText(/压缩时最近 N 个用户轮次及其后的回复保持原文/)).toHaveTextContent('留空则跟随当前上下文压缩策略 profile 默认值');
   });
@@ -354,7 +354,7 @@ describe('SettingsField', () => {
       />
     );
 
-    expect(screen.getByLabelText('自定义 Webhook Body 模板')).toBeInTheDocument();
+    expect(screen.getByLabelText('自定义 Webhook 请求体模板')).toBeInTheDocument();
     expect(screen.getByText(/会先于 Bark、Slack、Discord 等自动 payload 生效/)).toBeInTheDocument();
     expect(screen.getByText(/裸 \$content \/ \$title 不做 JSON 转义/)).toBeInTheDocument();
   });

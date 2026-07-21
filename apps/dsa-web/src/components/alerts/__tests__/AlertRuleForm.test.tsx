@@ -257,7 +257,7 @@ describe('AlertRuleForm', () => {
     fireEvent.change(screen.getByLabelText('目标范围'), { target: { value: 'market' } });
     fireEvent.change(screen.getByLabelText('市场区域'), { target: { value: 'us' } });
     fireEvent.change(screen.getByLabelText('规则类型'), { target: { value: 'market_light_score_drop' } });
-    fireEvent.change(screen.getByLabelText('Score 下降阈值'), { target: { value: '12' } });
+    fireEvent.change(screen.getByLabelText('评分下降阈值'), { target: { value: '12' } });
     fireEvent.click(screen.getByRole('button', { name: '创建规则' }));
 
     await waitFor(() => {

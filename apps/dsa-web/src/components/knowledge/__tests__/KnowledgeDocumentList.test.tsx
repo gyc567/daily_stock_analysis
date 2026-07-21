@@ -1,6 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { UiLanguageProvider } from '../../../contexts/UiLanguageContext';
 import { KnowledgeDocumentList } from '../KnowledgeDocumentList';
+
+const renderWithLanguage = (ui: React.ReactNode) =>
+  render(<UiLanguageProvider>{ui}</UiLanguageProvider>);
 
 describe('KnowledgeDocumentList', () => {
   const mockDocument = {
@@ -24,62 +28,66 @@ describe('KnowledgeDocumentList', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.setItem('dsa.uiLanguage', 'zh');
   });
 
   it('should show loading state', () => {
-    render(<KnowledgeDocumentList {...defaultProps} loading={true} />);
-    expect(screen.getByText('加载中...')).toBeInTheDocument();
+    renderWithLanguage(<KnowledgeDocumentList {...defaultProps} loading={true} />);
+    expect(screen.getByText('正在加载…')).toBeInTheDocument();
   });
 
   it('should show empty state when no documents', () => {
-    render(<KnowledgeDocumentList {...defaultProps} documents={[]} />);
+    renderWithLanguage(<KnowledgeDocumentList {...defaultProps} documents={[]} />);
     expect(screen.getByText('暂无文档')).toBeInTheDocument();
     expect(screen.getByText('上传文件或粘贴文本创建文档')).toBeInTheDocument();
   });
 
-  it('should render document list', () => {
-    render(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} />);
+  it('should render document list with localized source type and chunk count', () => {
+    renderWithLanguage(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} />);
     expect(screen.getByText('测试文档')).toBeInTheDocument();
-    expect(screen.getByText('markdown')).toBeInTheDocument();
-    expect(screen.getByText('5 chunks')).toBeInTheDocument();
+    expect(screen.getByText('Markdown')).toBeInTheDocument();
+    expect(screen.getByText('5 个内容片段')).toBeInTheDocument();
+    expect(screen.queryByText('5 chunks')).not.toBeInTheDocument();
   });
 
   it('should render tags', () => {
-    render(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} />);
+    renderWithLanguage(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} />);
     expect(screen.getByText('华为')).toBeInTheDocument();
     expect(screen.getByText('半导体')).toBeInTheDocument();
   });
 
   it('should highlight selected document', () => {
-    render(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} selectedDocId="doc-1" />);
+    renderWithLanguage(
+      <KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} selectedDocId="doc-1" />,
+    );
     const docElement = screen.getByText('测试文档').closest('[role="button"]');
     expect(docElement).toHaveAttribute('aria-selected', 'true');
   });
 
   it('should call onSelect when clicking document', () => {
-    render(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} />);
+    renderWithLanguage(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} />);
     fireEvent.click(screen.getByText('测试文档'));
     expect(defaultProps.onSelect).toHaveBeenCalledWith(mockDocument);
   });
 
-  it('should call onDelete when clicking delete button', () => {
-    render(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} />);
-    const deleteBtn = screen.getByLabelText(`删除文档: ${mockDocument.title}`);
+  it('should call onDelete when clicking delete button with localized aria', () => {
+    renderWithLanguage(<KnowledgeDocumentList {...defaultProps} documents={[mockDocument]} />);
+    const deleteBtn = screen.getByLabelText('删除文档：测试文档');
     fireEvent.click(deleteBtn);
     expect(defaultProps.onDelete).toHaveBeenCalledWith('doc-1');
   });
 
-  it('should show "+N" when tags exceed 5', () => {
+  it('should show tag overflow count with localized text', () => {
     const docWithManyTags = {
       ...mockDocument,
       tags: ['tag1', 'tag2', 'tag3', 'tag4', 'tag5', 'tag6'],
     };
-    render(<KnowledgeDocumentList {...defaultProps} documents={[docWithManyTags]} />);
-    expect(screen.getByText('+1')).toBeInTheDocument();
+    renderWithLanguage(<KnowledgeDocumentList {...defaultProps} documents={[docWithManyTags]} />);
+    expect(screen.getByText('其余 1 个')).toBeInTheDocument();
   });
 
   it('should apply custom className', () => {
-    const { container } = render(
+    const { container } = renderWithLanguage(
       <KnowledgeDocumentList
         documents={[]}
         loading={false}
@@ -87,7 +95,7 @@ describe('KnowledgeDocumentList', () => {
         onSelect={vi.fn()}
         onDelete={vi.fn()}
         className="custom-class"
-      />
+      />,
     );
     expect(container.firstChild).toHaveClass('custom-class');
   });
