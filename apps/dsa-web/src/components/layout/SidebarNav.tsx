@@ -82,7 +82,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
   const navItems = showAlphaSiftNav ? NAV_ITEMS : NAV_ITEMS.filter((item) => item.key !== 'screening');
   const isRail = variant === 'rail';
   const itemBaseClass = cn(
-    'group relative flex h-[var(--nav-item-height)] w-full items-center overflow-hidden rounded-2xl border border-transparent text-sm leading-none text-secondary-text transition-all',
+    'group relative flex min-h-[var(--nav-item-height)] w-full items-center overflow-hidden rounded-2xl border border-transparent py-1.5 text-sm leading-tight text-secondary-text transition-all',
     isRail
       ? 'justify-center gap-2.5 px-2'
       : collapsed
@@ -119,7 +119,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
         ) : null}
       </div>
 
-      <nav className={cn('flex flex-col gap-1.5', isRail ? '' : 'flex-1')} aria-label={t('layout.mainNav')}>
+      <nav className={cn('flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto')} aria-label={t('layout.mainNav')}>
         {navItems.map(({ key, labelKey, to, icon: Icon, exact, badge }) => {
           const label = t(labelKey);
           return (

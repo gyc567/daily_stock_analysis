@@ -113,4 +113,20 @@ describe('ReportMarkdownDrawer', () => {
       await screen.findByRole('heading', { name: 'Lazy loaded report' }, { timeout: 5000 }),
     ).toBeInTheDocument();
   });
+
+  it('uses a flex column with min-h-0 so the body can scroll independently', async () => {
+    vi.resetModules();
+    vi.doMock('../../../api/history', () => ({
+      historyApi: {
+        getMarkdown: vi.fn().mockResolvedValue('# Body scroll'),
+      },
+    }));
+
+    await renderDrawer();
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.className).toContain('flex');
+    expect(dialog.className).toContain('flex-col');
+    expect(dialog.className).toContain('min-h-0');
+  });
 });

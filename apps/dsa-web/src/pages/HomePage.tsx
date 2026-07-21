@@ -627,7 +627,11 @@ const HomePage: React.FC = () => {
   const sidebarContent = useMemo(
     () => (
       <div className="flex min-h-0 h-full flex-col gap-3 overflow-hidden">
-        <TaskPanel tasks={activeTasks} onOpenRunFlow={openTaskRunFlow} />
+        <TaskPanel
+          tasks={activeTasks}
+          onOpenRunFlow={openTaskRunFlow}
+          className="min-h-0 shrink-0"
+        />
         <StockBar
           items={mergedStockBarItems}
           isLoading={isLoadingStockBar}
@@ -636,7 +640,7 @@ const HomePage: React.FC = () => {
           onItemClick={handleHistoryItemClick}
           onDeleteStock={handleDeleteStock}
           isDeleting={isDeletingStock}
-          className="flex-1 overflow-hidden"
+          className="min-h-0 flex-1 overflow-hidden"
         />
       </div>
     ),

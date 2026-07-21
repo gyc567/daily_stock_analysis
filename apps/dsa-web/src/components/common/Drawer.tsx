@@ -81,7 +81,7 @@ export const Drawer: React.FC<DrawerProps> = ({
           aria-modal="true"
           aria-labelledby={titleId}
           className={cn(
-            'relative flex w-full flex-col bg-card',
+            'relative flex w-full min-h-0 flex-col bg-card',
             borderClass,
             side === 'right' ? 'border-border/80' : 'border-border/70 shadow-2xl',
             side === 'left' ? 'animate-slide-in-left' : 'animate-slide-in-right'
@@ -105,7 +105,7 @@ export const Drawer: React.FC<DrawerProps> = ({
               </svg>
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
             {children}
           </div>
         </div>
