@@ -699,6 +699,374 @@ def _infer_trend_direction(trend: Dict[str, Any]) -> str:
     return "neutral"
 
 
+def _candidate_json_open_positions(text: str) -> List[int]:
+    """Return indices of ``{`` characters that look like JSON object starts.
+
+    A candidate ``{`` is accepted if it is either:
+
+    * the start of the text, optionally preceded by whitespace;
+    * preceded by a JSON-structural character (``,`` ``:`` ``[`` ``{``)
+      with only whitespace between;
+    * preceded by a newline (a new "line" of thinking).
+
+    Plain prose that mentions braces in mid-sentence (e.g. ``Start with
+    { and end with }``) is filtered out so the bracket matcher does not
+    latch onto it.
+    """
+
+    indices: List[int] = []
+    for idx, ch in enumerate(text):
+        if ch != "{":
+            continue
+        j = idx - 1
+        while j >= 0 and text[j] in " \t":
+            j -= 1
+        if j < 0:
+            indices.append(idx)
+            continue
+        prev = text[j]
+        # Accept structural separators or new-line (likely a JSON object
+        # starting on a fresh line in the LLM response).
+        if prev in ",:[\n{":
+            indices.append(idx)
+    return indices
+
+
+def _scan_json_object_end(text: str, open_idx: int) -> Optional[int]:
+    """Return the index of the closing ``}`` that matches ``text[open_idx]``.
+
+    Tracks nesting depth while ignoring characters inside JSON string
+    literals (including escaped quotes). Returns ``None`` if no matching
+    close brace is found before end-of-text.
+    """
+
+    in_string = False
+    escape = False
+    depth = 0
+    for idx in range(open_idx, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return None
+
+
+# Recognised scalar keys for the six_dimension_inputs schema. The LLM
+# typically emits these in markdown bullet form inside its planning
+# section before (or instead of) the final JSON.
+_SIX_DIM_KEYS: Tuple[str, ...] = (
+    "chain_position",
+    "moat_type",
+    "moat_strength",
+    "customer_concentration",
+    "us_china_risk",
+    "chokepoint_type",
+    "cognitive_difference",
+    "recent_catalysts",
+    "news_sentiment",
+    "chip_concentration",
+)
+
+# Enum-like scalar fields whose value is a single token. We strip parenthetical
+# comments (e.g. ``midstream (电子材料产业链中游)`` → ``midstream``).
+_ENUM_LIKE_KEYS = frozenset(
+    {
+        "chain_position",
+        "moat_type",
+        "moat_strength",
+        "us_china_risk",
+        "chokepoint_type",
+        "cognitive_difference",
+        "news_sentiment",
+    }
+)
+
+
+def _coerce_six_dim_value(key: str, raw: str) -> Any:
+    """Coerce a recovered six_dimension_inputs scalar to its target type."""
+
+    text = raw.strip()
+    if not text or text.lower() in {"null", "none", "n/a"}:
+        return None
+    if key == "customer_concentration":
+        match = re.search(r"[-+]?\d*\.?\d+", text)
+        return float(match.group()) if match else None
+    if key == "chip_concentration":
+        match = re.search(r"\d+(?:\.\d+)?", text)
+        return float(match.group()) if match else None
+    if key == "recent_catalysts":
+        stripped = text.strip()
+        # Treat ``[]`` literal as an empty list.
+        if stripped in {"[]", "[ ]"}:
+            return []
+        # Bullets may be a single item or a JSON-ish list. We accept either.
+        if stripped.startswith("[") and stripped.endswith("]"):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if item is not None]
+            except Exception:  # noqa: BLE001
+                pass
+        # Treat as a single string (the LLM often writes one event).
+        return [text]
+    if key in _ENUM_LIKE_KEYS:
+        # 1. Strip parenthetical explanations: "midstream (注释)" → "midstream"
+        head = text.split("(", 1)[0].strip().strip(",").strip().strip('"').strip()
+        # 2. If the head still reads as prose (e.g. "midstream or upstream?
+        #    They make infrared detectors"), pick the first recognised enum
+        #    token; otherwise drop everything from the first sentence-ending
+        #    punctuation.
+        first_word = head.split(None, 1)[0].lower() if head else ""
+        if first_word in _KNOWN_ENUM_TOKENS:
+            return first_word
+        tokens = re.findall(r"[a-z_]+", head.lower())
+        for token in tokens:
+            if token in _KNOWN_ENUM_TOKENS:
+                return token
+        # Fall back to the head clipped at the first sentence-ending marker.
+        for marker in ("?", ".", "。", "!", ";", "\n"):
+            idx = head.find(marker)
+            if idx > 0:
+                head = head[:idx].strip().strip(",").strip()
+                break
+        return head or None
+    return text
+
+
+# Canonical enum tokens recognised by ``score_supply_chain`` (see
+# ``_score_chain_position`` and ``_score_moat`` in scoring/indicators/
+# supply_chain.py). The recovery heuristic prefers these tokens when the
+# LLM emits reasoning noise around the chosen value.
+_KNOWN_ENUM_TOKENS = frozenset(
+    {
+        # chain_position
+        "upstream",
+        "bottleneck",
+        "midstream",
+        "downstream",
+        "commodity",
+        # moat_type
+        "patent",
+        "technology",
+        "brand",
+        "network",
+        "switching_cost",
+        "license",
+        "regulatory",
+        "multiple",
+        # moat_strength / us_china_risk
+        "strong",
+        "moderate",
+        "weak",
+        "none",
+        "high",
+        "medium",
+        "low",
+        # chokepoint_type
+        "capacity",
+        "geo",
+        "tech",
+        "cert",
+        # cognitive_difference
+        "market_underestimating",
+        "market_fair",
+        "market_overestimating",
+        # news_sentiment
+        "positive",
+        "neutral",
+        "negative",
+    }
+)
+
+
+def _recover_six_dimension_inputs_from_prose(text: str) -> Optional[Dict[str, Any]]:
+    """Reconstruct ``six_dimension_inputs`` from the LLM planning section.
+
+    When the final JSON output is truncated or otherwise unparseable, the
+    LLM often lists the same fields as markdown bullets earlier in its
+    response (e.g. ``- chain_position: midstream``). This helper harvests
+    those bullets and returns a dict compatible with the schema in the
+    "长线六维·主观键值" prompt section.
+
+    Returns ``None`` if fewer than two known keys can be recovered (the
+    heuristic is conservative — we do not want to inject garbage).
+    """
+
+    if not text:
+        return None
+
+    # Locate the planning section. The LLM usually labels it
+    # "Six Dimension Inputs" (or "6. Six Dimension Inputs:") followed by
+    # bullets. We also accept a fenced "six_dimension_inputs: ..." block.
+    section_start_candidates = []
+    for marker in (
+        "Six Dimension Inputs",
+        "six_dimension_inputs",
+        "**Six Dimension",
+        "8. **Six",
+    ):
+        idx = text.find(marker)
+        if idx >= 0:
+            section_start_candidates.append(idx)
+    if not section_start_candidates:
+        return None
+
+    start = min(section_start_candidates)
+    section = text[start : start + 2000]
+    # Stop at the first fenced JSON block or the first ``` marker — anything
+    # after that belongs to the actual JSON payload, not the planning notes.
+    fence_idx = section.find("```")
+    if fence_idx > 0:
+        section = section[:fence_idx]
+
+    recovered: Dict[str, Any] = {}
+    bullet_pattern = re.compile(
+        r"^\s*[-*]\s*(?P<key>[a-z_]+)\s*[::]\s*(?P<value>.+?)\s*$",
+        re.MULTILINE,
+    )
+    for match in bullet_pattern.finditer(section):
+        key = match.group("key").strip()
+        if key not in _SIX_DIM_KEYS:
+            continue
+        recovered[key] = _coerce_six_dim_value(key, match.group("value"))
+
+    if len(recovered) < 2:
+        return None
+    return recovered
+
+
+def _wrap_bare_six_dim_dict(
+    parsed: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """If *parsed* looks like a bare six-dimension object, wrap it.
+
+    The MiniMax-M3 thinking model occasionally emits the six-dimension
+    values as a top-level dict that lacks the ``six_dimension_inputs``
+    wrapper, e.g.::
+
+        {"chain_position": "upstream", "moat_type": "technology", ...}
+
+    instead of::
+
+        {"six_dimension_inputs": {"chain_position": "upstream", ...}}
+
+    Downstream code reads ``result.six_dimension_inputs``; without the
+    wrapper the framework scoring falls back to the "数据缺失，使用中性分"
+    placeholder. This helper detects the bare form (top-level keys all
+    belong to the six-dimension schema) and returns a wrapped copy. It
+    returns ``None`` when the dict contains only a handful of unrelated
+    keys so we never wrap an unrelated sub-object by accident.
+    """
+
+    if "six_dimension_inputs" in parsed:
+        return None
+    known = sum(1 for key in parsed if key in _SIX_DIM_KEYS)
+    other = sum(1 for key in parsed if key not in _SIX_DIM_KEYS)
+    if known < 4 or other > 0:
+        return None
+    inner: Dict[str, Any] = {}
+    for key in _SIX_DIM_KEYS:
+        if key in parsed:
+            inner[key] = parsed[key]
+    return {
+        "six_dimension_inputs": inner,
+        "_recovered_from_bare_wrapper": True,
+    }
+
+
+def _find_and_wrap_bare_six_dim(
+    text: str,
+    best_parsed: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Scan *text* for a separate bare six-dim object and merge it.
+
+    When the LLM emits two distinct JSON objects (the main dashboard plus
+    a bare ``{"chain_position": ..., "moat_type": ..., ...}`` at the
+    end), :func:`_extract_json_candidate` only returns the dashboard.
+    This helper runs a secondary scan for any *other* parse candidate
+    that looks like a bare six-dimension dict and merges it into the
+    dashboard under the ``six_dimension_inputs`` key.
+
+    Returns ``None`` when no suitable secondary object is found so the
+    caller can fall back to its existing behaviour.
+    """
+
+    if "six_dimension_inputs" in best_parsed:
+        return None
+
+    primary_start, primary_end = _find_primary_object_span(text, best_parsed)
+    if primary_start is None or primary_end is None:
+        return None
+
+    candidates = _candidate_json_open_positions(text)
+    for open_idx in candidates:
+        if primary_start <= open_idx <= primary_end:
+            # Skip the primary candidate — we already know it does not
+            # contain six_dimension_inputs (otherwise we'd not be here).
+            continue
+        match_end = _scan_json_object_end(text, open_idx)
+        if match_end is None:
+            continue
+        try:
+            parsed = json.loads(text[open_idx : match_end + 1])
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        wrapped = _wrap_bare_six_dim_dict(parsed)
+        if wrapped is not None:
+            merged = dict(best_parsed)
+            merged["six_dimension_inputs"] = wrapped["six_dimension_inputs"]
+            merged["_recovered_from_bare_wrapper"] = True
+            return merged
+    return None
+
+
+def _find_primary_object_span(
+    text: str, parsed: Dict[str, Any]
+) -> Tuple[Optional[int], Optional[int]]:
+    """Locate the span of the JSON object that *parsed* was decoded from.
+
+    Used by :func:`_find_and_wrap_bare_six_dim` to skip the primary
+    candidate when scanning for a bare six-dim sibling object. We
+    cannot rely on a single offset (the candidate may have been
+    rebuilt by ``repair_json``), so we re-match by finding the longest
+    candidate whose parse equals *parsed*.
+    """
+
+    candidates = _candidate_json_open_positions(text)
+    best_span: Tuple[int, int] = (0, 0)
+    for open_idx in candidates:
+        match_end = _scan_json_object_end(text, open_idx)
+        if match_end is None:
+            continue
+        span_len = match_end - open_idx + 1
+        if span_len <= best_span[1] - best_span[0]:
+            continue
+        try:
+            parsed_candidate = json.loads(text[open_idx : match_end + 1])
+        except Exception:  # noqa: BLE001
+            continue
+        if parsed_candidate == parsed:
+            best_span = (open_idx, match_end)
+    if best_span == (0, 0):
+        return (None, None)
+    return best_span
+
+
 def _filter_conflicting_trend_items(
     items: List[str], conflict_hints: Tuple[str, ...]
 ) -> List[str]:
@@ -4209,13 +4577,11 @@ class GeminiAnalyzer:
             elif "```" in cleaned_text:
                 cleaned_text = cleaned_text.replace("```", "")
 
-            # 尝试找到 JSON 内容
-            json_start = cleaned_text.find("{")
-            json_end = cleaned_text.rfind("}") + 1
+            # 优先使用括号匹配的候选 JSON，避免 LLM 在 prose 中夹带 `{` `}`
+            # 或在 JSON 之后再追加一段不完整对象导致的范围错配。
+            json_str = self._extract_first_json_object(cleaned_text)
 
-            if json_start >= 0 and json_end > json_start:
-                json_str = cleaned_text[json_start:json_end]
-
+            if json_str:
                 # 尝试修复常见的 JSON 问题
                 json_str = self._fix_json_string(json_str)
 
@@ -4492,6 +4858,171 @@ class GeminiAnalyzer:
         json_str = repair_json(json_str)
 
         return json_str
+
+    @staticmethod
+    def _extract_json_candidate(text: str) -> Optional[str]:
+        """Locate a single JSON object inside *text* and return the substring.
+
+        The previous ``find("{")`` / ``rfind("}")`` heuristic failed whenever
+        the LLM (notably the MiniMax-M3 thinking model) emitted prose
+        containing stray braces (e.g. ``Start with { and end with }``) or
+        followed the JSON with a second incomplete object after ``}``. In
+        those cases the captured substring mixed prose and JSON, breaking
+        ``json.loads`` and silently dropping the ``six_dimension_inputs``
+        block that downstream code reads via ``result.six_dimension_inputs``.
+
+        Strategy (ordered best-effort):
+
+        1. If a ``\\`\\`\\`json`` fenced block exists, return its inner text.
+        2. Otherwise, iterate over candidate ``{`` positions (filtered to
+           JSON-structural separators and newlines) and bracket-match each
+           forward to its closing ``}``. Return the first candidate whose
+           parsed object contains a "dashboard" key (the most reliable
+           marker that we have located the outermost decision dashboard
+           rather than a nested sub-object like ``intelligence.latest_news``).
+        3. Fall back to the first candidate whose parse yields any object,
+           regardless of shape.
+        4. Return ``None`` if no balanced JSON object can be located.
+        """
+
+        if not text:
+            return None
+
+        # 1. Look for a fenced JSON block. Capture the entire fenced body
+        #    (between the opening and closing ``` markers), then bracket-match
+        #    the outermost {...} inside it. Using a non-greedy regex would
+        #    stop at the first nested `}`, so we do the matching manually.
+        fence_pattern = re.compile(r"```(?:json|JSON)?\s*(\{)", re.DOTALL)
+        fence_match = fence_pattern.search(text)
+        if fence_match:
+            fence_open = fence_match.start(1)
+            fence_end_idx = text.find("```", fence_open + 1)
+            if fence_end_idx > fence_open:
+                match_end = _scan_json_object_end(text, fence_open)
+                if match_end is not None and match_end < fence_end_idx + 4:
+                    candidate = text[fence_open : match_end + 1]
+                    try:
+                        json.loads(candidate)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    else:
+                        return candidate
+
+        candidates = _candidate_json_open_positions(text)
+        # Prefer the parse candidate that:
+        #  1. parses to a dict,
+        #  2. contains a "dashboard" / "six_dimension_inputs" key (or
+        #     "code" + "operation_advice"), and
+        #  3. is the largest by character length (so we prefer the outermost
+        #     decision dashboard over nested sub-objects like
+        #     ``intelligence.latest_news``).
+        best_match: Optional[str] = None
+        best_match_len = 0
+        fallback: Optional[str] = None
+        fallback_len = 0
+        for open_idx in candidates:
+            match_end = _scan_json_object_end(text, open_idx)
+            if match_end is None:
+                continue
+            candidate = text[open_idx : match_end + 1]
+            try:
+                parsed = json.loads(candidate)
+            except Exception:  # noqa: BLE001
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            cand_len = len(candidate)
+            if cand_len > fallback_len:
+                fallback = candidate
+                fallback_len = cand_len
+            is_root = (
+                "dashboard" in parsed
+                or "six_dimension_inputs" in parsed
+                or ("code" in parsed and "operation_advice" in parsed)
+            )
+            if is_root and cand_len > best_match_len:
+                best_match = candidate
+                best_match_len = cand_len
+        if best_match is not None:
+            # If the best match lacks ``six_dimension_inputs`` but the
+            # response contains another JSON object that is a bare
+            # six-dimension dict (600176 repro), merge it in.
+            try:
+                best_parsed = json.loads(best_match)
+            except Exception:  # noqa: BLE001
+                best_parsed = None
+            if (
+                isinstance(best_parsed, dict)
+                and "six_dimension_inputs" not in best_parsed
+            ):
+                wrapped = _find_and_wrap_bare_six_dim(text, best_parsed)
+                if wrapped is not None:
+                    return json.dumps(wrapped, ensure_ascii=False)
+            return best_match
+        if fallback is not None:
+            # If the largest parseable object is missing six_dimension_inputs
+            # (e.g. the LLM truncated the response after the dashboard block
+            # but before the six-dimension block), try to recover the
+            # six-dimension values from the LLM's planning notes in the prose.
+            try:
+                fallback_parsed = json.loads(fallback)
+            except Exception:  # noqa: BLE001
+                fallback_parsed = None
+            if (
+                isinstance(fallback_parsed, dict)
+                and "six_dimension_inputs" not in fallback_parsed
+            ):
+                six_recovery = _recover_six_dimension_inputs_from_prose(text)
+                if six_recovery is not None:
+                    fallback_parsed["six_dimension_inputs"] = six_recovery
+                    fallback_parsed["_recovered_from_prose"] = True
+                    return json.dumps(fallback_parsed, ensure_ascii=False)
+                # Some LLMs emit the six-dimension keys as a bare top-level
+                # object *without* the ``six_dimension_inputs`` wrapper
+                # (600176 repro). Wrap them so downstream code can find
+                # the dict under the expected key.
+                wrapped = _wrap_bare_six_dim_dict(fallback_parsed)
+                if wrapped is not None:
+                    return json.dumps(wrapped, ensure_ascii=False)
+            return fallback
+
+        # No parseable JSON object at all. As a final fallback, recover
+        # six_dimension_inputs from the LLM planning notes so the
+        # six-dimension scoring can still populate non-default indicators
+        # instead of defaulting to "数据缺失，使用中性分".
+        six_recovery = _recover_six_dimension_inputs_from_prose(text)
+        if six_recovery is not None:
+            envelope = json.dumps(
+                {
+                    "_recovered_from_prose": True,
+                    "six_dimension_inputs": six_recovery,
+                },
+                ensure_ascii=False,
+            )
+            return envelope
+        return None
+
+    @staticmethod
+    def _extract_first_json_object(text: str) -> str:
+        """Public façade that always returns *some* substring to parse.
+
+        Falls back to the legacy ``find('{')`` / ``rfind('}')`` range when
+        :meth:`_extract_json_candidate` fails so callers always receive a
+        non-empty string. Returning an empty value would force callers to
+        duplicate the heuristic and risks divergent behaviour; the legacy
+        fallback is only a safety net for malformed responses.
+        """
+
+        candidate = GeminiAnalyzer._extract_json_candidate(text)
+        if candidate is not None:
+            return candidate
+        if not text:
+            return ""
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end < 0 or end <= start:
+            return ""
+        return text[start : end + 1]
 
     def _validate_json_response(self, text: str) -> None:
         """Validate that *text* contains a parseable JSON object.
