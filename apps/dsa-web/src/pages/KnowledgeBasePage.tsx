@@ -311,7 +311,7 @@ export function KnowledgeBasePage() {
   }, []);
 
   return (
-    <div className="flex h-[calc(100vh-5rem)] w-full min-w-0 flex-col overflow-hidden sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]">
+    <div className="flex min-h-[calc(100vh-5rem)] w-full min-w-0 flex-col sm:min-h-[calc(100vh-5.5rem)] lg:min-h-[calc(100vh-2rem)]">
       {/* 页面头部 */}
       <header className="mb-4 flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -333,7 +333,7 @@ export function KnowledgeBasePage() {
       />
 
       {/* 主内容区 */}
-      <main className="flex-1 overflow-y-auto rounded-[1.25rem] border border-white/8 bg-card/82 p-5 shadow-soft-card">
+      <main className="rounded-[1.25rem] border border-white/8 bg-card/82 p-5 shadow-soft-card">
         {/* 有搜索 query 时显示搜索结果，否则显示文档列表 */}
         {searchQuery.trim() ? (
           <KnowledgeSearchResults

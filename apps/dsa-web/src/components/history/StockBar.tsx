@@ -78,6 +78,7 @@ export const StockBar: React.FC<StockBarProps> = ({
       <ScrollArea
         viewportClassName="p-4"
         testId="home-stock-bar-scroll"
+        ariaLabel={t('stockBar.title')}
       >
         <div className="mb-4 space-y-3">
           <DashboardPanelHeader

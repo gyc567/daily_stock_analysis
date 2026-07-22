@@ -474,6 +474,101 @@ search_clue_hype_tool = ToolDefinition(
 
 
 # ============================================================
+# [v2] 供应链知识库检索（用户自定义 KB 加权检索）
+# ============================================================
+
+
+def _handle_search_supply_chain_kb(
+    stock_code: str = "",
+    stock_name: str = "",
+    industry_hint: str = "",
+    keywords: str = "",
+    top_k: int = 8,
+) -> Dict[str, Any]:
+    """[v2] 检索用户自定义知识库中与本次主题/标的相关的产业链片段。
+
+    包装 SupplyChainKBRetriever（KB 加权 + 衰减 + cold start）。
+    失败时返回 error，agent 据此标注「待核验」。
+    """
+    try:
+        from src.services.supply_chain.kb_retriever import SupplyChainKBRetriever
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "error": f"KB 检索器加载失败: {exc}",
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+        }
+
+    kw_list = (
+        [k.strip() for k in keywords.split(",") if k.strip()] if keywords else None
+    )
+    retriever = SupplyChainKBRetriever()
+    result = retriever.retrieve(
+        stock_code=stock_code or None,
+        stock_name=stock_name or None,
+        industry_hint=industry_hint,
+        top_k=top_k,
+        keywords=kw_list,
+    )
+    return {
+        "stock_code": stock_code,
+        "stock_name": stock_name,
+        "industry_hint": industry_hint,
+        "aggregate_score": result.aggregate_score,
+        "kb_hit_count": len(result.hits),
+        "hits": [
+            {
+                "document_id": h.document_id,
+                "document_title": h.document_title,
+                "chunk_id": h.chunk_id,
+                "content": h.content[:500],
+                "score": h.score,
+                "tag_weight": h.tag_weight,
+                "recency_weight": h.recency_weight,
+                "kb_doc_age_days": h.kb_doc_age_days,
+                "validation_status": h.validation_status,
+            }
+            for h in result.hits
+        ],
+    }
+
+
+search_supply_chain_kb_tool = ToolDefinition(
+    name="search_supply_chain_kb",
+    description=(
+        "[v2] 检索用户自定义知识库（含已上传的产业链报告/纪要/IR 文档）的相关产业链片段。"
+        "返回每条 {document_id, document_title, chunk_id, content, score(0-1), "
+        "tag_weight, recency_weight, kb_doc_age_days, validation_status}。"
+        "**供应链报告第一步必调**：把命中片段写入报告「知识库参考」小节；"
+        "命中片段可显著提升结论置信度，但仍需与行情/新闻交叉验证。"
+    ),
+    parameters=[
+        ToolParameter(
+            "stock_code", "string", "股票代码（可空）", required=False, default=""
+        ),
+        ToolParameter(
+            "stock_name", "string", "股票名称（可空）", required=False, default=""
+        ),
+        ToolParameter(
+            "industry_hint",
+            "string",
+            "行业/主题提示（如『HBM』『动力电池』）",
+            required=False,
+            default="",
+        ),
+        ToolParameter(
+            "keywords", "string", "逗号分隔的自定义关键词", required=False, default=""
+        ),
+        ToolParameter(
+            "top_k", "integer", "返回条数（默认 8）", required=False, default=8
+        ),
+    ],
+    handler=_handle_search_supply_chain_kb,
+    category="knowledge",
+)
+
+
+# ============================================================
 # 供应链双源校验（公司 / 板块归属，东方财富 + 同花顺结构化核验）
 # ============================================================
 
@@ -560,4 +655,5 @@ ALL_SUPPLY_CHAIN_TOOLS = [
     search_semianalysis_tool,
     search_clue_hype_tool,
     verify_supply_chain_evidence_tool,
+    search_supply_chain_kb_tool,
 ]

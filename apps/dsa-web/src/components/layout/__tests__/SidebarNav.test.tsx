@@ -173,4 +173,50 @@ describe('SidebarNav', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认退出' }));
     expect(mockLogout).toHaveBeenCalled();
   });
+
+  it('scrolls the menu internally when the viewport is shorter than the menu stack', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SidebarNav variant="rail" />
+      </MemoryRouter>,
+    );
+
+    const nav = screen.getByRole('navigation', { name: '主导航' });
+    expect(nav.className).toContain('overflow-y-auto');
+    expect(nav.className).toContain('flex-1');
+    expect(nav.className).toContain('min-h-0');
+  });
+
+  it('clamps the menu height to the parent flex container so overflow-y-auto can take effect', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <div className="flex h-40 flex-col" data-testid="shell-aside">
+          <SidebarNav variant="rail" />
+        </div>
+      </MemoryRouter>,
+    );
+
+    const inner = screen.getByTestId('shell-aside').firstElementChild;
+    expect(inner?.className).toContain('h-full');
+    expect(inner?.className).toContain('flex-col');
+
+    const nav = screen.getByRole('navigation', { name: '主导航' });
+    expect(nav.className).toContain('overflow-y-auto');
+    expect(nav.className).toContain('flex-1');
+    expect(nav.className).toContain('min-h-0');
+  });
+
+  it('uses a flexible min-height with vertical padding so labels do not clip when zoomed', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SidebarNav variant="rail" />
+      </MemoryRouter>,
+    );
+
+    const homeLink = screen.getByRole('link', { name: '首页' });
+    expect(homeLink.className).toContain('min-h-[var(--nav-item-height)]');
+    expect(homeLink.className).not.toMatch(/\bh-\[var\(--nav-item-height\)\]\b/);
+    expect(homeLink.className).toContain('py-1.5');
+    expect(homeLink.className).toContain('leading-tight');
+  });
 });

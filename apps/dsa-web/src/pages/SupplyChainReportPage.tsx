@@ -228,9 +228,9 @@ export function SupplyChainReportPage() {
   );
 
   return (
-    <div className="flex h-[calc(100vh-5rem)] w-full min-w-0 gap-4 overflow-hidden sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]">
+    <div className="flex min-h-[calc(100vh-5rem)] w-full min-w-0 gap-4 sm:min-h-[calc(100vh-5.5rem)] lg:min-h-[calc(100vh-2rem)]">
       {/* 左栏：desktop 历史列表 */}
-      <div className="hidden h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-[1.25rem] border border-white/8 bg-card/82 shadow-soft-card md:flex">
+      <div className="sticky top-3 hidden max-h-[calc(100vh-1.5rem)] w-64 flex-shrink-0 flex-col overflow-hidden rounded-[1.25rem] border border-white/8 bg-card/82 shadow-soft-card self-start sm:top-4 sm:max-h-[calc(100vh-2rem)] md:flex">
         {sidebarContent}
       </div>
 
@@ -248,7 +248,7 @@ export function SupplyChainReportPage() {
       )}
 
       {/* 右栏：主区 */}
-      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="mb-4 flex-shrink-0 space-y-3">
           <div className="flex items-center gap-2">
             <button
@@ -354,7 +354,7 @@ export function SupplyChainReportPage() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto rounded-[1.25rem] border border-white/8 bg-card/82 p-5 shadow-soft-card">
+        <div className="rounded-[1.25rem] border border-white/8 bg-card/82 p-5 shadow-soft-card">
           {/* 生成中 */}
           {isGenerating && (
             <div className="space-y-4">
