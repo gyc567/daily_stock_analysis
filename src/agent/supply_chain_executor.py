@@ -38,6 +38,7 @@ _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE = """你是「供应链分析」助手，�
 - `search_semianalysis`：检索 SemiAnalysis（semianalysis.com，半导体 / AI 算力一级研究机构）的文章与数据，返回标题/摘要/**原文地址 url**。**半导体 / AI 主题必调**（见下方「SemiAnalysis 检索规则」）。
 - `search_clue_hype`：跨国内财经媒体（新浪财经/雪球/同花顺/巨潮公司公告/全网）检索「供应链线索」，返回每源提及情况 + 提及源列表 + 题材炒作信号强度（无/弱/中/强）。**用户提供了线索时必调**（见下方「线索核验规则」第 6 条）。
 - `verify_supply_chain_evidence`：对「公司 / 板块归属」事实做东方财富 + 同花顺双源结构化校验，返回 `status`（confirmed/partial/conflict/unverified/not_applicable）+ `confidence`（high/medium/low）+ 两源证据 + 成分股重合度。**A 股候选标的进入最终候选表前必调**（见下方「A 股双源校验规则」）。
+- `search_supply_chain_kb`：[v2] 检索用户自定义知识库的产业链片段，返回 document_id + chunk_id + content + score（0-1）+ tag_weight + recency_weight + validation_status。**报告第一步必调**（见下方「知识库参考」段）。
 
 ## 分析方法（Serenity 9 步 pipeline 全文）
 
@@ -76,8 +77,6 @@ _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE = """你是「供应链分析」助手，�
 
 ## A 股双源校验规则（公司 / 板块归属，必须遵守）
 
-供应链报告中的「公司 / 板块归属」类事实，必须经过东方财富 + 同花顺双源结构化校验，不能把单源搜索结果写成已确认：
-
 1. **A 股候选标的进入最终候选表前，必须调用 `verify_supply_chain_evidence`**，把工具返回的 `status` / `confidence` 写进候选表「双源状态」列。
 2. **用户提供线索且涉及 A 股公司 / 板块时**，必须对线索中的公司或板块调用该工具核验。
 3. **未得到 `confirmed` 的结论不得写成已确认事实**；按工具返回的 `status` 如实落字：
@@ -88,6 +87,16 @@ _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE = """你是「供应链分析」助手，�
    - `not_applicable`（非 A 股）→ 写「A 股双源校验不适用」；本阶段范围限定 A 股，正常不应进入最终候选表。
 4. **工具不可用时展示「待核验」**，而不是省略校验列——报告最终表格必须保留「双源状态」一列。
 5. **搜索型线索 ≠ 板块归属证据**：`search_clue_hype` / `search_semianalysis` 只能证明「被提及」，`verify_supply_chain_evidence` 才证明「板块 / 公司归属支持」，两者在报告中不能混用。
+
+## [v2] 知识库参考（第一步必做）
+
+报告生成第一步**必须调用 `search_supply_chain_kb`**：
+
+1. 把 (股票代码, 股票名, 行业提示) 传入，召回用户自定义知识库命中片段
+2. 把命中片段（≤ 2000 token）注入后续推理；每条结论标注 KB 命中来源 document_id + chunk_id
+3. 在最终报告新增「## 7. 知识库参考」小节，列出命中 document_id + 关联结论
+4. KB 内容与行情/新闻/基本面工具冲突时，以工具证据为准；KB 失真时如实标注「待核验」
+5. aggregate_score ≥ 0.6 时，KB 命中作为强证据进入核心结论；< 0.3 时在报告中显式说明「本次未充分命中用户知识库」
 
 ## 合规红线（必须遵守）
 
@@ -137,10 +146,8 @@ def build_supply_chain_system_prompt() -> str:
         _read_text(reference_path(name), f"reference {name}")
         for name in CORE_REFERENCES
     )
-    return (
-        _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE
-        .replace("{{SKILL}}", skill)
-        .replace("{{REFERENCES}}", references)
+    return _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE.replace("{{SKILL}}", skill).replace(
+        "{{REFERENCES}}", references
     )
 
 
@@ -178,7 +185,6 @@ class SupplyChainExecutor:
         from src.agent.runner import run_agent_loop
 
         system_prompt = build_supply_chain_system_prompt()
-        tool_decls = self.tool_registry.to_openai_tools()
 
         conversation_manager.get_or_create(session_id)
         config = getattr(self.llm_adapter, "_config", None) or get_config()
@@ -203,7 +209,9 @@ class SupplyChainExecutor:
         )
 
         if loop_result.success:
-            conversation_manager.add_message(session_id, "assistant", loop_result.content)
+            conversation_manager.add_message(
+                session_id, "assistant", loop_result.content
+            )
         else:
             conversation_manager.add_message(
                 session_id,

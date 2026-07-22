@@ -10,6 +10,7 @@
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import cast, Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -1397,3 +1398,272 @@ class SupplyChainDataService:
                 ],
             },
         }
+
+    # =====================================================================
+    # [v2] Deep Optimization Entry Points
+    # =====================================================================
+    #
+    # V2 在原 fetch_all 基础上引入：
+    # 1. KB 加权检索（SupplyChainKBRetriever）
+    # 2. 两轮抽取 + 公开数据补全（TwoPassSupplyChainExtractor + FieldEnricher）
+    # 3. 结构化图谱（SupplyChainGraphBuilder）
+    # 4. 统一 Serenity 评分（SerenityScorer）
+    # 5. 数据完整度披露
+    #
+    # 行为开关：
+    # - fetch_all() 保持 v1 行为，不破坏现有调用
+    # - fetch_all_v2() 新入口，返回 SupplyChainV2 完整结构
+    # - fetch_all_v2_legacy_compat() 同时返回 v1 字典 + v2 结构
+
+    def fetch_all_v2(
+        self,
+        stock_code: str,
+        stock_name: str,
+        fundamental_analysis: str = "",
+        market: str = "cn",
+        enable_serenity: bool = True,
+        industry_hint: str = "",
+    ) -> Any:
+        """[v2] 获取完整供应链数据，返回 SupplyChainV2。
+
+        Args:
+            stock_code: 股票代码
+            stock_name: 股票名称
+            fundamental_analysis: 基本面分析文本（用于 LLM 二次抽取）
+            market: 市场 (cn/hk/us)
+            enable_serenity: 是否启用 Serenity 评分
+            industry_hint: 行业/主题提示（如『高端白酒』『半导体』）
+
+        Returns:
+            SupplyChainV2 实例（含 v1 兼容字段 + v2 结构化图谱 + KB 命中 + 数据完整度）
+        """
+        from src.schemas.supply_chain import (
+            Chokepoint,
+            SupplyChainV2,
+            USChinaChain,
+        )
+        from src.services.supply_chain.graph_builder import SupplyChainGraphBuilder
+        from src.services.supply_chain.kb_retriever import (
+            ColdStartStrategy,
+            SupplyChainKBRetriever,
+        )
+        from src.services.supply_chain.serenity_scorer import SerenityScorer
+
+        # 1. KB 检索（最高优先级）
+        kb_retriever = SupplyChainKBRetriever()
+        kb_result = kb_retriever.retrieve(
+            stock_code=stock_code,
+            stock_name=stock_name,
+            industry_hint=industry_hint,
+            top_k=8,
+        )
+        cold = ColdStartStrategy(kb_result.aggregate_score)
+
+        # 2. LLM 一次抽取（C 链路，仅在 KB 不够时降级）
+        llm_data: Dict[str, Any] = {}
+        if cold.llm_fallback in ("aggressive", "moderate", "selective"):
+            llm_data = self._fetch_from_llm(
+                stock_code, stock_name, fundamental_analysis
+            )
+
+        # 3. 构建结构化图谱
+        builder = SupplyChainGraphBuilder()
+        # 从 v1 兼容字段（KB 硬编码或 LLM 推断）取公司位置 + 行业驱动
+        position_v1 = ""
+        industry_v1 = industry_hint or "未知行业"
+        drivers_v1: List[str] = []
+
+        if llm_data:
+            position_v1 = llm_data.get("company_position", "") or ""
+            drivers_v1 = llm_data.get("industry_drivers", []) or []
+
+        if not position_v1:
+            # 兜底：旧 KB 硬编码（_fetch_from_knowledge_base 的 V1 路径）
+            v1_kb = self._fetch_from_knowledge_base(stock_code, stock_name)
+            if v1_kb.get("company_position"):
+                position_v1 = str(v1_kb["company_position"])
+            if v1_kb.get("industry_drivers"):
+                drivers_v1 = list(v1_kb["industry_drivers"])
+
+        if not position_v1:
+            position_v1 = f"{stock_name}（{stock_code}）"
+
+        # v1 chokepoints（保留）
+        chokepoints_v1: List[Chokepoint] = []
+        for cp in llm_data.get("chokepoints") or []:
+            if isinstance(cp, dict):
+                try:
+                    chokepoints_v1.append(
+                        Chokepoint(
+                            type=cp.get("type", "tech"),
+                            description=str(cp.get("description", "")),
+                            confidence=cp.get("confidence", "medium"),
+                        )
+                    )
+                except Exception:
+                    continue
+
+        # us_china_chain（保留）
+        us_china_v1: Optional[USChinaChain] = None
+        uc = llm_data.get("us_china_chain") or {}
+        if isinstance(uc, dict) and uc:
+            try:
+                us_china_v1 = USChinaChain(
+                    role=str(uc.get("role", "待分析")),
+                    substitution_progress=uc.get("substitution_progress"),
+                    sanction_risk=uc.get("sanction_risk"),
+                    dual_chain_impact=uc.get("dual_chain_impact"),
+                )
+            except Exception:
+                us_china_v1 = None
+
+        # 4. 图谱构建（v2 核心）
+        graph = builder.build(
+            ticker=stock_code,
+            company=stock_name,
+            industry=industry_v1,
+            position=position_v1,
+            kb_result=kb_result,
+            llm_first_pass={
+                "upstream": llm_data.get("upstream", []) or [],
+                "downstream": llm_data.get("downstream", []) or [],
+            },
+            industry_hint=industry_hint,
+            chokepoints=chokepoints_v1,
+            us_china_chain=us_china_v1,
+        )
+
+        # 5. Serenity 评分（v2 统一入口）
+        serenity_result: Optional[Any] = None
+        if enable_serenity:
+            scorer = SerenityScorer()
+            llm_signals = self._extract_llm_signals(llm_data)
+            serenity_result = scorer.score(
+                ticker=stock_code,
+                company=stock_name,
+                market=market,
+                graph=graph,
+                kb_result=kb_result,
+                llm_signals=llm_signals,
+                industry_hint=industry_hint,
+            )
+
+        # 6. 组装 SupplyChainV2（v1 兼容字段 + v2 字段）
+        v2 = SupplyChainV2(
+            # v1 兼容
+            data_sources=["knowledge_base", "llm", "graph", "serenity"][
+                : 2 + (1 if enable_serenity else 0) + (1 if serenity_result else 0)
+            ],
+            company_position=position_v1,
+            upstream=[n.name for n in graph.upstream],
+            downstream=[n.name for n in graph.downstream],
+            chokepoints=chokepoints_v1,
+            us_china_chain=us_china_v1,
+            industry_drivers=drivers_v1,
+            # v2 新增
+            graph=graph,
+            kb_evidence=kb_result.hits,
+            llm_signals=self._extract_llm_signals(llm_data),
+            data_completeness=graph.data_completeness,
+            serenity_score=serenity_result.final_score if serenity_result else None,
+            serenity_verdict=serenity_result.verdict if serenity_result else None,
+            serenity_factor_details={
+                k: {
+                    "rating": v.rating,
+                    "points": v.points,
+                    "kb_relevance": v.kb_relevance,
+                    "llm_signal": v.llm_signal,
+                    "industry_prior": v.industry_prior,
+                    "kb_bonus_applied": v.kb_bonus_applied,
+                }
+                for k, v in (serenity_result.factors.items() if serenity_result else {})
+            }
+            if serenity_result
+            else {},
+            serenity_penalty_details={
+                k: {"rating": v.rating, "points": v.points}
+                for k, v in (
+                    serenity_result.penalties.items() if serenity_result else {}
+                )
+            }
+            if serenity_result
+            else {},
+            serenity_kb_bonus_applied={
+                k: v.kb_bonus_applied
+                for k, v in (serenity_result.factors.items() if serenity_result else {})
+                if v.kb_bonus_applied > 0
+            }
+            if serenity_result
+            else {},
+            fetched_at=datetime.now(timezone.utc),
+        )
+
+        logger.info(
+            "[SupplyChainDataService v2] %s supply chain: kb_score=%.2f (%s), "
+            "upstream=%d, downstream=%d, serenity=%s",
+            stock_code,
+            kb_result.aggregate_score,
+            cold.tier,
+            len(graph.upstream),
+            len(graph.downstream),
+            v2.serenity_verdict,
+        )
+
+        return v2
+
+    def _extract_llm_signals(self, llm_data: Dict[str, Any]) -> Dict[str, float]:
+        """从 LLM 推断结果里抽取因子信号（v2 启发式映射）。"""
+        signals: Dict[str, float] = {}
+
+        chokepoints = llm_data.get("chokepoints") or []
+        if isinstance(chokepoints, list) and chokepoints:
+            signals["chokepoint_severity"] = min(1.0, len(chokepoints) / 3.0)
+
+        upstream = llm_data.get("upstream") or []
+        if isinstance(upstream, list) and len(upstream) >= 3:
+            signals["expansion_difficulty"] = 0.6
+
+        uc = llm_data.get("us_china_chain") or {}
+        if isinstance(uc, dict):
+            risk = uc.get("sanction_risk", "")
+            if risk == "高":
+                signals["penalty_geopolitics"] = 0.8
+            elif risk == "中":
+                signals["penalty_geopolitics"] = 0.4
+
+        drivers = llm_data.get("industry_drivers") or []
+        if isinstance(drivers, list) and drivers:
+            signals["demand_inflection"] = min(1.0, len(drivers) / 3.0)
+            signals["catalyst_timing"] = 0.5
+
+        return signals
+
+    def fetch_all_v2_legacy_compat(
+        self,
+        stock_code: str,
+        stock_name: str,
+        fundamental_analysis: str = "",
+        market: str = "cn",
+        enable_serenity: bool = True,
+        industry_hint: str = "",
+    ) -> Dict[str, Any]:
+        """[v2] 返回 dict 形式（同时含 v1 字段和 v2 字段），便于平滑迁移。"""
+        v2 = self.fetch_all_v2(
+            stock_code=stock_code,
+            stock_name=stock_name,
+            fundamental_analysis=fundamental_analysis,
+            market=market,
+            enable_serenity=enable_serenity,
+            industry_hint=industry_hint,
+        )
+        v2_dict = v2.model_dump()
+        v1_only = self.fetch_all(
+            stock_code=stock_code,
+            stock_name=stock_name,
+            fundamental_analysis=fundamental_analysis,
+            market=market,
+            enable_serenity=enable_serenity,
+        )
+        # v2 字段优先；v1 兜底
+        merged = {**v1_only, **v2_dict}
+        return merged
