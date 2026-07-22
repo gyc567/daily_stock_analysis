@@ -30,6 +30,10 @@ from src.schemas.supply_chain import (
 )
 from src.services.supply_chain.kb_retriever import SupplyChainKBResult
 
+
+# 类型别名：避免 pyright 对 Dict[str, ...] 推断丢失 FactorKey literal
+FactorKeywordsMap = Dict[FactorKey, Tuple[str, ...]]
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,7 +68,8 @@ _PENALTY_MAX_RATING = 5.0
 
 
 # 关键词 → 因子相关度（用于从 KB chunk 文本算 kb_relevance）
-FACTOR_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+# 类型用 FactorKeywordsMap 而非 Dict[str, ...]，让 pyright 跟踪到 FactorKey literal
+FACTOR_KEYWORDS: FactorKeywordsMap = {
     "demand_inflection": ("需求拐点", "渗透率", "订单爆发", "扩产", "供不应求"),
     "architecture_coupling": ("架构耦合", "接口", "兼容", "标准绑定", "深度依赖"),
     "chokepoint_severity": ("卡点", "瓶颈", "不可替代", "国产化率", "卡脖子"),

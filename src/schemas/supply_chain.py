@@ -107,46 +107,50 @@ class ChainNodeV3(BaseModel):
     # ---- 基础识别 ----
     name: str = Field(..., min_length=1, max_length=80, description="公司/品类名")
     code: Optional[str] = Field(
-        None,
+        default=None,
         pattern=r"^(\d{6}|[A-Z]{1,5}(\.[A-Z])?)$",
         description="股票代码（6 位 A 股 / 美股 ticker）",
     )
     layer: Literal["upstream", "midstream", "downstream"] = Field(...)
     sub_layer: Optional[str] = Field(
-        None, max_length=40, description="细分子层（如『硅片』『光刻胶』）"
+        default=None, max_length=40, description="细分子层（如『硅片』『光刻胶』）"
     )
 
     # ---- 关系强度（v2 关键：v1 完全缺失的量化字段） ----
-    relationship: Literal["核心", "重要", "一般", "潜在"] = Field("一般")
+    relationship: Literal["核心", "重要", "一般", "潜在"] = Field(default="一般")
     concentration_pct: Optional[float] = Field(
-        None, ge=0, le=100, description="占该环节供应商/客户的比例（0-100）"
+        default=None, ge=0, le=100, description="占该环节供应商/客户的比例（0-100）"
     )
-    substitutability: Literal["高", "中", "低", "不可替代", "未知"] = Field("未知")
+    substitutability: Literal["高", "中", "低", "不可替代", "未知"] = Field(
+        default="未知"
+    )
     geographic_distribution: List[str] = Field(
         default_factory=list, description="产地/市场地理分布"
     )
 
     # ---- 来源血缘（v2 关键：每个字段可追溯） ----
-    name_source: FieldSource = Field("llm")
-    name_source_doc_id: Optional[str] = Field(None, description="KB 文档 ID")
+    name_source: FieldSource = Field(default="llm")
+    name_source_doc_id: Optional[str] = Field(default=None, description="KB 文档 ID")
 
     concentration_source: Optional[FieldSource] = Field(
-        None, description="concentration_pct 来源"
+        default=None, description="concentration_pct 来源"
     )
-    concentration_doc_id: Optional[str] = Field(None)
+    concentration_doc_id: Optional[str] = Field(default=None)
     concentration_tool: Optional[str] = Field(
-        None, description="调用了哪个工具（如 tushare.top10_holders）"
+        default=None, description="调用了哪个工具（如 tushare.top10_holders）"
     )
 
     # ---- 证据链 ----
-    evidence_strength: EvidenceStrength = Field("analysis")
-    source_url: Optional[str] = Field(None, max_length=2048)
-    confidence: Literal["high", "medium", "low"] = Field("medium")
+    evidence_strength: EvidenceStrength = Field(default="analysis")
+    source_url: Optional[str] = Field(default=None, max_length=2048)
+    confidence: Literal["high", "medium", "low"] = Field(default="medium")
 
     # ---- 衰减（v2 新增） ----
-    kb_doc_id: Optional[str] = Field(None, description="来自知识库的关联文档 ID")
+    kb_doc_id: Optional[str] = Field(
+        default=None, description="来自知识库的关联文档 ID"
+    )
     kb_doc_age_days: Optional[int] = Field(
-        None, ge=0, description="KB 文档距今天数（用于衰减）"
+        default=None, ge=0, description="KB 文档距今天数（用于衰减）"
     )
 
     @model_validator(mode="after")
@@ -199,19 +203,19 @@ class DataCompleteness(BaseModel):
 
     model_config = ConfigDict(strict=True, frozen=True)
 
-    upstream_total: int = Field(0, ge=0)
-    upstream_with_concentration: int = Field(0, ge=0)
-    upstream_with_geo: int = Field(0, ge=0)
-    upstream_with_substitutability: int = Field(0, ge=0)
-    upstream_with_code: int = Field(0, ge=0)
+    upstream_total: int = Field(default=0, ge=0)
+    upstream_with_concentration: int = Field(default=0, ge=0)
+    upstream_with_geo: int = Field(default=0, ge=0)
+    upstream_with_substitutability: int = Field(default=0, ge=0)
+    upstream_with_code: int = Field(default=0, ge=0)
 
-    downstream_total: int = Field(0, ge=0)
-    downstream_with_concentration: int = Field(0, ge=0)
-    downstream_with_geo: int = Field(0, ge=0)
+    downstream_total: int = Field(default=0, ge=0)
+    downstream_with_concentration: int = Field(default=0, ge=0)
+    downstream_with_geo: int = Field(default=0, ge=0)
 
-    kb_hit_count: int = Field(0, ge=0, description="KB 命中 chunk 数")
-    kb_coverage_score: float = Field(0.0, ge=0.0, le=1.0)
-    aggregate_confidence: Literal["high", "medium", "low"] = Field("low")
+    kb_hit_count: int = Field(default=0, ge=0, description="KB 命中 chunk 数")
+    kb_coverage_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    aggregate_confidence: Literal["high", "medium", "low"] = Field(default="low")
 
     def summary(self) -> Dict[str, Any]:
         """供报告 Markdown 表格使用的紧凑摘要。"""
@@ -234,6 +238,15 @@ class DataCompleteness(BaseModel):
             "kb_coverage_score": self.kb_coverage_score,
             "aggregate_confidence": self.aggregate_confidence,
         }
+
+
+def _make_empty_data_completeness() -> "DataCompleteness":
+    """[v2] Module-level factory for DataCompleteness default.
+
+    在 default_factory 中用模块级函数（而非 lambda 或类引用）让 pyright
+    能正确推导返回类型，避免 strict 模式下 "Arguments missing" 误报。
+    """
+    return DataCompleteness()
 
 
 class SupplyChainGraph(BaseModel):
@@ -262,7 +275,7 @@ class SupplyChainGraph(BaseModel):
     kb_coverage_score: float = Field(0.0, ge=0.0, le=1.0)
     aggregate_confidence: Literal["high", "medium", "low"] = Field("low")
     data_completeness: DataCompleteness = Field(
-        default_factory=lambda: DataCompleteness()
+        default_factory=_make_empty_data_completeness
     )
 
     @model_validator(mode="after")
@@ -310,7 +323,7 @@ class SupplyChainV2(BaseModel):
         default_factory=dict, description="[v2] LLM 因子信号 0-1"
     )
     data_completeness: DataCompleteness = Field(
-        default_factory=lambda: DataCompleteness()
+        default_factory=_make_empty_data_completeness
     )
 
     # Serenity 评分（v2 统一入口返回）
@@ -395,9 +408,9 @@ class SerenityScoreResult(BaseModel):
     market: str = Field("")
     factors: Dict[FactorKey, SerenityFactorScore] = Field(default_factory=dict)
     penalties: Dict[PenaltyKey, SerenityPenaltyScore] = Field(default_factory=dict)
-    raw_factor_points: float = Field(0.0)
-    penalty_points: float = Field(0.0)
-    final_score: int = Field(0, ge=0, le=100)
+    raw_factor_points: float = Field(default=0.0)
+    penalty_points: float = Field(default=0.0)
+    final_score: int = Field(default=0, ge=0, le=100)
     verdict: str = Field("", description="中文评级，如『顶级研究优先级』")
     notes: str = Field("", description="备注")
 

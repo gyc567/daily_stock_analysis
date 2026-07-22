@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from src.schemas.supply_chain import ChainNodeV3, FieldSource
 from src.services.supply_chain.field_enrichment import SupplyChainFieldEnricher
@@ -228,7 +228,7 @@ class TwoPassSupplyChainExtractor:
     def _make_node(
         self,
         name: str,
-        layer: str,
+        layer: Literal["upstream", "midstream", "downstream"],
         kb_hits: List[Any],
         ticker: str,
         industry_hint: str,
