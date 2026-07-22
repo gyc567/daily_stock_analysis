@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from src.schemas.knowledge_base import (
     KnowledgeChunkHit,
@@ -96,7 +96,8 @@ def recency_weight(
         return 1.0
     if half_life_days <= 0:
         return 1.0
-    return 0.5 ** (age_days / half_life_days)
+    ratio: float = float(age_days) / float(half_life_days)
+    return cast(float, 0.5**ratio)
 
 
 def _tokenize_for_relevance(content: str, keywords: List[str]) -> float:
