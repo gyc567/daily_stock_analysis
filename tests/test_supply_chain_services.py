@@ -31,7 +31,9 @@ def _full_input(**overrides):
         "market": "A-share",
         "factors": _sample_factors(4.0),
         "penalties": _sample_penalties(1.0),
-        "evidence": [{"claim": "某环节少数厂商垄断", "source": "公司年报", "strength": "primary"}],
+        "evidence": [
+            {"claim": "某环节少数厂商垄断", "source": "公司年报", "strength": "primary"}
+        ],
         "what_could_weaken_view": ["竞品扩产", "需求转弱"],
     }
     data.update(overrides)
@@ -41,6 +43,7 @@ def _full_input(**overrides):
 # ============================================================
 # scorecard 纯函数
 # ============================================================
+
 
 class TestScorecard:
     def test_score_returns_result_and_verdict(self):
@@ -89,8 +92,12 @@ class TestScorecard:
 
     def test_higher_chokepoint_scores_higher(self):
         # 高卡点（因子全 5、惩罚全 0）应明显高于低卡点（因子全 0）
-        high, _ = scorecard.score(_full_input(factors=_sample_factors(5), penalties=_sample_penalties(0)))
-        low, _ = scorecard.score(_full_input(factors=_sample_factors(0), penalties=_sample_penalties(0)))
+        high, _ = scorecard.score(
+            _full_input(factors=_sample_factors(5), penalties=_sample_penalties(0))
+        )
+        low, _ = scorecard.score(
+            _full_input(factors=_sample_factors(0), penalties=_sample_penalties(0))
+        )
         assert high["final_score"] > low["final_score"]
 
     def test_penalties_reduce_score(self):
@@ -102,6 +109,7 @@ class TestScorecard:
 # ============================================================
 # 工具 handler
 # ============================================================
+
 
 class TestScoreTool:
     def test_normal_scoring(self):
@@ -146,7 +154,11 @@ class TestScoreTool:
         result = _handle_score_supply_chain_bottleneck(
             ticker="X",
             company="Y",
-            factors={"demand_inflection": 999, "chokepoint_severity": "bad", "evidence_quality": -3},
+            factors={
+                "demand_inflection": 999,
+                "chokepoint_severity": "bad",
+                "evidence_quality": -3,
+            },
         )
         assert "error" not in result
         assert "verdict" in result
@@ -165,15 +177,18 @@ class TestScoreTool:
 # 工具集元数据
 # ============================================================
 
+
 class TestToolMetadata:
     def test_supply_chain_tools(self):
-        assert len(ALL_SUPPLY_CHAIN_TOOLS) == 4
+        # v2 增了 search_supply_chain_kb → 共 5 个工具
+        assert len(ALL_SUPPLY_CHAIN_TOOLS) == 5
         names = {t.name for t in ALL_SUPPLY_CHAIN_TOOLS}
         assert names == {
             "score_supply_chain_bottleneck",
             "search_semianalysis",
             "search_clue_hype",
             "verify_supply_chain_evidence",
+            "search_supply_chain_kb",
         }
         assert ALL_SUPPLY_CHAIN_TOOLS[0].name == "score_supply_chain_bottleneck"
         assert ALL_SUPPLY_CHAIN_TOOLS[0].category == "analysis"
