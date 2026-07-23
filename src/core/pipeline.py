@@ -1444,6 +1444,20 @@ class StockAnalysisPipeline:
 
             # Agent 路径: 长线投研框架集成 (Research Framework Integration)
             if result is not None:
+                # Inject research_framework-compatible keys into initial_context
+                # so _extract_raw_data_from_context can find them.
+                # Agent path stores raw objects under agent-style keys (realtime_quote,
+                # trend_result) but the scoring engine expects enhanced_context-style
+                # keys (realtime, trend_analysis, today, yesterday).
+                if realtime_quote:
+                    rt = cast(Dict[str, Any], self._safe_to_dict(realtime_quote) or {})
+                    initial_context["realtime"] = rt
+                if trend_result:
+                    tr = cast(Dict[str, Any], self._safe_to_dict(trend_result) or {})
+                    initial_context["trend_analysis"] = tr
+                if isinstance(analysis_context, dict):
+                    initial_context["today"] = analysis_context.get("today", {})
+                    initial_context["yesterday"] = analysis_context.get("yesterday", {})
                 integrated: Optional[AnalysisResult] = (
                     self._integrate_research_framework(result, initial_context)
                 )

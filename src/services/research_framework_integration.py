@@ -45,6 +45,9 @@ def integrate_research_framework(
         # P2-fix: 也从 LLM 的 dashboard / raw_result 里取主观维度键值
         _enrich_raw_data_from_llm_output(raw_data, result)
 
+        # fallback: 当 LLM 未产出产业链定位字段时，从知识库推导
+        _fallback_supply_chain_from_knowledge_base(raw_data, result)
+
         scoring_service = ResearchScoringService()
         scoring_result = scoring_service.process_with_p2_enrichment(
             stock_code=result.code,
@@ -584,8 +587,9 @@ def _extract_raw_data_from_context(
         cap = context["capital_flow"]
         _capital_merge(raw_data, cap)
 
-    # ---- new: enhanced_context.realtime ----
-    rt = context.get("realtime") or {}
+    # ---- new: enhanced_context.realtime ---
+    # fallback for agent path (realtime_quote) when enhanced path (realtime) is absent
+    rt = context.get("realtime") or context.get("realtime_quote") or {}
     if isinstance(rt, dict):
         if rt.get("pe_ratio") is not None and rt["pe_ratio"] > 0:
             pe_pctile = _pe_to_percentile(rt["pe_ratio"])
@@ -617,7 +621,8 @@ def _extract_raw_data_from_context(
             _earnings_merge(raw_data, earnings_block.get("data") or {})
 
     # ---- new: enhanced_context.trend_analysis → ma_alignment + derive extra indicators ----
-    ta = context.get("trend_analysis") or {}
+    # fallback for agent path (trend_result) when enhanced path (trend_analysis) is absent
+    ta = context.get("trend_analysis") or context.get("trend_result") or {}
     if isinstance(ta, dict):
         if not raw_data.get("ma_alignment"):
             _ma_alignment_from_text(
@@ -744,6 +749,113 @@ def _enrich_raw_data_from_llm_output(
             if isinstance(pe_v, (int, float)):
                 raw_data["pe_percentile"] = float(pe_v)
                 break
+
+
+def _fallback_supply_chain_from_knowledge_base(
+    raw_data: Dict[str, Any], result: "AnalysisResult"
+) -> None:
+    """当 LLM 未产出可靠的产业链定位字段时，从知识库推导。
+
+    只有当 LLM 输出结构化的 six_dimension_inputs（JSON 直接解析得到）时
+    才信任 LLM 的产业链字段；文本回退恢复出的值允许被知识库覆盖。
+    """
+    llm_produced_reliable = isinstance(
+        getattr(result, "six_dimension_inputs", None), dict
+    )
+    if llm_produced_reliable:
+        _SCORE_KEYS = (
+            "chain_position", "moat_type", "moat_strength",
+            "us_china_risk", "chokepoint_type",
+        )
+        if any(raw_data.get(k) for k in _SCORE_KEYS):
+            return
+
+    try:
+        from src.services.supply_chain_data_service import SupplyChainDataService
+
+        sc_service = SupplyChainDataService()
+        sc_data = sc_service.fetch_all(
+            stock_code=result.code,
+            stock_name=result.name,
+            fundamental_analysis=result.fundamental_analysis or "",
+            market=_infer_market(result.code),
+            enable_serenity=False,
+        )
+    except Exception:
+        return
+
+    kb_pos = (sc_data.get("company_position") or "").strip()
+    if not kb_pos:
+        return
+
+    # ---- chain_position: 从 company_position 文本中提取 ----
+    pos_lower = kb_pos.lower()
+    if any(w in pos_lower for w in ("产业链上游核心", "产业链上游")):
+        inferred_chain = "upstream"
+    elif any(w in pos_lower for w in ("产业链中游核心", "产业链中游", "中游核心环节")):
+        inferred_chain = "midstream"
+    elif any(w in pos_lower for w in ("产业链下游", "终端环节")):
+        inferred_chain = "downstream"
+    else:
+        inferred_chain = "midstream"
+
+    raw_data["chain_position"] = inferred_chain
+
+    # ---- moat_type / moat_strength: 从 chokepoints 文本推断 ----
+    chokepoints = sc_data.get("chokepoints") or []
+    if chokepoints:
+        types = [c.get("type", "") for c in chokepoints if isinstance(c, dict)]
+        type_text = " ".join(t.lower() for t in types)
+        if "技术" in type_text or "专利" in type_text:
+            inferred_moat = "technology"
+        elif "资质" in type_text or "认证" in type_text or "牌照" in type_text:
+            inferred_moat = "license"
+        elif "设备" in type_text or "产能" in type_text:
+            inferred_moat = "scale"
+        else:
+            inferred_moat = "technology"
+
+        confidences = [c.get("confidence", "") for c in chokepoints if isinstance(c, dict)]
+        high_count = sum(1 for cf in confidences if cf.lower() == "high")
+        if high_count >= 2:
+            inferred_strength = "strong"
+        elif high_count >= 1:
+            inferred_strength = "moderate"
+        else:
+            inferred_strength = "weak"
+
+        raw_data["moat_type"] = inferred_moat
+        raw_data["moat_strength"] = inferred_strength
+
+    # ---- chokepoint_type ----
+    if chokepoints:
+        first = None
+        for c in chokepoints:
+            if isinstance(c, dict):
+                t = c.get("type", "")
+                if t == "技术":
+                    first = "tech"
+                elif t == "资质":
+                    first = "cert"
+                elif t == "设备":
+                    first = "capacity"
+                elif t == "材料":
+                    first = "capacity"
+                if first:
+                    break
+        if first:
+            raw_data["chokepoint_type"] = first
+
+    # ---- us_china_risk: 从 us_china_chain.sanction_risk 映射 ----
+    us_chain = sc_data.get("us_china_chain") or {}
+    sanction_raw = (us_chain.get("sanction_risk") or "").strip()
+    if sanction_raw:
+        if "高" in sanction_raw:
+            raw_data["us_china_risk"] = "high"
+        elif "中" in sanction_raw:
+            raw_data["us_china_risk"] = "medium"
+        elif "低" in sanction_raw:
+            raw_data["us_china_risk"] = "low"
 
 
 def _merge_six_dim(raw_data: Dict[str, Any], six: Dict[str, Any]) -> None:
