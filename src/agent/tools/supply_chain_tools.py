@@ -713,7 +713,7 @@ def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
         # 6 秒超时保护（避免网络 hang 拖累整个工具调用）
         import signal
 
-        def _timeout_handler(signum, frame):
+        def _timeout_handler(signum: int, frame: object) -> None:
             raise TimeoutError("get_stock_info timeout")
 
         old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
@@ -736,7 +736,7 @@ def _fetch_real_realtime_quote(ticker: str) -> Dict[str, Any]:
 
         import signal
 
-        def _timeout_handler(signum, frame):
+        def _timeout_handler(signum: int, frame: object) -> None:
             raise TimeoutError("get_realtime_quote timeout")
 
         old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
