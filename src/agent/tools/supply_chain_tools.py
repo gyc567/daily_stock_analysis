@@ -22,7 +22,7 @@ v3 深度小节工具（5 个）：
 """
 
 import logging
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter
 
@@ -946,7 +946,7 @@ def _parse_v3_json(content: str) -> Dict[str, Any]:
         pass
 
     # 3. 候选多个 { ... } 块，按嵌套深度选最深的（最可能是完整 JSON）
-    candidates: List[Dict[str, Any]] = []
+    candidates: List[Tuple[int, int, Dict[str, Any]]] = []
     for m in re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text):
         try:
             cand = json.loads(m.group(0))
