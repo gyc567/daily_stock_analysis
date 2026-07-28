@@ -1450,10 +1450,10 @@ class StockAnalysisPipeline:
                 # trend_result) but the scoring engine expects enhanced_context-style
                 # keys (realtime, trend_analysis, today, yesterday).
                 if realtime_quote:
-                    rt = cast(Dict[str, Any], self._safe_to_dict(realtime_quote) or {})
+                    rt = self._safe_to_dict(realtime_quote) or {}
                     initial_context["realtime"] = rt
                 if trend_result:
-                    tr = cast(Dict[str, Any], self._safe_to_dict(trend_result) or {})
+                    tr = self._safe_to_dict(trend_result) or {}
                     initial_context["trend_analysis"] = tr
                 if isinstance(analysis_context, dict):
                     initial_context["today"] = analysis_context.get("today", {})
