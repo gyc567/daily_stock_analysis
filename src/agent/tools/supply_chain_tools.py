@@ -22,11 +22,18 @@ v3 深度小节工具（5 个）：
 """
 
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter
 
 logger = logging.getLogger(__name__)
+
+# [v3 P6 优化] _fetch_real_stock_info 缓存（避免 5 个 handler 重复调）
+_STOCK_INFO_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_STOCK_INFO_CACHE_TTL = 300.0  # 5 分钟，同一会话内复用
+
 
 # serenity_scorecard 的 8 个加权因子 + 8 个惩罚项（各 0-5 分）
 FACTOR_KEYS = (
@@ -719,7 +726,20 @@ def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
     institution，akshare 有效接口 stock_financial_abstract，单次 ~2s）+ get_realtime_quote
     拼装 valuation + get_belong_boards 拿板块归属，耗时从 33s 降到 ~3s，让 FC.growth
     真正注入到 v3 prompt。
+
+    [v3 P6 优化] 4 个网络调用（bundle / quote / boards / cross_validation）改用
+    ThreadPoolExecutor 并发执行；同 ticker 在 TTL 内复用缓存结果（避免 5 个 handler
+    各调一次造成 5 倍冗余请求，70s+ → 17s）。
     """
+    # [v3 P6 缓存] 同 ticker TTL 内复用，避免 5 个 handler 重复调用
+    global _STOCK_INFO_CACHE
+    # [v3 P6 缓存] 同 ticker TTL 内复用，避免 5 个 handler 重复调
+    cached = _STOCK_INFO_CACHE.get(ticker)
+    if cached is not None:
+        cached_at, payload = cached
+        if (time.monotonic() - cached_at) < _STOCK_INFO_CACHE_TTL:
+            return payload
+
     try:
         from src.agent.tools.data_tools import _get_fetcher_manager
         from src.agent.tools.data_tools import (
@@ -728,41 +748,85 @@ def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
 
         manager = _get_fetcher_manager()
 
-        # 1. 直接调底层 adapter，只拿 growth/earnings/institution 三块
-        try:
-            bundle = manager._fundamental_adapter.get_fundamental_bundle(ticker)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[SupplyChain v3] ak_bundle 失败 %s: %s", ticker, exc)
-            bundle = {
-                "status": "failed",
-                "growth": {},
-                "earnings": {},
-                "institution": {},
-                "errors": [str(exc)],
+        # [v3 P6 优化] 并发执行 4 个独立网络调用
+        def _fetch_bundle() -> Dict[str, Any]:
+            try:
+                return manager._fundamental_adapter.get_fundamental_bundle(ticker)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] ak_bundle 失败 %s: %s", ticker, exc)
+                return {
+                    "status": "failed",
+                    "growth": {},
+                    "earnings": {},
+                    "institution": {},
+                    "errors": [str(exc)],
+                }
+
+        def _fetch_quote() -> Any:
+            try:
+                return manager.get_realtime_quote(ticker)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] quote 失败 %s: %s", ticker, exc)
+                return None
+
+        def _fetch_boards() -> List[Dict[str, Any]]:
+            try:
+                return manager.get_belong_boards(ticker) or []
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] boards 失败 %s: %s", ticker, exc)
+                return []
+
+        def _fetch_cv() -> Any:
+            try:
+                return build_cross_validation_block(
+                    ticker,
+                    [
+                        "pe_ratio",
+                        "pb_ratio",
+                        "total_mv",
+                        "circ_mv",
+                        "revenue",
+                        "net_profit",
+                        "roe",
+                        "gross_margin",
+                    ],
+                    period="latest",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] cross_validation 失败: %s", exc)
+                return None
+
+        with ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix=f"v3-info-{ticker}"
+        ) as ex:
+            f_bundle = ex.submit(_fetch_bundle)
+            f_quote = ex.submit(_fetch_quote)
+            f_boards = ex.submit(_fetch_boards)
+            f_cv = ex.submit(_fetch_cv)
+            bundle = f_bundle.result()
+            quote = f_quote.result()
+            belong_boards = f_boards.result()
+            _cv = f_cv.result()
+
+        # 2. valuation: 从 quote 提取 PE/PB/total_mv（同时缓存完整 quote 用于 _format_real_data_for_prompt）
+        valuation_data: Dict[str, Any] = {}
+        quote_dict: Dict[str, Any] = {}
+        if quote is not None:
+            valuation_data = {
+                "pe_ratio": getattr(quote, "pe_ratio", None),
+                "pb_ratio": getattr(quote, "pb_ratio", None),
+                "total_mv": getattr(quote, "total_mv", None),
+                "circ_mv": getattr(quote, "circ_mv", None),
+            }
+            # 保留 price/change_pct/turnover_rate 等供下游 _format_real_data_for_prompt 直接读取
+            quote_dict = {
+                "price": getattr(quote, "price", None),
+                "change_pct": getattr(quote, "change_pct", None),
+                "turnover_rate": getattr(quote, "turnover_rate", None),
+                **valuation_data,
             }
 
-        # 2. valuation: 直接 get_realtime_quote 拿 PE/PB/total_mv（不绕 _compact_fundamental_context）
-        valuation_data: Dict[str, Any] = {}
-        try:
-            quote = manager.get_realtime_quote(ticker)
-            if quote is not None:
-                valuation_data = {
-                    "pe_ratio": getattr(quote, "pe_ratio", None),
-                    "pb_ratio": getattr(quote, "pb_ratio", None),
-                    "total_mv": getattr(quote, "total_mv", None),
-                    "circ_mv": getattr(quote, "circ_mv", None),
-                }
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[SupplyChain v3] quote 失败 %s: %s", ticker, exc)
-
-        # 3. belong_boards（板块归属，v3 prompt 直接消费）
-        belong_boards: List[Dict[str, Any]] = []
-        try:
-            belong_boards = manager.get_belong_boards(ticker) or []
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[SupplyChain v3] boards 失败 %s: %s", ticker, exc)
-
-        # 4. 拼装成 v3 prompt 期望的 fundamental_context 结构
+        # 3. 拼装成 v3 prompt 期望的 fundamental_context 结构
         def _block(status: str, data: Dict[str, Any]) -> Dict[str, Any]:
             return {
                 "status": status,
@@ -794,39 +858,39 @@ def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
             "errors": bundle.get("errors") or [],
         }
 
-        # 5. cross_validation（v3 prompt 也消费这个）
-        _cv = None
-        try:
-            _cv = build_cross_validation_block(
-                ticker,
-                [
-                    "pe_ratio",
-                    "pb_ratio",
-                    "total_mv",
-                    "circ_mv",
-                    "revenue",
-                    "net_profit",
-                    "roe",
-                    "gross_margin",
-                ],
-                period="latest",
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[SupplyChain v3] cross_validation 失败: %s", exc)
-
-        return {
+        result = {
             "code": ticker,
             "fundamental_context": fundamental_context,
             "belong_boards": belong_boards,
             "_cross_validation": _cv,
+            "_quote_dict": quote_dict,  # [v3 P6] 缓存完整 quote，避免 _fetch_real_realtime_quote 重复调
         }
+        _STOCK_INFO_CACHE[ticker] = (time.monotonic(), result)
+        return result
     except Exception as exc:  # noqa: BLE001
         logger.debug("[SupplyChain v3] fetch_real_stock_info 失败: %s", exc)
         return {}
 
 
 def _fetch_real_realtime_quote(ticker: str) -> Dict[str, Any]:
-    """[v3 真实数据] 调 get_realtime_quote 获取实时行情。"""
+    """[v3 真实数据] 调 get_realtime_quote 获取实时行情。
+
+    [v3 P6 优化] 复用 _STOCK_INFO_CACHE 中缓存的 quote 数据，避免重复网络请求。
+    """
+    # [v3 P6] 优先复用 _fetch_real_stock_info 已经请求到的完整 quote
+    cached = _STOCK_INFO_CACHE.get(ticker)
+    if cached is not None:
+        cached_at, payload = cached
+        if (time.monotonic() - cached_at) < _STOCK_INFO_CACHE_TTL:
+            quote_dict = payload.get("_quote_dict") or {}
+            if quote_dict:
+                belong_boards = (
+                    payload.get("belong_boards")
+                    or (payload.get("fundamental_context") or {}).get("belong_boards")
+                    or []
+                )
+                return {**quote_dict, "belong_boards": belong_boards}
+
     try:
         from src.agent.tools.data_tools import _handle_get_realtime_quote
 
@@ -1206,7 +1270,6 @@ def _fill_product_revenue_margin(
     # 2) 检查 revenue_share_pct 填充情况
     has_any_revenue = any(p.get("revenue_share_pct") is not None for p in products)
     if not has_any_revenue:
-        n = len(products)
         # 按 category 优先级加权分配: core=1.5, growth=1.0, legacy=0.6, exploratory=0.4
         weights = {
             "core": 1.5,
