@@ -796,7 +796,8 @@ def _fetch_real_stock_info_uncached(ticker: str) -> Dict[str, Any]:
         # [v3 P6 优化] 并发执行 4 个独立网络调用
         def _fetch_bundle() -> Dict[str, Any]:
             try:
-                return manager._fundamental_adapter.get_fundamental_bundle(ticker)
+                result = manager._fundamental_adapter.get_fundamental_bundle(ticker)
+                return cast(Dict[str, Any], result)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[SupplyChain v3] ak_bundle 失败 %s: %s", ticker, exc)
                 return {
