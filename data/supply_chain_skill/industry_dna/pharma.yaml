@@ -41,6 +41,28 @@ key_players:
   - 智飞生物/万泰生物（疫苗）
   - 同仁堂/云南白药（中药）
 concentration: "CXO 全球 CR3: 30%+（药明康德/LabCorp/查尔斯河）；创新药 CR10 集中度高但分散；医疗器械 CR5: 50%+"
+
+# [v3 P5] 子赛道级数字字段
+subsegment_cr:
+  - name: CXO/CDMO
+    market_share_pct_leaders: {"药明康德": 12.0, "LabCorp": 8.0, "查尔斯河": 6.0}
+    cr3_pct: 26.0
+    cr5_pct: 38.0
+    share_trend: rising
+    top_competitors: ["药明康德", "LabCorp", "查尔斯河", "康龙化成", "泰格医药", "凯莱英"]
+  - name: 医疗器械-影像
+    market_share_pct_leaders: {"GE Healthcare": 27.0, "Siemens": 23.0, "Philips": 19.0}
+    cr3_pct: 69.0
+    cr5_pct: 85.0
+    share_trend: stable
+    top_competitors: ["GE Healthcare", "Siemens", "Philips", "联影医疗", "迈瑞医疗"]
+  - name: IVD
+    market_share_pct_leaders: {"Roche Diagnostics": 17.0, "Abbott": 14.0, "丹纳赫": 9.0}
+    cr3_pct: 40.0
+    cr5_pct: 55.0
+    share_trend: stable
+    top_competitors: ["Roche Diagnostics", "Abbott", "丹纳赫", "迈瑞医疗", "安图生物"]
+
 customer_types:
   - 三级医院
   - 基层医疗机构
