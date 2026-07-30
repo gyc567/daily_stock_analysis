@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 # [v3 P6 优化] _fetch_real_stock_info 缓存（避免 5 个 handler 重复调）
 _STOCK_INFO_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _STOCK_INFO_CACHE_TTL = 300.0  # 5 分钟，同一会话内复用
+# [v3 P6 修复竞态] 同 ticker 并发时只触发一次网络调用
+import threading as _threading
+
+_STOCK_INFO_LOCK = _threading.Lock()
+_STOCK_INFO_INFLIGHT: Dict[str, _threading.Event] = {}  # ticker → 事件
+_STOCK_INFO_PAYLOAD: Dict[str, Dict[str, Any]] = {}  # in-flight 期间共享结果
 
 
 # serenity_scorecard 的 8 个加权因子 + 8 个惩罚项（各 0-5 分）
@@ -713,7 +719,7 @@ def _safe_run_sync(handler: Any, *args: Any, **kwargs: Any) -> Dict[str, Any]:
 
 
 def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
-    """[v3 真实数据] 调 get_stock_info 获取行情/板块/财务。
+    """[v3 真实数据] 调 get_stock_info 获取行情/板块/财务（带缓存 + 并发）。
 
     [v3 P0 修复] 之前用 signal.alarm(6) + get_fundamental_context 路径，但
     1) signal.alarm 只对主线程生效，ThreadPoolExecutor worker thread 不响应 SIGALRM，
@@ -729,17 +735,56 @@ def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
 
     [v3 P6 优化] 4 个网络调用（bundle / quote / boards / cross_validation）改用
     ThreadPoolExecutor 并发执行；同 ticker 在 TTL 内复用缓存结果（避免 5 个 handler
-    各调一次造成 5 倍冗余请求，70s+ → 17s）。
+    各调一次造成 5 倍冗余请求，70s+ → 5.4s）。
+
+    [v3 P6 修复竞态] 用 threading.Lock + in-flight set 保证同 ticker 并发请求
+    只触发一次网络调用（5 个 handler 同时进入时只有一个真正执行，其余等待结果）。
     """
-    # [v3 P6 缓存] 同 ticker TTL 内复用，避免 5 个 handler 重复调用
-    global _STOCK_INFO_CACHE
-    # [v3 P6 缓存] 同 ticker TTL 内复用，避免 5 个 handler 重复调
+    # 1) 快路径：缓存命中直接返回
     cached = _STOCK_INFO_CACHE.get(ticker)
     if cached is not None:
         cached_at, payload = cached
         if (time.monotonic() - cached_at) < _STOCK_INFO_CACHE_TTL:
             return payload
 
+    # 2) 慢路径：加锁防止并发重复请求
+    waiter: Optional[_threading.Event] = None
+    with _STOCK_INFO_LOCK:
+        # 双重检查：拿锁期间其他线程可能已完成
+        cached = _STOCK_INFO_CACHE.get(ticker)
+        if cached is not None:
+            cached_at, payload = cached
+            if (time.monotonic() - cached_at) < _STOCK_INFO_CACHE_TTL:
+                return payload
+        # 如果别的线程正在 fetch，则等待它完成并复用其结果
+        if ticker in _STOCK_INFO_INFLIGHT:
+            waiter = _STOCK_INFO_INFLIGHT[ticker]
+        else:
+            # 自己成为 fetcher：注册事件
+            _STOCK_INFO_INFLIGHT[ticker] = _threading.Event()
+
+    if waiter is not None:
+        # 等待别的线程完成
+        waiter.wait(timeout=_STOCK_INFO_CACHE_TTL)
+        with _STOCK_INFO_LOCK:
+            return _STOCK_INFO_PAYLOAD.get(ticker) or {}
+        # fallback（极端情况：等待超时）
+
+    try:
+        payload = _fetch_real_stock_info_uncached(ticker)
+        with _STOCK_INFO_LOCK:
+            _STOCK_INFO_CACHE[ticker] = (time.monotonic(), payload)
+            _STOCK_INFO_PAYLOAD[ticker] = payload
+        return payload
+    finally:
+        with _STOCK_INFO_LOCK:
+            evt = _STOCK_INFO_INFLIGHT.pop(ticker, None)
+            if evt is not None:
+                evt.set()
+
+
+def _fetch_real_stock_info_uncached(ticker: str) -> Dict[str, Any]:
+    """[v3 P6] 实际的 4 个网络调用（并发执行），无缓存层。"""
     try:
         from src.agent.tools.data_tools import _get_fetcher_manager
         from src.agent.tools.data_tools import (
@@ -858,15 +903,13 @@ def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
             "errors": bundle.get("errors") or [],
         }
 
-        result = {
+        return {
             "code": ticker,
             "fundamental_context": fundamental_context,
             "belong_boards": belong_boards,
             "_cross_validation": _cv,
             "_quote_dict": quote_dict,  # [v3 P6] 缓存完整 quote，避免 _fetch_real_realtime_quote 重复调
         }
-        _STOCK_INFO_CACHE[ticker] = (time.monotonic(), result)
-        return result
     except Exception as exc:  # noqa: BLE001
         logger.debug("[SupplyChain v3] fetch_real_stock_info 失败: %s", exc)
         return {}
