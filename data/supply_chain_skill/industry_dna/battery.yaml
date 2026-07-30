@@ -41,6 +41,34 @@ key_players:
   - 恩捷股份（隔膜）
   - 天赐材料（电解液）
 concentration: "全球动力 CR3: 65%+（CATL/BYD/LG）；中国动力 CR5: 85%+；储能 CR3: 60%+"
+
+# [v3 P5] 子赛道级数字字段
+subsegment_cr:
+  - name: 动力电池（全球）
+    market_share_pct_leaders: {"CATL": 36.0, "BYD": 16.0, "LG新能源": 12.0}
+    cr3_pct: 64.0
+    cr5_pct: 80.0
+    share_trend: rising
+    top_competitors: ["CATL", "BYD", "LG新能源", "SK On", "松下", "中创新航"]
+  - name: 动力电池（中国）
+    market_share_pct_leaders: {"CATL": 45.0, "BYD": 25.0, "中创新航": 7.0}
+    cr3_pct: 77.0
+    cr5_pct: 88.0
+    share_trend: rising
+    top_competitors: ["CATL", "BYD", "中创新航", "国轩高科", "亿纬锂能"]
+  - name: 储能电池
+    market_share_pct_leaders: {"CATL": 36.0, "BYD": 17.0, "亿纬锂能": 12.0}
+    cr3_pct: 65.0
+    cr5_pct: 80.0
+    share_trend: rising
+    top_competitors: ["CATL", "BYD", "亿纬锂能", "国轩高科", "海辰储能", "瑞浦兰钧"]
+  - name: 隔膜
+    market_share_pct_leaders: {"恩捷股份": 38.0, "星源材质": 14.0, "中材科技": 12.0}
+    cr3_pct: 64.0
+    cr5_pct: 82.0
+    share_trend: stable
+    top_competitors: ["恩捷股份", "星源材质", "中材科技", "沧州明珠"]
+
 customer_types:
   - 新能源车企（特斯拉/比亚迪/蔚来/理想/小鹏）
   - 储能系统集成商

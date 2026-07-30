@@ -36,6 +36,28 @@ key_players:
   - AGY（高模量特种）
   - Nippon Electric Glass（NEG）
 concentration: "全球 CR3: 约 50%（巨石/OC/CPIC/泰山合计）；中国 CR3: 约 65%（巨石/泰山/重庆国际）"
+
+# [v3 P5] 子赛道级数字字段
+subsegment_cr:
+  - name: 玻璃纤维（全球）
+    market_share_pct_leaders: {"中国巨石": 22.0, "Owens Corning": 14.0, "泰山玻纤": 10.0}
+    cr3_pct: 46.0
+    cr5_pct: 68.0
+    share_trend: rising
+    top_competitors: ["中国巨石", "Owens Corning", "泰山玻纤", "重庆国际", "Jushi USA"]
+  - name: 玻璃纤维（中国）
+    market_share_pct_leaders: {"中国巨石": 32.0, "泰山玻纤": 18.0, "重庆国际": 13.0}
+    cr3_pct: 63.0
+    cr5_pct: 78.0
+    share_trend: rising
+    top_competitors: ["中国巨石", "泰山玻纤", "重庆国际", "长海股份", "四川威玻"]
+  - name: 电子级玻纤布
+    market_share_pct_leaders: {"南亚 PCB": 22.0, "建滔积层板": 18.0, "生益科技": 14.0}
+    cr3_pct: 54.0
+    cr5_pct: 75.0
+    share_trend: rising
+    top_competitors: ["南亚 PCB", "建滔积层板", "生益科技", "联茂电子", "松下电工"]
+
 customer_types:
   - 风电叶片厂商（金风/远景/明阳/Vestas/Siemens Gamesa）
   - 汽车零部件（玻璃钢车身/电池盖板）

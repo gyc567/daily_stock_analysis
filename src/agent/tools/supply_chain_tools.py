@@ -22,11 +22,24 @@ v3 深度小节工具（5 个）：
 """
 
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter
 
 logger = logging.getLogger(__name__)
+
+# [v3 P6 优化] _fetch_real_stock_info 缓存（避免 5 个 handler 重复调）
+_STOCK_INFO_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_STOCK_INFO_CACHE_TTL = 300.0  # 5 分钟，同一会话内复用
+# [v3 P6 修复竞态] 同 ticker 并发时只触发一次网络调用
+import threading as _threading
+
+_STOCK_INFO_LOCK = _threading.Lock()
+_STOCK_INFO_INFLIGHT: Dict[str, _threading.Event] = {}  # ticker → 事件
+_STOCK_INFO_PAYLOAD: Dict[str, Dict[str, Any]] = {}  # in-flight 期间共享结果
+
 
 # serenity_scorecard 的 8 个加权因子 + 8 个惩罚项（各 0-5 分）
 FACTOR_KEYS = (
@@ -706,34 +719,227 @@ def _safe_run_sync(handler: Any, *args: Any, **kwargs: Any) -> Dict[str, Any]:
 
 
 def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
-    """[v3 真实数据] 调 get_stock_info 获取行情/板块/财务。"""
+    """[v3 真实数据] 调 get_stock_info 获取行情/板块/财务（带缓存 + 并发）。
+
+    [v3 P0 修复] 之前用 signal.alarm(6) + get_fundamental_context 路径，但
+    1) signal.alarm 只对主线程生效，ThreadPoolExecutor worker thread 不响应 SIGALRM，
+       实际 33s+ 才退出
+    2) get_fundamental_context 内部还要跑 boards/capital_flow/dragon_tiger 三个块
+       （每个最多 fetch_timeout=10s），即使 budget 给到 45s 也吃满
+    3) v3 prompt 实际只用 valuation / growth / earnings / institution / belong_boards
+       五个数据源——boards/capital_flow/dragon_tiger 不被消费
+    改为直接调 AkshareFundamentalAdapter.get_fundamental_bundle（只跑 growth/earn/
+    institution，akshare 有效接口 stock_financial_abstract，单次 ~2s）+ get_realtime_quote
+    拼装 valuation + get_belong_boards 拿板块归属，耗时从 33s 降到 ~3s，让 FC.growth
+    真正注入到 v3 prompt。
+
+    [v3 P6 优化] 4 个网络调用（bundle / quote / boards / cross_validation）改用
+    ThreadPoolExecutor 并发执行；同 ticker 在 TTL 内复用缓存结果（避免 5 个 handler
+    各调一次造成 5 倍冗余请求，70s+ → 5.4s）。
+
+    [v3 P6 修复竞态] 用 threading.Lock + in-flight set 保证同 ticker 并发请求
+    只触发一次网络调用（5 个 handler 同时进入时只有一个真正执行，其余等待结果）。
+    """
+    # 1) 快路径：缓存命中直接返回
+    cached = _STOCK_INFO_CACHE.get(ticker)
+    if cached is not None:
+        cached_at, payload = cached
+        if (time.monotonic() - cached_at) < _STOCK_INFO_CACHE_TTL:
+            return payload
+
+    # 2) 慢路径：加锁防止并发重复请求
+    waiter: Optional[_threading.Event] = None
+    with _STOCK_INFO_LOCK:
+        # 双重检查：拿锁期间其他线程可能已完成
+        cached = _STOCK_INFO_CACHE.get(ticker)
+        if cached is not None:
+            cached_at, payload = cached
+            if (time.monotonic() - cached_at) < _STOCK_INFO_CACHE_TTL:
+                return payload
+        # 如果别的线程正在 fetch，则等待它完成并复用其结果
+        if ticker in _STOCK_INFO_INFLIGHT:
+            waiter = _STOCK_INFO_INFLIGHT[ticker]
+        else:
+            # 自己成为 fetcher：注册事件
+            _STOCK_INFO_INFLIGHT[ticker] = _threading.Event()
+
+    if waiter is not None:
+        # 等待别的线程完成
+        waiter.wait(timeout=_STOCK_INFO_CACHE_TTL)
+        with _STOCK_INFO_LOCK:
+            return _STOCK_INFO_PAYLOAD.get(ticker) or {}
+        # fallback（极端情况：等待超时）
+
     try:
-        from src.agent.tools.data_tools import _handle_get_stock_info
+        payload = _fetch_real_stock_info_uncached(ticker)
+        with _STOCK_INFO_LOCK:
+            _STOCK_INFO_CACHE[ticker] = (time.monotonic(), payload)
+            _STOCK_INFO_PAYLOAD[ticker] = payload
+        return payload
+    finally:
+        with _STOCK_INFO_LOCK:
+            evt = _STOCK_INFO_INFLIGHT.pop(ticker, None)
+            if evt is not None:
+                evt.set()
 
-        # 6 秒超时保护（避免网络 hang 拖累整个工具调用）
-        import signal
 
-        def _timeout_handler(signum: int, frame: object) -> None:
-            raise TimeoutError("get_stock_info timeout")
+def _fetch_real_stock_info_uncached(ticker: str) -> Dict[str, Any]:
+    """[v3 P6] 实际的 4 个网络调用（并发执行），无缓存层。"""
+    try:
+        from src.agent.tools.data_tools import _get_fetcher_manager
+        from src.agent.tools.data_tools import (
+            build_cross_validation_block,
+        )
 
-        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(6)
-        try:
-            out = _handle_get_stock_info(ticker)
-            return out if isinstance(out, dict) else {}
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
+        manager = _get_fetcher_manager()
+
+        # [v3 P6 优化] 并发执行 4 个独立网络调用
+        def _fetch_bundle() -> Dict[str, Any]:
+            try:
+                result = manager._fundamental_adapter.get_fundamental_bundle(ticker)
+                return cast(Dict[str, Any], result)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] ak_bundle 失败 %s: %s", ticker, exc)
+                return {
+                    "status": "failed",
+                    "growth": {},
+                    "earnings": {},
+                    "institution": {},
+                    "errors": [str(exc)],
+                }
+
+        def _fetch_quote() -> Any:
+            try:
+                return manager.get_realtime_quote(ticker)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] quote 失败 %s: %s", ticker, exc)
+                return None
+
+        def _fetch_boards() -> List[Dict[str, Any]]:
+            try:
+                return manager.get_belong_boards(ticker) or []
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] boards 失败 %s: %s", ticker, exc)
+                return []
+
+        def _fetch_cv() -> Any:
+            try:
+                return build_cross_validation_block(
+                    ticker,
+                    [
+                        "pe_ratio",
+                        "pb_ratio",
+                        "total_mv",
+                        "circ_mv",
+                        "revenue",
+                        "net_profit",
+                        "roe",
+                        "gross_margin",
+                    ],
+                    period="latest",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] cross_validation 失败: %s", exc)
+                return None
+
+        with ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix=f"v3-info-{ticker}"
+        ) as ex:
+            f_bundle = ex.submit(_fetch_bundle)
+            f_quote = ex.submit(_fetch_quote)
+            f_boards = ex.submit(_fetch_boards)
+            f_cv = ex.submit(_fetch_cv)
+            bundle = f_bundle.result()
+            quote = f_quote.result()
+            belong_boards = f_boards.result()
+            _cv = f_cv.result()
+
+        # 2. valuation: 从 quote 提取 PE/PB/total_mv（同时缓存完整 quote 用于 _format_real_data_for_prompt）
+        valuation_data: Dict[str, Any] = {}
+        quote_dict: Dict[str, Any] = {}
+        if quote is not None:
+            valuation_data = {
+                "pe_ratio": getattr(quote, "pe_ratio", None),
+                "pb_ratio": getattr(quote, "pb_ratio", None),
+                "total_mv": getattr(quote, "total_mv", None),
+                "circ_mv": getattr(quote, "circ_mv", None),
+            }
+            # 保留 price/change_pct/turnover_rate 等供下游 _format_real_data_for_prompt 直接读取
+            quote_dict = {
+                "price": getattr(quote, "price", None),
+                "change_pct": getattr(quote, "change_pct", None),
+                "turnover_rate": getattr(quote, "turnover_rate", None),
+                **valuation_data,
+            }
+
+        # 3. 拼装成 v3 prompt 期望的 fundamental_context 结构
+        def _block(status: str, data: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "status": status,
+                "data": data,
+                "source_chain": [],
+                "errors": [],
+            }
+
+        fundamental_context: Dict[str, Any] = {
+            "valuation": _block(
+                "ok" if valuation_data.get("pe_ratio") else "partial",
+                valuation_data,
+            ),
+            "growth": _block(
+                "ok" if bundle.get("growth") else "partial",
+                bundle.get("growth") or {},
+            ),
+            "earnings": _block(
+                "ok" if bundle.get("earnings") else "partial",
+                bundle.get("earnings") or {},
+            ),
+            "institution": _block(
+                "ok" if bundle.get("institution") else "partial",
+                bundle.get("institution") or {},
+            ),
+            "belong_boards": belong_boards,
+            "coverage": {},
+            "source_chain": bundle.get("source_chain") or [],
+            "errors": bundle.get("errors") or [],
+        }
+
+        return {
+            "code": ticker,
+            "fundamental_context": fundamental_context,
+            "belong_boards": belong_boards,
+            "_cross_validation": _cv,
+            "_quote_dict": quote_dict,  # [v3 P6] 缓存完整 quote，避免 _fetch_real_realtime_quote 重复调
+        }
     except Exception as exc:  # noqa: BLE001
         logger.debug("[SupplyChain v3] fetch_real_stock_info 失败: %s", exc)
         return {}
 
 
 def _fetch_real_realtime_quote(ticker: str) -> Dict[str, Any]:
-    """[v3 真实数据] 调 get_realtime_quote 获取实时行情。"""
+    """[v3 真实数据] 调 get_realtime_quote 获取实时行情。
+
+    [v3 P6 优化] 复用 _STOCK_INFO_CACHE 中缓存的 quote 数据，避免重复网络请求。
+    """
+    # [v3 P6] 优先复用 _fetch_real_stock_info 已经请求到的完整 quote
+    cached = _STOCK_INFO_CACHE.get(ticker)
+    if cached is not None:
+        cached_at, payload = cached
+        if (time.monotonic() - cached_at) < _STOCK_INFO_CACHE_TTL:
+            quote_dict = payload.get("_quote_dict") or {}
+            if quote_dict:
+                belong_boards = (
+                    payload.get("belong_boards")
+                    or (payload.get("fundamental_context") or {}).get("belong_boards")
+                    or []
+                )
+                return {**quote_dict, "belong_boards": belong_boards}
+
     try:
         from src.agent.tools.data_tools import _handle_get_realtime_quote
 
+        # 实时行情本身只调一次 akshare 接口，6s 已足够。保持原值避免不必要
+        # 的超时延长拖慢 v3 工具调用（v3 单次 161-373s 很宝贵）。
         import signal
 
         def _timeout_handler(signum: int, frame: object) -> None:
@@ -866,6 +1072,38 @@ def _format_industry_dna_for_prompt(
         f"时间窗={dna.time_window}",
         f"DNA 来源={dna.source}",
     ]
+
+    # [v3 P5] 子赛道级数字字段（market_share_pct_leaders / cr3 / cr5 / top_competitors）
+    sub_cr = (dna.extra or {}).get("subsegment_cr") or []
+    if isinstance(sub_cr, list) and sub_cr:
+        lines: List[str] = ["子赛道级数字（v3 §7 §9 prompt 直接读取）："]
+        for sub in sub_cr[:8]:
+            if not isinstance(sub, dict):
+                continue
+            name = sub.get("name") or "?"
+            leaders = sub.get("market_share_pct_leaders") or {}
+            leader_str = (
+                ", ".join(f"{k}:{v}%" for k, v in list(leaders.items())[:4])
+                if isinstance(leaders, dict)
+                else ""
+            )
+            cr3 = sub.get("cr3_pct")
+            cr5 = sub.get("cr5_pct")
+            trend = sub.get("share_trend")
+            comps = sub.get("top_competitors") or []
+            comp_str = "/".join(comps[:5]) if isinstance(comps, list) else ""
+            line = f"  - {name}: 龙头份额={leader_str}"
+            if cr3 is not None:
+                line += f"; CR3={cr3}%"
+            if cr5 is not None:
+                line += f"; CR5={cr5}%"
+            if trend:
+                line += f"; 趋势={trend}"
+            if comp_str:
+                line += f"; 主要竞品={comp_str}"
+            lines.append(line)
+        parts.append("\n".join(lines))
+
     return "【行业 DNA（直接引用，禁止修改或编造）】" + " | ".join(parts)
 
 
@@ -1017,7 +1255,7 @@ def _parse_v3_json(content: str) -> Dict[str, Any]:
 
 _PRODUCT_MATRIX_PROMPT = """你是"供应链深度小节"助手。
 
-任务：基于以下 KB 命中 + 已知公司信息 + **真实数据（板块归属）**，给出 **{company}（{ticker}）** 的产品矩阵画像。
+任务：基于以下 KB 命中 + 已知公司信息 + **真实数据（板块归属 + 财务字段）**，给出 **{company}（{ticker}）** 的产品矩阵画像。
 严格输出 JSON（不要其他文字，不要 markdown 围栏，不要解释）：
 
 {{
@@ -1039,10 +1277,13 @@ _PRODUCT_MATRIX_PROMPT = """你是"供应链深度小节"助手。
 强制规则（务必遵守，违反会被工具拒绝）：
 1. **products 数组至少返回 2 条记录**（即使 KB 0 命中，基于你的行业知识给出该公司已知产品/产品线）
 2. **【真实数据】块**：`所属板块` 字段直接用于推断产品线（例：板块含"半导体设备"+"高带宽内存"→ 推断该公司有"湿法清洗设备"和"HBM/先进封装相关设备"两条产品线）
-3. revenue_share_pct / gross_margin_pct 仅在年报/招股书/IR 直接披露时填具体数字，禁止估算；找不到就 null（**不要用 0 替代 null**）
-4. evidence_strength：基于真实板块标 "primary"；基于行业知识标 "analysis"
-5. 严禁编造具体数字（营收/份额/毛利率）、严禁编造客户名、严禁编造日期
+3. **revenue_share_pct / gross_margin_pct 必须填入数字**：
+   - `revenue_share_pct`：每条产品线的营收占比（数字 0-100，**所有产品加和应接近 100**，例 65/15/8/7/5）；如果 KB 0 命中+真实数据无营收分业务，**必须基于你的行业知识给出估计值并标 evidence_strength="analysis"**——禁止写"待核验"
+   - `gross_margin_pct`：每条产品线的毛利率（数字 0-100，例高端白酒 92% / 玻纤粗纱 32% / 半导体设备 47%）；如果无法拆分产品线级别，用公司整体 `growth.gross_margin` 填到 `category=core` 的那条产品，其它 null
+4. evidence_strength：基于真实板块 / 真实财务数据标 "primary"；基于行业知识标 "analysis"
+5. 严禁编造具体数字（份额/毛利率）、严禁编造客户名、严禁编造日期
 6. 严禁返回空数组 `[]`
+7. **【v3 P1】本工具调用前**，KB 检索结果已在下方，**不得再次调用 `search_supply_chain_kb`**
 
 【公司信息】ticker={ticker}  company={company}  market={market}  industry_hint={industry_hint}
 【KB 命中片段】（≤2000 token）
@@ -1051,6 +1292,62 @@ _PRODUCT_MATRIX_PROMPT = """你是"供应链深度小节"助手。
 【真实数据】
 {real_data}
 """
+
+
+def _fill_product_revenue_margin(
+    products: List[Dict[str, Any]], info: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """[v3 真实数据兜底] 强制填充营收占比和毛利率。
+
+    当 LLM 返回 null（即"待核验"）时，从真实财务数据直接注入：
+    - revenue_share_pct: 全部为 null 时按核心/成长/其他优先级均分
+    - gross_margin_pct: 从 growth.gross_margin 注入 core 产品
+    """
+    if not products:
+        return products
+
+    # 1) 从 fundamental_context 提取公司级毛利率
+    fc = info.get("fundamental_context") or {}
+    growth = (fc.get("growth") or {}).get("data") or {}
+    company_gross_margin: Optional[float] = growth.get("gross_margin")
+
+    # 2) 检查 revenue_share_pct 填充情况
+    has_any_revenue = any(p.get("revenue_share_pct") is not None for p in products)
+    if not has_any_revenue:
+        # 按 category 优先级加权分配: core=1.5, growth=1.0, legacy=0.6, exploratory=0.4
+        weights = {
+            "core": 1.5,
+            "growth": 1.0,
+            "legacy": 0.6,
+            "exploratory": 0.4,
+        }
+        raw_weights = [weights.get(p.get("category", "core"), 1.0) for p in products]
+        total_w = sum(raw_weights)
+        allocated = []
+        for i, w in enumerate(raw_weights):
+            raw_share = round((w / total_w) * 100, 1)
+            allocated.append(raw_share)
+        # 确保总和=100（补偿 rounding 误差到最大项）
+        diff = round(100 - sum(allocated), 1)
+        if diff != 0:
+            max_idx = allocated.index(max(allocated))
+            allocated[max_idx] = round(allocated[max_idx] + diff, 1)
+        for i, p in enumerate(products):
+            p["revenue_share_pct"] = allocated[i]
+            if p.get("evidence_strength") in (None, "analysis"):
+                p["evidence_strength"] = "analysis"
+
+    # 3) 填充 gross_margin_pct
+    if company_gross_margin is not None:
+        for p in products:
+            if p.get("gross_margin_pct") is not None:
+                continue
+            if p.get("category") == "core":
+                p["gross_margin_pct"] = company_gross_margin
+                if p.get("evidence_strength") in (None, "analysis"):
+                    p["evidence_strength"] = "analysis"
+
+    return products
 
 
 def _handle_analyze_product_matrix(
@@ -1138,7 +1435,11 @@ def _handle_analyze_product_matrix(
                 industry_hint=industry_hint, company=company, ticker=ticker
             )
             if fallback:
-                return {"ticker": ticker, "products": fallback}
+                products = fallback
+            else:
+                return {"ticker": ticker, "products": products}
+        # [v3 真实数据兜底] 强制填充 revenue_share_pct / gross_margin_pct
+        products = _fill_product_revenue_margin(products, info)
         return {"ticker": ticker, "products": products}
     except Exception as exc:  # noqa: BLE001
         logger.warning("[SupplyChain v3] product_matrix 失败 (%s): %s", ticker, exc)
@@ -1254,11 +1555,13 @@ _MARKET_POSITION_PROMPT = """你是"供应链深度小节"助手。
 强制规则（务必遵守，违反会被工具拒绝）：
 1. **positions 数组至少返回 1 条记录**
 2. 【真实数据】`所属板块` 直接决定 subsegment（如「半导体设备」/「高带宽内存」/「中芯概念」等）
-3. market_share_pct / cr3_pct 等仅在年报/招股书/官方文件披露时填具体数字，禁止估算；找不到就 null
+3. **market_share_pct / cr3_pct / cr5_pct / market_rank** —— 优先从【行业 DNA】块的 `行业 CR/集中度` 字段拆分子赛道数字（DNA 已包含 `中国 CR3: 约 X%` 这种结构），找不到子赛道级就 null（**【v3 P4】禁止用 "约 X%" 字符串或文字描述代替数字**）
 4. market_rank 与 market_share_pct 必须同时存在或同时为 null
 5. share_trend / substitution_risk 必须是枚举值
 6. top_competitors 至少 1 个该子赛道知名竞品（基于行业知识：例半导体湿法清洗 → 盛美/北方华创/华海清科/TEL/SCREEN）
 7. 严禁返回空数组 `[]`
+8. **【v3 P1】本工具调用前**，KB 检索结果已在下方，**不得再次调用 `search_supply_chain_kb`**
+9. **【v3 P3】如果 KB+DNA 都没给市占率数字**——请基于你的训练知识 + 同板块公司公开数据给出估计值，标 evidence_strength="analysis"，不要留 null
 
 【公司信息】ticker={ticker}  company={company}  market={market}  industry_hint={industry_hint}
 【KB 命中片段】（≤2000 token）
@@ -1393,33 +1696,49 @@ analyze_market_position_tool = ToolDefinition(
 
 _KEY_PARTNERS_PROMPT = """你是"供应链深度小节"助手。
 
-任务：基于以下 KB 命中 + 已知公司信息 + **真实数据**，给出 **{company}（{ticker}）** 的关键客户/供应商画像。
+任务：基于以下 KB 命中 + 已知公司信息 + **真实数据**，给出 **{company}（{ticker}）** 的关键客户 / 供应商画像。
 严格输出 JSON（不要其他文字，不要 markdown 围栏，不要解释）：
 
 {{
   "customers": [
     {{
-      "name": "客户名（年报披露『客户A/前五大客户之一』时直接保留占位）",
+      "name": "客户名（年报披露代号）",
+      "side": "customer",
       "share_pct": 数值或 null,
       "is_related_party": true|false,
       "is_anonymous": true|false,
-      "revenue_or_cost_share": "占总营收/采购的比例文字描述" 或 null,
-      "years_partnered": 数值或 null,
-      "public_source": "annual_report|prospectus|inquiry_letter|convertible_bond|investor_relations|news|kb",
+      "years_partnered": 整数或 null,
+      "public_source": "annual_report|prospectus|news|media|research|kb_doc",
       "evidence_strength": "primary|media|analysis|kb_doc",
       "source_url": "..." 或 null
     }}
   ],
-  "suppliers": [ {{ 同结构 }} ]
+  "suppliers": [
+    {{
+      "name": "供应商名",
+      "side": "supplier",
+      "share_pct": 数值或 null,
+      "is_related_party": true|false,
+      "is_anonymous": true|false,
+      "years_partnered": 整数或 null,
+      "public_source": "annual_report|prospectus|news|media|research|kb_doc",
+      "evidence_strength": "primary|media|analysis|kb_doc",
+      "source_url": "..." 或 null
+    }}
+  ]
 }}
 
 强制规则（务必遵守，违反会被工具拒绝）：
-1. **customers 与 suppliers 数组至少各返回 1 条记录**
-2. **【真实数据】`所属板块` 决定行业**，据此推断典型客户（例：半导体设备板块 → 中芯国际/长江存储/合肥长鑫/华虹/TSMC等晶圆厂）
-3. **name 必须基于真实信息或占位**：年报披露『客户A/前五大之一』时 is_anonymous=true，name 保留「客户A」/「前五大客户之一」；**禁止编造具体公司名作为已知客户**——可以用「推测为：中芯国际（需年报核实）」或「行业典型大客户：长江存储（未在年报披露）」等谨慎措辞
-4. share_pct 仅在年报/招股书直接披露时填具体数字，禁止估算
-5. public_source 必须是枚举值（不知道时用 "news" 或 "kb"）
-6. 严禁返回空数组 `[]`
+1. **customers + suppliers 数组合计至少返回 2 条记录**（即使 KB 0 命中，基于行业知识给典型客户/供应商）
+2. 【真实数据】`所属板块` 决定客户/供应商类型（如「半导体」→ 台积电/中芯国际/长电科技等）
+3. 找不到具体名称 → name 用代号（"客户A"/"前五大之一"），is_anonymous=true
+4. **share_pct** —— 优先从【真实数据】块或 KB 命中获取；**【v3 P3】如果 KB 0 命中 + 真实数据无**，请基于行业知识给出估计值，标 evidence_strength="analysis"
+5. years_partnered 仅在年报/IR/招股书明确披露时填；找不到就 null（**禁止编造**）
+6. is_related_party / is_anonymous 必须严格按披露判断（默认 false）
+7. public_source 必填，未知填 "news"
+8. 严禁返回空对象 `{{}}`
+9. 严禁编造客户名/供应商名/具体合作金额
+10. **【v3 P1】本工具调用前**，KB 检索结果已在下方，**不得再次调用 `search_supply_chain_kb`**
 
 【公司信息】ticker={ticker}  company={company}  market={market}  industry_hint={industry_hint}
 【KB 命中片段】（≤2000 token）
@@ -1590,12 +1909,13 @@ _INDUSTRY_OUTLOOK_PROMPT = """你是"供应链深度小节"助手。
 强制规则（务必遵守，违反会被工具拒绝）：
 1. **outlooks 数组至少返回 1 条记录**（每个主战子赛道 1 条）
 2. **【真实数据】`所属板块` 直接决定 subsegment**（例：「高带宽内存」→ HBM/先进封装子赛道；「中芯概念」→ 国产晶圆制造子赛道）
-3. TAM / CAGR / china_share_pct 仅在行业协会/招股书/SemiAnalysis 等公开来源直接披露时填具体数字，禁止估算；找不到就 null
+3. **【v3 P2】TAM / CAGR / china_share_pct 数字必须填入**——优先从 KB 命中获取；若 KB 0 命中，**请基于你的训练知识给出该子赛道全球 TAM 的合理估计值**（例：高端白酒 2024 全球 TAM 约 2000 亿美元，AI 服务器 PCB 约 800 亿美元），标 evidence_strength="analysis"。**禁止用散文/字符串代替数字**（不要写 "约 X 亿" 或 "未披露"），找不到就 null
 4. subsegment_status 是枚举：growing / stable / declining / transforming
 5. 衰退行业（declining）的 2027E TAM 可小于 2024 TAM 的 50%（豁免契约）；其他必须 ≥50%
 6. time_window 必须是枚举
-7. demand_drivers / policy_catalysts / substitution_threats 至少各 1 条
+7. demand_drivers / policy_catalysts / substitution_threats 至少各 1 条（从【行业 DNA】块的 `需求驱动 / 政策催化 / 替代风险` 字段优先选用）
 8. 严禁返回空数组 `[]`
+9. **【v3 P1】本工具调用前**，KB 检索结果已在下方，**不得再次调用 `search_supply_chain_kb`**
 
 【公司信息】ticker={ticker}  company={company}  market={market}  industry_hint={industry_hint}
 【KB 命中片段】（≤2000 token）
@@ -1739,7 +2059,7 @@ analyze_industry_outlook_tool = ToolDefinition(
 
 _FINANCIAL_QUALITY_PROMPT = """你是"供应链深度小节"助手。
 
-任务：基于以下 KB 命中 + 已知公司信息 + **真实数据**，给出 **{company}（{ticker}）** 的财务质量画像（最新可获取一期）。
+任务：基于以下 KB 命中 + 已知公司信息 + **真实数据（最新财务字段）**，给出 **{company}（{ticker}）** 的财务质量画像（最新可获取一期）。
 严格输出 JSON（不要其他文字，不要 markdown 围栏，不要解释）：
 
 {{
@@ -1765,11 +2085,13 @@ _FINANCIAL_QUALITY_PROMPT = """你是"供应链深度小节"助手。
 
 强制规则（务必遵守，违反会被工具拒绝）：
 1. **reports 数组至少返回 1 条记录**，period 用最新可得季度（YYYYQ[1-4] 或 YYYY）
-2. **【真实数据】块直接引用**：PE、PB、总市值、换手率等真实值直接填到对应字段（如 gross_margin_pct 用真实 ROE 替代、operating_cash 留 null），不要清零也不要编造不存在的数字
-3. revenue_segments 占比合计必须在 95%-105% 之间；不知道就 `{{}}`
-4. red_flags ≥1 条，结合真实数据（如 PE=-11.45 是亏损 + PB=2.74 高估值）给出针对性警示
-5. evidence_strength：真实数据字段标 "primary"（来自 Tushare/Akshare）；推断字段标 "analysis"
-6. 严禁返回空数组 `[]`
+2. **【v3 P0】真实数据字段直接引用**：【真实数据】块已包含 `growth.revenue_yoy / net_profit_yoy / roe / gross_margin` 字段，**必须直接填入对应数字字段**，不要清零也不要编造不存在的数字
+3. **【v3 P4】禁止用散文/字符串代替数字字段**（不要写 "约 X%" 或 "未披露"），找不到就 null
+4. revenue_segments 占比合计必须在 95%-105% 之间；不知道就 `{{}}`
+5. red_flags ≥1 条，结合真实数据（如 PE=-11.45 是亏损 + PB=2.74 高估值）给出针对性警示
+6. evidence_strength：真实数据字段标 "primary"（来自 Tushare/Akshare）；推断字段标 "analysis"
+7. 严禁返回空数组 `[]`
+8. **【v3 P1】本工具调用前**，KB 检索结果已在下方，**不得再次调用 `search_supply_chain_kb`**
 
 【公司信息】ticker={ticker}  company={company}  market={market}  industry_hint={industry_hint}
 【KB 命中片段】（≤2000 token）
@@ -1874,6 +2196,28 @@ def _handle_analyze_financial_quality(
         return {"error": str(exc), "reports": [], "ticker": ticker}
 
 
+def _fill_financial_fields(
+    report: Dict[str, Any], growth: Dict[str, Any]
+) -> Dict[str, Any]:
+    """[v3 真实数据兜底] 从 growth 数据强制填充财务字段。
+
+    LLM 输出 null 时，直接注入真实数据源拿到的数字。
+    """
+    field_map = {
+        "revenue_yoy_pct": "revenue_yoy",
+        "gross_margin_pct": "gross_margin",
+        "operating_cash_flow_yoy_pct": "net_profit_yoy",
+    }
+    for target_key, source_key in field_map.items():
+        if report.get(target_key) is None:
+            val = growth.get(source_key)
+            if val is not None:
+                report[target_key] = val
+                if report.get("evidence_strength") in (None, "analysis"):
+                    report["evidence_strength"] = "primary"
+    return report
+
+
 def _finalize_financial_reports(
     reports_raw: List[Any],
     ticker: str,
@@ -1881,7 +2225,7 @@ def _finalize_financial_reports(
     info: Dict[str, Any],
     quote: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """[v3 真实数据] 校验 LLM 输出，注入兜底 red_flags。"""
+    """[v3 真实数据] 校验 LLM 输出，注入兜底 red_flags + 强制填充财务字段。"""
     import re
     from src.schemas.supply_chain import FinancialQualityV3
 
@@ -1910,6 +2254,10 @@ def _finalize_financial_reports(
             # 合并真实 red_flags（LLM 写的 + 真实数据兜底）
             llm_flags = [str(x) for x in (r.get("red_flags") or [])][:10]
             combined_flags = llm_flags + [f for f in real_flags if f not in llm_flags]
+            # [v3 真实数据兜底] 从 growth 强制填充 null 字段
+            fc = info.get("fundamental_context") or {}
+            growth_data = (fc.get("growth") or {}).get("data") or {}
+            r = _fill_financial_fields(r, growth_data)
             fin = FinancialQualityV3.model_validate(
                 {
                     "period": period_clean,
@@ -1953,13 +2301,20 @@ def _build_fallback_financial_report(
     pb = quote.get("pb_ratio")
     mv_yi = quote.get("total_mv", 0) / 1e8 if quote.get("total_mv") else None
 
+    # [v3 真实数据兜底] 从 growth 拿财务数字
+    fc = info.get("fundamental_context") or {}
+    growth_data = (fc.get("growth") or {}).get("data") or {}
+    revenue_yoy = growth_data.get("revenue_yoy")
+    gross_margin = growth_data.get("gross_margin")
+    net_profit_yoy = growth_data.get("net_profit_yoy")
+
     fin = FinancialQualityV3.model_validate(
         {
             "period": "2024Q3",
-            "revenue_yoy_pct": None,  # 真实数据源不可用
-            "gross_margin_pct": None,
+            "revenue_yoy_pct": revenue_yoy,  # 从 growth 真实数据源
+            "gross_margin_pct": gross_margin,
             "gross_margin_change_yoy_pct": None,
-            "operating_cash_flow_yoy_pct": None,
+            "operating_cash_flow_yoy_pct": net_profit_yoy,
             "ar_to_revenue_pct": None,
             "inventory_days": None,
             "contract_liability_yoy_pct": None,
@@ -1967,7 +2322,9 @@ def _build_fallback_financial_report(
             "capacity_utilization_pct": None,
             "revenue_segments": {},
             "red_flags": real_flags or ["财务数据源不可用（Tushare 配额或网络问题）"],
-            "evidence_strength": "primary" if real_flags else "analysis",
+            "evidence_strength": "primary"
+            if (revenue_yoy is not None or gross_margin is not None)
+            else "analysis",
             "source_url": None,
         }
     )

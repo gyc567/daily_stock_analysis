@@ -33,6 +33,28 @@ key_players:
   - 舍得酒业/水井坊（次高端）
   - 习酒/郎酒（酱香次高端）
 concentration: "高端 CR3: 90%+（茅台/五粮液/老窖）；酱香 CR3: 95%+（茅台/习酒/郎酒）；全行业 CR10: 50%+"
+
+# [v3 P5] 子赛道级数字字段，v3 §7 prompt 直接读
+subsegment_cr:
+  - name: 高端白酒
+    market_share_pct_leaders: {"贵州茅台": 33.0, "五粮液": 17.0, "泸州老窖": 8.0}
+    cr3_pct: 58.0
+    cr5_pct: 75.0
+    share_trend: rising
+    top_competitors: ["贵州茅台", "五粮液", "泸州老窖", "山西汾酒", "洋河股份"]
+  - name: 酱香型
+    market_share_pct_leaders: {"贵州茅台": 70.0, "习酒": 12.0, "郎酒": 8.0}
+    cr3_pct: 90.0
+    cr5_pct: 95.0
+    share_trend: rising
+    top_competitors: ["贵州茅台", "习酒", "郎酒", "国台", "金沙"]
+  - name: 次高端
+    market_share_pct_leaders: {"山西汾酒": 18.0, "洋河股份": 16.0, "舍得酒业": 8.0}
+    cr3_pct: 42.0
+    cr5_pct: 60.0
+    share_trend: stable
+    top_competitors: ["山西汾酒", "洋河股份", "舍得酒业", "水井坊", "古井贡酒"]
+
 customer_types:
   - 高端商务宴请
   - 礼品市场
