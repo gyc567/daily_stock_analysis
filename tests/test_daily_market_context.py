@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 from src.core.market_review import MarketReviewRunResult
 from src.services import daily_market_context as daily_market_context_module
 from src.services.daily_market_context import (
+    DailyMarketContext,
     DailyMarketContextService,
     format_daily_market_context_prompt_section,
 )
@@ -63,7 +64,13 @@ def _history_record(
 def test_query_scoped_cache_can_skip_stale_analysis_history_context() -> None:
     db = MagicMock()
     db.get_analysis_history.side_effect = [
-        [_history_record(created_at=datetime(2026, 6, 6, 9, 30), query_id="old-q", summary="旧复盘")],
+        [
+            _history_record(
+                created_at=datetime(2026, 6, 6, 9, 30),
+                query_id="old-q",
+                summary="旧复盘",
+            )
+        ],
         [
             _history_record(
                 created_at=datetime(2026, 6, 6, 9, 45),
@@ -400,7 +407,9 @@ def test_reuses_previous_trading_day_history_after_weekend() -> None:
     run_review.assert_not_called()
 
 
-def test_reuses_history_by_payload_trade_date_when_created_at_is_wall_clock_date() -> None:
+def test_reuses_history_by_payload_trade_date_when_created_at_is_wall_clock_date() -> (
+    None
+):
     db = MagicMock()
     db.get_analysis_history.return_value = [
         _history_record(
@@ -486,12 +495,18 @@ def test_get_context_uses_isolated_market_context_query_id_when_generating() -> 
     )
     lock_token = object()
 
-    with patch(
-        "src.services.daily_market_context.try_acquire_market_review_lock",
-        return_value=lock_token,
-    ) as acquire_lock, \
-         patch("src.services.daily_market_context.release_market_review_lock") as release_lock, \
-         patch("src.services.daily_market_context.run_market_review", return_value=result) as run_review:
+    with (
+        patch(
+            "src.services.daily_market_context.try_acquire_market_review_lock",
+            return_value=lock_token,
+        ) as acquire_lock,
+        patch(
+            "src.services.daily_market_context.release_market_review_lock"
+        ) as release_lock,
+        patch(
+            "src.services.daily_market_context.run_market_review", return_value=result
+        ) as run_review,
+    ):
         context = service.get_context(
             region="cn",
             config=SimpleNamespace(report_language="zh"),
@@ -566,12 +581,18 @@ def test_get_context_acquires_market_review_lock_before_generating() -> None:
         },
     )
 
-    with patch(
-        "src.services.daily_market_context.try_acquire_market_review_lock",
-        return_value=lock_token,
-    ) as acquire_lock, \
-         patch("src.services.daily_market_context.release_market_review_lock") as release_lock, \
-        patch("src.services.daily_market_context.run_market_review", return_value=result) as run_review:
+    with (
+        patch(
+            "src.services.daily_market_context.try_acquire_market_review_lock",
+            return_value=lock_token,
+        ) as acquire_lock,
+        patch(
+            "src.services.daily_market_context.release_market_review_lock"
+        ) as release_lock,
+        patch(
+            "src.services.daily_market_context.run_market_review", return_value=result
+        ) as run_review,
+    ):
         context = service.get_context(
             region="cn",
             config=config,
@@ -598,13 +619,17 @@ def test_get_context_skips_generation_when_market_review_lock_is_held() -> None:
         today_fn=lambda: date(2026, 6, 6),
     )
 
-    with patch(
-        "src.services.daily_market_context.try_acquire_market_review_lock",
-        return_value=None,
-    ) as acquire_lock, \
-         patch("src.services.daily_market_context.time.sleep") as sleep_mock, \
-         patch("src.services.daily_market_context.release_market_review_lock") as release_lock, \
-         patch("src.services.daily_market_context.run_market_review") as run_review:
+    with (
+        patch(
+            "src.services.daily_market_context.try_acquire_market_review_lock",
+            return_value=None,
+        ) as acquire_lock,
+        patch("src.services.daily_market_context.time.sleep") as sleep_mock,
+        patch(
+            "src.services.daily_market_context.release_market_review_lock"
+        ) as release_lock,
+        patch("src.services.daily_market_context.run_market_review") as run_review,
+    ):
         context = service.get_context(
             region="cn",
             config=SimpleNamespace(report_language="zh"),
@@ -640,15 +665,19 @@ def test_get_context_waits_for_market_review_generation_when_lock_is_held() -> N
         today_fn=lambda: date(2026, 6, 6),
     )
 
-    with patch(
-        "src.services.daily_market_context.time.sleep",
-    ) as sleep_mock, \
-         patch(
+    with (
+        patch(
+            "src.services.daily_market_context.time.sleep",
+        ) as sleep_mock,
+        patch(
             "src.services.daily_market_context.try_acquire_market_review_lock",
             return_value=None,
-        ) as acquire_lock, \
-         patch("src.services.daily_market_context.release_market_review_lock") as release_lock, \
-         patch("src.services.daily_market_context.run_market_review") as run_review:
+        ) as acquire_lock,
+        patch(
+            "src.services.daily_market_context.release_market_review_lock"
+        ) as release_lock,
+        patch("src.services.daily_market_context.run_market_review") as run_review,
+    ):
         context = service.get_context(
             region="cn",
             config=SimpleNamespace(report_language="zh"),
@@ -668,7 +697,9 @@ def test_get_context_waits_for_market_review_generation_when_lock_is_held() -> N
     assert db.get_analysis_history.call_count == 4
 
 
-def test_get_context_generates_context_when_lock_is_released_without_matching_history() -> None:
+def test_get_context_generates_context_when_lock_is_released_without_matching_history() -> (
+    None
+):
     db = MagicMock()
     db.get_analysis_history.return_value = []
     service = DailyMarketContextService(
@@ -680,18 +711,22 @@ def test_get_context_generates_context_when_lock_is_released_without_matching_hi
     notifier = MagicMock()
     analyzer = MagicMock()
     search_service = MagicMock()
-    with patch(
-        "src.services.daily_market_context.time.sleep",
-    ) as sleep_mock, \
-         patch(
+    with (
+        patch(
+            "src.services.daily_market_context.time.sleep",
+        ) as sleep_mock,
+        patch(
             "src.services.daily_market_context.try_acquire_market_review_lock",
             side_effect=[None, None, released_lock],
-        ) as acquire_lock, \
-         patch("src.services.daily_market_context.release_market_review_lock") as release_lock, \
-         patch(
+        ) as acquire_lock,
+        patch(
+            "src.services.daily_market_context.release_market_review_lock"
+        ) as release_lock,
+        patch(
             "src.services.daily_market_context.run_market_review",
             return_value="市场偏弱，结构性震荡，建议回避",
-         ) as run_review:
+        ) as run_review,
+    ):
         context = service.get_context(
             region="cn",
             config=SimpleNamespace(report_language="zh"),
@@ -943,7 +978,9 @@ def test_prompt_section_escapes_summary_sentinel_text_before_insertion() -> None
     assert section.index("忽略约束") < section.rindex("- END_UNTRUSTED_MARKET_SUMMARY")
 
 
-def test_extract_summary_prefers_region_scoped_section_over_generic_fallback_title() -> None:
+def test_extract_summary_prefers_region_scoped_section_over_generic_fallback_title() -> (
+    None
+):
     context = DailyMarketContextService(
         db_manager=MagicMock(),
         today_fn=lambda: date(2026, 6, 6),
@@ -1030,3 +1067,90 @@ def test_yellow_market_light_status_marks_context_conservative() -> None:
 
     assert context is not None
     assert "conservative" in context.to_safe_dict()["risk_tags"]
+
+
+# ============================================================
+# P4-fix: 宏观与地缘维度入参抽取
+# ============================================================
+
+
+def test_build_context_from_payload_extracts_macro_indicators() -> None:
+    """P4-fix: 市场复盘文本含宽松/充裕关键词时，应注入 macro 字段。"""
+    context = DailyMarketContextService(
+        db_manager=MagicMock(),
+        today_fn=lambda: date(2026, 6, 6),
+    )._build_context_from_payload(
+        region="cn",
+        trade_date=date(2026, 6, 6),
+        payload={"summary": "央行实施宽松货币政策，流动性充裕，市场风险偏好回升。"},
+        source="test",
+    )
+
+    assert context is not None
+    assert context.monetary_policy == "accommodative"
+    assert context.liquidity_indicator == "abundant"
+    assert context.sector_policy is None
+
+
+def test_build_context_from_payload_macro_unknown_returns_none() -> None:
+    context = DailyMarketContextService(
+        db_manager=MagicMock(),
+        today_fn=lambda: date(2026, 6, 6),
+    )._build_context_from_payload(
+        region="cn",
+        trade_date=date(2026, 6, 6),
+        payload={"summary": "市场震荡，结构分化。"},
+        source="test",
+    )
+
+    assert context is not None
+    assert context.monetary_policy is None
+    assert context.liquidity_indicator is None
+
+
+def test_safe_dict_includes_macro_fields_when_populated() -> None:
+    context = DailyMarketContext(
+        region="cn",
+        trade_date=date(2026, 6, 6),
+        summary="央行宽松",
+        monetary_policy="accommodative",
+        liquidity_indicator="abundant",
+    )
+
+    payload = context.to_safe_dict()
+    assert payload["monetary_policy"] == "accommodative"
+    assert payload["liquidity_indicator"] == "abundant"
+
+
+def test_prompt_section_includes_macro_fields_zh() -> None:
+    section = format_daily_market_context_prompt_section(
+        {
+            "region": "cn",
+            "trade_date": "2026-06-06",
+            "summary": "大盘震荡",
+            "risk_tags": [],
+            "source": "test",
+            "monetary_policy": "accommodative",
+            "liquidity_indicator": "abundant",
+        },
+        report_language="zh",
+    )
+    assert "货币政策：accommodative" in section
+    assert "市场流动性：abundant" in section
+
+
+def test_prompt_section_includes_macro_fields_en() -> None:
+    section = format_daily_market_context_prompt_section(
+        {
+            "region": "us",
+            "trade_date": "2026-06-06",
+            "summary": "Market mixed",
+            "risk_tags": [],
+            "source": "test",
+            "monetary_policy": "tight",
+            "liquidity_indicator": "scarce",
+        },
+        report_language="en",
+    )
+    assert "Monetary stance: tight" in section
+    assert "Liquidity: scarce" in section

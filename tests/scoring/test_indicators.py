@@ -226,3 +226,33 @@ class TestMacro:
     def test_missing_data(self):
         result = score_macro()
         assert result["score"] == 50.0
+
+    def test_low_regulatory_risk(self):
+        result = score_macro(regulatory_risk="low")
+        assert result["score"] >= 70
+
+    def test_high_regulatory_risk(self):
+        result = score_macro(regulatory_risk="high")
+        assert result["score"] < 40
+
+    def test_all_indicators_weighted_sum_to_one(self):
+        result = score_macro(
+            monetary_policy="accommodative",
+            liquidity_indicator="abundant",
+            sector_policy="supportive",
+            us_china_impact="minimal",
+            regulatory_risk="low",
+        )
+        weights = [ind["weight"] for ind in result["indicators"]]
+        assert abs(sum(weights) - 1.0) < 1e-6
+        assert len(result["indicators"]) == 5
+
+    def test_indicators_have_no_missing_summary_when_data_present(self):
+        """P4-fix: 当任一字段填入时，UI 不应再显示"暂无可用数据"。"""
+        result = score_macro(
+            monetary_policy="neutral",
+            liquidity_indicator="moderate",
+            sector_policy="neutral",
+        )
+        summaries = [ind["summary"] for ind in result["indicators"]]
+        assert not any("数据缺失" in s for s in summaries)

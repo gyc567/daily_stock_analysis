@@ -46,13 +46,13 @@ def score_macro(
             {
                 "name": "货币政策",
                 "score": mp_score,
-                "weight": 0.25,
+                "weight": 0.22,
                 "basis": "rule",
                 "summary": f"货币政策立场:{monetary_policy}",
             }
         )
-        total_score += mp_score * 0.25
-        total_weight += 0.25
+        total_score += mp_score * 0.22
+        total_weight += 0.22
 
     if liquidity_indicator:
         liquidity_score = _score_liquidity(liquidity_indicator)
@@ -60,13 +60,13 @@ def score_macro(
             {
                 "name": "流动性",
                 "score": liquidity_score,
-                "weight": 0.20,
+                "weight": 0.18,
                 "basis": "rule",
                 "summary": f"市场流动性:{liquidity_indicator}",
             }
         )
-        total_score += liquidity_score * 0.20
-        total_weight += 0.20
+        total_score += liquidity_score * 0.18
+        total_weight += 0.18
 
     if sector_policy:
         policy_score = _score_sector_policy(sector_policy)
@@ -74,13 +74,13 @@ def score_macro(
             {
                 "name": "行业政策",
                 "score": policy_score,
-                "weight": 0.25,
+                "weight": 0.22,
                 "basis": "rule",
                 "summary": f"行业政策:{sector_policy}",
             }
         )
-        total_score += policy_score * 0.25
-        total_weight += 0.25
+        total_score += policy_score * 0.22
+        total_weight += 0.22
 
     if us_china_impact:
         impact_score = _score_us_china_impact(us_china_impact)
@@ -88,13 +88,27 @@ def score_macro(
             {
                 "name": "中美影响",
                 "score": impact_score,
-                "weight": 0.30,
+                "weight": 0.28,
                 "basis": "llm",
                 "summary": f"中美关系影响:{us_china_impact}",
             }
         )
-        total_score += impact_score * 0.30
-        total_weight += 0.30
+        total_score += impact_score * 0.28
+        total_weight += 0.28
+
+    if regulatory_risk:
+        rr_score = _score_regulatory_risk(regulatory_risk)
+        indicators.append(
+            {
+                "name": "监管风险",
+                "score": rr_score,
+                "weight": 0.10,
+                "basis": "llm",
+                "summary": f"监管风险:{regulatory_risk}",
+            }
+        )
+        total_score += rr_score * 0.10
+        total_weight += 0.10
 
     if total_weight > 0:
         final_score = total_score / total_weight
@@ -158,3 +172,16 @@ def _score_us_china_impact(impact: str) -> float:
         "severe": 20,
     }
     return float(impact_map.get(impact.lower(), DEFAULT_NEUTRAL_SCORE))
+
+
+def _score_regulatory_risk(risk: str) -> float:
+    """Score regulatory risk (low risk → high score).
+
+    监管风险越低，分数越高（更利好个股）。
+    """
+    risk_map = {
+        "low": 80,
+        "medium": 50,
+        "high": 25,
+    }
+    return float(risk_map.get(risk.lower(), DEFAULT_NEUTRAL_SCORE))

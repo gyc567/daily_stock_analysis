@@ -738,6 +738,39 @@ def get_weight_sum() -> float:
     return sum(DEFAULT_DIMENSION_WEIGHTS.values())
 ```
 
+#### 3.2.1 宏观与地缘维度数据源（P4-fix 2026-07-31）
+
+**问题**：六维详情面板"宏观与地缘"维度长期显示"该维度暂无可用数据，评分仅作参考"——根因是 `score_macro` 接受的 5 个键值（`monetary_policy` / `liquidity_indicator` / `sector_policy` / `us_china_impact` / `regulatory_risk`）在 `_extract_raw_data_from_context` 与 LLM `six_dimension_inputs` schema 中都没有填充链路，整条调用链上无任何节点负责产出。
+
+**修复（方案 B：行情层注入客观数据）**：
+
+| 入参 | 数据源 | 抽取方式 |
+| --- | --- | --- |
+| `monetary_policy` | `DailyMarketContext.summary` | `_MACRO_MONETARY_PATTERNS` regex（顺序敏感：宽松 > 中性 > 紧缩） |
+| `liquidity_indicator` | `DailyMarketContext.summary` | `_MACRO_LIQUIDITY_PATTERNS` regex |
+| `sector_policy` | `result.fundamental_analysis` + `industry_drivers` | `_SECTOR_POLICY_PATTERNS`（个股行业维度，非横切大盘） |
+| `us_china_impact` | LLM 主观值（保留路径 A 后续接入） | 当前仍走中性分 |
+| `regulatory_risk` | LLM 主观值（保留路径 A 后续接入） | 当前仍走中性分 |
+
+**权重重新平衡**（5 项加和=1.0）：
+
+| 指标 | 权重 | basis |
+| --- | --- | --- |
+| 货币政策 | 0.22 | rule |
+| 流动性 | 0.18 | rule |
+| 行业政策 | 0.22 | rule |
+| 中美影响 | 0.28 | llm |
+| 监管风险 | 0.10 | llm |
+
+**契约**：
+- 任一字段非空 → UI 不再显示"暂无可用数据"
+- `_extract_first_match` 顺序敏感，宽松优先于中性（防止"稳健中性偏宽松"误判）
+- `setdefault` 注入顺序保证：客观数据先于 LLM 主观值（路径 A 后续接入时无冲突）
+
+**未验证项**：
+- 港股/美股无 `DailyMarketContext` 时，monetary/liquidity 回退到 None（行业政策仍可从 fundamental 推断）
+- 历史 report `raw_scores_json` 不含宏观键值，反序列化时 `get(...)` 拿不到 → 自然 fallback
+
 ### 3.3 数据持久化 (`src/repositories/position_ledger_repo.py`)
 
 ```python

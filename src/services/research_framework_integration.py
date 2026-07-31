@@ -6,7 +6,7 @@ Research Framework Integration Helper.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
 from src.analyzer import AnalysisResult
 
@@ -489,6 +489,107 @@ def _extract_industry_drivers(
     return drivers if drivers else ["产业驱动因素待详细分析"]
 
 
+_SECTOR_POLICY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "supportive",
+        (
+            "政策支持",
+            "政策扶持",
+            "产业政策利好",
+            "国家支持",
+            "鼓励发展",
+            "补贴",
+            "支持政策",
+            "政策利好",
+        ),
+    ),
+    (
+        "restrictive",
+        (
+            "监管收紧",
+            "政策限制",
+            "监管趋严",
+            "去杠杆",
+            "监管限制",
+            "限制政策",
+        ),
+    ),
+    (
+        "neutral",
+        (
+            "中性",
+            "无明显政策",
+        ),
+    ),
+)
+
+
+def _infer_sector_policy(
+    *,
+    fundamental_text: Optional[str],
+    industry_drivers: List[str],
+) -> Optional[str]:
+    """P4-fix: 从基本面文本与产业驱动词推断 sector_policy。
+
+    顺序敏感（与 daily_market_context 一致：宽松/收紧 > 中性）。
+    返回 None 表示无任何命中。
+    P4-fix v3: 更长短语优先 + 黑名单过滤，避免子串误命中。
+    """
+    parts: List[str] = []
+    if fundamental_text:
+        parts.append(fundamental_text)
+    if industry_drivers:
+        parts.append(" ".join(industry_drivers))
+    if not parts:
+        return None
+    joined = "\n".join(parts).lower()
+    for tag, kws in _SECTOR_POLICY_PATTERNS:
+        sorted_kws = sorted(kws, key=len, reverse=True)
+        for kw in sorted_kws:
+            kw_lower = kw.lower()
+            if kw_lower not in joined:
+                continue
+            if not _has_sector_non_fp_hit(joined, kw_lower):
+                continue
+            return tag
+    return None
+
+
+_SECTOR_FALSE_POSITIVE_PHRASES: Tuple[str, ...] = (
+    "政策限制性改革",
+    "非政策限制",
+    "非监管收紧",
+)
+
+
+def _has_sector_non_fp_hit(text: str, keyword: str) -> bool:
+    """检查 keyword 在 text 中是否至少有一个命中位置不在任何 FP 短语内。"""
+    start = 0
+    while True:
+        idx = text.find(keyword, start)
+        if idx == -1:
+            return False
+        if not _is_sector_inside_fp(text, idx, len(keyword)):
+            return True
+        start = idx + 1
+
+
+def _is_sector_inside_fp(text: str, idx: int, kw_len: int) -> bool:
+    for fp in _SECTOR_FALSE_POSITIVE_PHRASES:
+        fp_lower = fp.lower()
+        if fp_lower not in text:
+            continue
+        fp_pos = 0
+        while True:
+            fp_idx = text.find(fp_lower, fp_pos)
+            if fp_idx == -1:
+                break
+            if fp_idx <= idx and idx + kw_len <= fp_idx + len(fp_lower):
+                return True
+            fp_pos = fp_idx + 1
+    return False
+
+
 def _build_chain_map_from_context(context: Dict[str, Any]) -> List[Dict[str, Any]]:
     """从上下文构建供应链地图"""
     fundamental = context.get("fundamental", {})
@@ -586,6 +687,24 @@ def _extract_raw_data_from_context(
     if context.get("capital_flow"):
         cap = context["capital_flow"]
         _capital_merge(raw_data, cap)
+
+    # ---- P4-fix: 宏观与地缘维度入参 ----
+    # 优先级：daily_market_context（客观） > industry_drivers + fundamental（个股行业） > LLM 主观值（_enrich_raw_data_from_llm_output）
+    # 用 setdefault 给 LLM 主观值保留覆盖机会（_enrich_raw_data_from_llm_output 后跑）
+    dmc = context.get("daily_market_context") or {}
+    if isinstance(dmc, dict):
+        for key in ("monetary_policy", "liquidity_indicator"):
+            v = dmc.get(key)
+            if isinstance(v, str) and v.strip():
+                raw_data.setdefault(key, v.strip())
+    # sector_policy 走个股行业维度（个股 macro 评分需要 sector 而不是横切大盘）
+    drivers = _extract_industry_drivers(result, context)
+    sector_policy = _infer_sector_policy(
+        fundamental_text=result.fundamental_analysis,
+        industry_drivers=drivers,
+    )
+    if sector_policy is not None:
+        raw_data.setdefault("sector_policy", sector_policy)
 
     # ---- new: enhanced_context.realtime ---
     # fallback for agent path (realtime_quote) when enhanced path (realtime) is absent
@@ -764,8 +883,11 @@ def _fallback_supply_chain_from_knowledge_base(
     )
     if llm_produced_reliable:
         _SCORE_KEYS = (
-            "chain_position", "moat_type", "moat_strength",
-            "us_china_risk", "chokepoint_type",
+            "chain_position",
+            "moat_type",
+            "moat_strength",
+            "us_china_risk",
+            "chokepoint_type",
         )
         if any(raw_data.get(k) for k in _SCORE_KEYS):
             return
@@ -815,7 +937,9 @@ def _fallback_supply_chain_from_knowledge_base(
         else:
             inferred_moat = "technology"
 
-        confidences = [c.get("confidence", "") for c in chokepoints if isinstance(c, dict)]
+        confidences = [
+            c.get("confidence", "") for c in chokepoints if isinstance(c, dict)
+        ]
         high_count = sum(1 for cf in confidences if cf.lower() == "high")
         if high_count >= 2:
             inferred_strength = "strong"
