@@ -6,7 +6,6 @@ Fetches annual report text from cninfo (巨潮资讯网).
 """
 
 import logging
-import os
 import re
 from typing import Dict, Any, Optional
 
@@ -54,7 +53,7 @@ class AnnualReportProvider:
             import requests
 
             ts_code = self._normalize_ts_code(stock_code)
-            url = f"https://www.cninfo.com.cn/new/hisAnnouncement/query"
+            url = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
 
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",

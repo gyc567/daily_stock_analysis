@@ -11,9 +11,334 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import cast, Any, Dict, List, Optional
+from typing import cast, Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 行业推断模板（_infer_from_industry 用）
+# ============================================================
+# (关键词元组, 模板 dict) 顺序表，按顺序匹配首个命中即返回；fallback 见下方。
+# 模板字段：company_position / upstream / downstream / chokepoints /
+# us_china_chain / industry_drivers。
+
+_INDUSTRY_INFERENCE_TEMPLATES: Tuple[Tuple[Tuple[str, ...], Dict[str, Any]], ...] = (
+    (
+        ("半导体", "芯片", "集成电路", "晶圆"),
+        {
+            "company_position": "半导体/集成电路设计制造",
+            "upstream": ["硅片", "光刻胶", "EDA软件", "半导体设备"],
+            "downstream": ["消费电子", "汽车电子", "通信设备", "工业控制"],
+            "chokepoints": [
+                {
+                    "type": "技术",
+                    "description": "先进制程技术壁垒",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "受美国出口管制影响",
+                "sanction_risk": "高",
+                "dual_chain_impact": "显著",
+            },
+            "industry_drivers": ["国产替代加速", "AI算力需求", "汽车电动化"],
+        },
+    ),
+    (
+        ("白酒", "茅台", "五粮液", "泸州", "汾酒", "洋河"),
+        {
+            "company_position": "高端白酒生产",
+            "upstream": ["糯高粱", "小麦", "水", "包装材料"],
+            "downstream": ["高端消费", "商务宴请", "礼品市场"],
+            "chokepoints": [
+                {"type": "品牌", "description": "品牌护城河", "confidence": "high"}
+            ],
+            "us_china_chain": {
+                "role": "纯国内业务",
+                "sanction_risk": "低",
+                "dual_chain_impact": "极小",
+            },
+            "industry_drivers": ["消费升级", "品牌集中度提升", "文化建设"],
+        },
+    ),
+    (
+        ("新能源", "锂电池", "动力电池", "宁德", "亿纬"),
+        {
+            "company_position": "新能源电池制造",
+            "upstream": ["锂矿", "钴镍", "隔膜", "电解液", "铜箔"],
+            "downstream": ["新能源汽车", "储能系统", "消费电子"],
+            "chokepoints": [
+                {
+                    "type": "产能",
+                    "description": "规模效应+成本控制",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "全球供应主导",
+                "sanction_risk": "中",
+                "dual_chain_impact": "美国市场受限",
+            },
+            "industry_drivers": ["新能源汽车渗透率提升", "储能需求爆发", "原材料成本"],
+        },
+    ),
+    (
+        ("医药", "制药", "生物", "医疗", "恒瑞", "迈瑞"),
+        {
+            "company_position": "医药/医疗器械",
+            "upstream": ["原料药", "药用辅料", "医疗器械零部件"],
+            "downstream": ["医院", "药店", "患者"],
+            "chokepoints": [
+                {
+                    "type": "认证",
+                    "description": "药品/器械审批壁垒",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "国内市场为主",
+                "sanction_risk": "低",
+                "dual_chain_impact": "较小",
+            },
+            "industry_drivers": ["老龄化", "创新药政策", "国产替代"],
+        },
+    ),
+    (
+        ("光伏", "太阳能", "隆基", "通威"),
+        {
+            "company_position": "光伏产业链",
+            "upstream": ["硅料", "硅片", "银浆", "光伏玻璃"],
+            "downstream": ["光伏电站", "分布式光伏", "EPC厂商"],
+            "chokepoints": [
+                {
+                    "type": "产能",
+                    "description": "产能周期与技术迭代",
+                    "confidence": "medium",
+                }
+            ],
+            "us_china_chain": {
+                "role": "全球光伏主导",
+                "sanction_risk": "高",
+                "dual_chain_impact": "美国限制中国光伏产品",
+            },
+            "industry_drivers": ["碳中和政策", "光伏经济性提升", "全球能源转型"],
+        },
+    ),
+    (
+        ("面板", "显示", "京东方", "TCL", "OLED"),
+        {
+            "company_position": "显示面板制造",
+            "upstream": ["玻璃基板", "偏光片", "驱动芯片", "发光材料"],
+            "downstream": ["手机", "电视", "车载显示", "IT产品"],
+            "chokepoints": [
+                {
+                    "type": "产能",
+                    "description": "高世代线投资门槛",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "全球产能主导",
+                "sanction_risk": "中",
+                "dual_chain_impact": "技术追赶中",
+            },
+            "industry_drivers": ["大尺寸化", "OLED渗透", "车载需求"],
+        },
+    ),
+    (
+        ("互联网", "腾讯", "阿里", "百度", "字节", "京东"),
+        {
+            "company_position": "互联网平台",
+            "upstream": ["服务器", "带宽", "云计算基础设施"],
+            "downstream": ["个人用户", "企业客户", "广告主", "商家"],
+            "chokepoints": [
+                {
+                    "type": "网络",
+                    "description": "用户生态与数据壁垒",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "纯国内业务为主",
+                "sanction_risk": "中",
+                "dual_chain_impact": "监管政策影响大",
+            },
+            "industry_drivers": ["数字化转型", "电商渗透", "内容消费升级"],
+        },
+    ),
+    (
+        ("银行", "招商", "宁波", "平安银行"),
+        {
+            "company_position": "商业银行",
+            "upstream": ["存款客户", "金融市场"],
+            "downstream": ["企业贷款", "个人贷款", "中间业务"],
+            "chokepoints": [
+                {"type": "牌照", "description": "银行牌照壁垒", "confidence": "high"}
+            ],
+            "us_china_chain": {
+                "role": "纯国内业务",
+                "sanction_risk": "低",
+                "dual_chain_impact": "极小",
+            },
+            "industry_drivers": ["息差变化", "资产质量", "中间业务发展"],
+        },
+    ),
+    (
+        ("证券", "券商", "中信", "华泰", "国泰", "海通", "广发"),
+        {
+            "company_position": "证券经纪/投行",
+            "upstream": ["机构客户", "上市公司"],
+            "downstream": ["个人投资者", "机构投资者", "企业客户"],
+            "chokepoints": [
+                {
+                    "type": "牌照",
+                    "description": "证券业务牌照壁垒",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "纯国内业务",
+                "sanction_risk": "低",
+                "dual_chain_impact": "极小",
+            },
+            "industry_drivers": ["资本市场活跃度", "注册制改革", "财富管理转型"],
+        },
+    ),
+    (
+        ("保险", "平安保险", "中国人寿", "太平洋保险"),
+        {
+            "company_position": "保险",
+            "upstream": ["投保人", "资本市场"],
+            "downstream": ["个人客户", "企业客户"],
+            "chokepoints": [
+                {"type": "牌照", "description": "保险牌照壁垒", "confidence": "high"}
+            ],
+            "us_china_chain": {
+                "role": "纯国内业务",
+                "sanction_risk": "低",
+                "dual_chain_impact": "极小",
+            },
+            "industry_drivers": ["人口老龄化", "保障意识提升", "政策支持"],
+        },
+    ),
+    (
+        ("房地产", "万科", "保利", "招商蛇口", "金地", "华侨城"),
+        {
+            "company_position": "房地产开发",
+            "upstream": ["地方政府", "建筑公司", "原材料供应商"],
+            "downstream": ["购房者", "企业客户"],
+            "chokepoints": [
+                {
+                    "type": "资金",
+                    "description": "资金密集+政策周期",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "纯国内业务",
+                "sanction_risk": "低",
+                "dual_chain_impact": "极小",
+            },
+            "industry_drivers": ["政策调控", "城镇化", "改善性需求"],
+        },
+    ),
+    (
+        ("汽车", "比亚迪", "长城", "吉利", "长安", "上汽", "广汽"),
+        {
+            "company_position": "汽车制造",
+            "upstream": ["零部件供应商", "钢铁", "芯片"],
+            "downstream": ["个人消费者", "经销商", "集团采购"],
+            "chokepoints": [
+                {
+                    "type": "技术",
+                    "description": "发动机/电动化技术",
+                    "confidence": "medium",
+                }
+            ],
+            "us_china_chain": {
+                "role": "国内为主",
+                "sanction_risk": "低",
+                "dual_chain_impact": "较小",
+            },
+            "industry_drivers": ["新能源转型", "出口增长", "智能驾驶"],
+        },
+    ),
+    (
+        ("家电", "格力", "美的", "海尔", "海信", "TCL"),
+        {
+            "company_position": "家电制造",
+            "upstream": ["钢铁", "塑料", "电子元器件"],
+            "downstream": ["个人消费者", "经销商", "企业客户"],
+            "chokepoints": [
+                {
+                    "type": "品牌",
+                    "description": "家电品牌渠道壁垒",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "全球产能",
+                "sanction_risk": "低",
+                "dual_chain_impact": "较小",
+            },
+            "industry_drivers": ["消费升级", "海外拓展", "智能家居"],
+        },
+    ),
+    (
+        ("食品", "伊利", "蒙牛", "海天", "农夫山泉"),
+        {
+            "company_position": "食品饮料制造",
+            "upstream": ["农产品", "原材料", "包装材料"],
+            "downstream": ["个人消费者", "商超", "餐饮"],
+            "chokepoints": [
+                {
+                    "type": "渠道",
+                    "description": "食品饮料渠道壁垒",
+                    "confidence": "high",
+                }
+            ],
+            "us_china_chain": {
+                "role": "纯国内业务",
+                "sanction_risk": "低",
+                "dual_chain_impact": "极小",
+            },
+            "industry_drivers": ["消费升级", "品牌集中度", "渠道下沉"],
+        },
+    ),
+    (
+        ("纺织", "服装", "李宁", "安踏", "波司登"),
+        {
+            "company_position": "纺织服装",
+            "upstream": ["棉花", "化纤", "面料"],
+            "downstream": ["个人消费者", "经销商", "品牌商"],
+            "chokepoints": [
+                {"type": "品牌", "description": "服装品牌壁垒", "confidence": "medium"}
+            ],
+            "us_china_chain": {
+                "role": "全球供应链",
+                "sanction_risk": "低",
+                "dual_chain_impact": "品牌出海",
+            },
+            "industry_drivers": ["国货崛起", "运动消费", "品牌升级"],
+        },
+    ),
+)
+
+_INDUSTRY_INFERENCE_FALLBACK: Dict[str, Any] = {
+    "company_position": "待分析",
+    "upstream": ["待分析"],
+    "downstream": ["待分析"],
+    "chokepoints": [
+        {"type": "unknown", "description": "需详细产业链分析", "confidence": "low"}
+    ],
+    "us_china_chain": {
+        "role": "待分析",
+        "sanction_risk": "待评估",
+        "dual_chain_impact": "待评估",
+    },
+    "industry_drivers": [],
+}
 
 
 class SupplyChainDataService:
@@ -79,54 +404,7 @@ class SupplyChainDataService:
         llm_data = self._fetch_from_llm(stock_code, stock_name, fundamental_analysis)
         if llm_data:
             result["data_sources"].append("llm")
-
-            def _has_valid_data(data, key):
-                val = data.get(key)
-                if val is None:
-                    return False
-                if isinstance(val, str) and val.strip() in (
-                    "",
-                    "null",
-                    "None",
-                    "待分析",
-                    "待评估",
-                ):
-                    return False
-                if isinstance(val, list) and len(val) == 0:
-                    return False
-                if isinstance(val, dict):
-                    return any(
-                        str(v).strip() not in ("", "null", "None", "待分析", "待评估")
-                        for v in val.values()
-                        if v is not None
-                    )
-                return True
-
-            # 只有当知识库数据为空/占位符时才用LLM数据补充
-            if _has_valid_data(llm_data, "company_position") and not _has_valid_data(
-                result, "company_position"
-            ):
-                result["company_position"] = llm_data.get("company_position")
-            if _has_valid_data(llm_data, "upstream") and not _has_valid_data(
-                result, "upstream"
-            ):
-                result["upstream"] = llm_data.get("upstream")
-            if _has_valid_data(llm_data, "downstream") and not _has_valid_data(
-                result, "downstream"
-            ):
-                result["downstream"] = llm_data.get("downstream")
-            if _has_valid_data(llm_data, "chokepoints") and not _has_valid_data(
-                result, "chokepoints"
-            ):
-                result["chokepoints"] = llm_data.get("chokepoints")
-            if _has_valid_data(llm_data, "us_china_chain") and not _has_valid_data(
-                result, "us_china_chain"
-            ):
-                result["us_china_chain"] = llm_data.get("us_china_chain")
-            if _has_valid_data(llm_data, "industry_drivers") and not _has_valid_data(
-                result, "industry_drivers"
-            ):
-                result["industry_drivers"] = llm_data.get("industry_drivers")
+            self._merge_llm_into_result(result, llm_data)
 
         # B链路: Serenity 深度分析 (可选，耗时较长)
         if enable_serenity:
@@ -146,6 +424,50 @@ class SupplyChainDataService:
         )
 
         return result
+
+    # LLM 数据合并到 result 的字段名（顺序敏感：先合并的字段优先级更高）
+    _LLM_MERGE_FIELDS: Tuple[str, ...] = (
+        "company_position",
+        "upstream",
+        "downstream",
+        "chokepoints",
+        "us_china_chain",
+        "industry_drivers",
+    )
+
+    @staticmethod
+    def _has_valid_data(data: Dict[str, Any], key: str) -> bool:
+        """[拆分] 判断 data[key] 是否为「非空 / 非占位符」值。"""
+        val = data.get(key)
+        if val is None:
+            return False
+        if isinstance(val, str) and val.strip() in (
+            "",
+            "null",
+            "None",
+            "待分析",
+            "待评估",
+        ):
+            return False
+        if isinstance(val, list) and len(val) == 0:
+            return False
+        if isinstance(val, dict):
+            return any(
+                str(v).strip() not in ("", "null", "None", "待分析", "待评估")
+                for v in val.values()
+                if v is not None
+            )
+        return True
+
+    def _merge_llm_into_result(
+        self, result: Dict[str, Any], llm_data: Dict[str, Any]
+    ) -> None:
+        """[拆分] 把 LLM 推断数据合并到 result（仅当 result 字段为空/占位符时补充）。"""
+        for field in self._LLM_MERGE_FIELDS:
+            if self._has_valid_data(llm_data, field) and not self._has_valid_data(
+                result, field
+            ):
+                result[field] = llm_data.get(field)
 
     def _fetch_from_llm(
         self,
@@ -216,11 +538,11 @@ class SupplyChainDataService:
                 if json_match:
                     parsed_result = json_repair.loads(json_match.group(0))  # type: ignore[union-attr]
                 else:
-                    logger.warning(f"[SupplyChainDataService] LLM parse failed")
+                    logger.warning("[SupplyChainDataService] LLM parse failed")
                     return {}
 
             normalized = self._normalize_llm_output(cast(Dict[str, Any], parsed_result))
-            logger.info(f"[SupplyChainDataService] LLM extraction completed")
+            logger.info("[SupplyChainDataService] LLM extraction completed")
             return normalized
 
         except Exception as e:
@@ -395,309 +717,15 @@ class SupplyChainDataService:
         return self._infer_from_industry(name_lower)
 
     def _infer_from_industry(self, name_lower: str) -> Dict[str, Any]:
-        """基于行业推断供应链信息"""
-        result: Dict[str, Any] = {
-            "company_position": "",
-            "upstream": [],
-            "downstream": [],
-            "chokepoints": [],
-            "us_china_chain": {
-                "role": "待分析",
-                "sanction_risk": "待评估",
-                "dual_chain_impact": "待评估",
-            },
-            "industry_drivers": [],
-        }
+        """基于行业推断供应链信息。
 
-        if any(kw in name_lower for kw in ["半导体", "芯片", "集成电路", "晶圆"]):
-            result["company_position"] = "半导体/集成电路设计制造"
-            result["upstream"] = ["硅片", "光刻胶", "EDA软件", "半导体设备"]
-            result["downstream"] = ["消费电子", "汽车电子", "通信设备", "工业控制"]
-            result["chokepoints"] = [
-                {
-                    "type": "技术",
-                    "description": "先进制程技术壁垒",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "受美国出口管制影响",
-                "sanction_risk": "高",
-                "dual_chain_impact": "显著",
-            }
-            result["industry_drivers"] = ["国产替代加速", "AI算力需求", "汽车电动化"]
-        elif any(
-            kw in name_lower
-            for kw in ["白酒", "茅台", "五粮液", "泸州", "汾酒", "洋河"]
-        ):
-            result["company_position"] = "高端白酒生产"
-            result["upstream"] = ["糯高粱", "小麦", "水", "包装材料"]
-            result["downstream"] = ["高端消费", "商务宴请", "礼品市场"]
-            result["chokepoints"] = [
-                {"type": "品牌", "description": "品牌护城河", "confidence": "high"}
-            ]
-            result["us_china_chain"] = {
-                "role": "纯国内业务",
-                "sanction_risk": "低",
-                "dual_chain_impact": "极小",
-            }
-            result["industry_drivers"] = ["消费升级", "品牌集中度提升", "文化建设"]
-        elif any(
-            kw in name_lower for kw in ["新能源", "锂电池", "动力电池", "宁德", "亿纬"]
-        ):
-            result["company_position"] = "新能源电池制造"
-            result["upstream"] = ["锂矿", "钴镍", "隔膜", "电解液", "铜箔"]
-            result["downstream"] = ["新能源汽车", "储能系统", "消费电子"]
-            result["chokepoints"] = [
-                {
-                    "type": "产能",
-                    "description": "规模效应+成本控制",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "全球供应主导",
-                "sanction_risk": "中",
-                "dual_chain_impact": "美国市场受限",
-            }
-            result["industry_drivers"] = [
-                "新能源汽车渗透率提升",
-                "储能需求爆发",
-                "原材料成本",
-            ]
-        elif any(
-            kw in name_lower for kw in ["医药", "制药", "生物", "医疗", "恒瑞", "迈瑞"]
-        ):
-            result["company_position"] = "医药/医疗器械"
-            result["upstream"] = ["原料药", "药用辅料", "医疗器械零部件"]
-            result["downstream"] = ["医院", "药店", "患者"]
-            result["chokepoints"] = [
-                {
-                    "type": "认证",
-                    "description": "药品/器械审批壁垒",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "国内市场为主",
-                "sanction_risk": "低",
-                "dual_chain_impact": "较小",
-            }
-            result["industry_drivers"] = ["老龄化", "创新药政策", "国产替代"]
-        elif any(kw in name_lower for kw in ["光伏", "太阳能", "隆基", "通威"]):
-            result["company_position"] = "光伏产业链"
-            result["upstream"] = ["硅料", "硅片", "银浆", "光伏玻璃"]
-            result["downstream"] = ["光伏电站", "分布式光伏", "EPC厂商"]
-            result["chokepoints"] = [
-                {
-                    "type": "产能",
-                    "description": "产能周期与技术迭代",
-                    "confidence": "medium",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "全球光伏主导",
-                "sanction_risk": "高",
-                "dual_chain_impact": "美国限制中国光伏产品",
-            }
-            result["industry_drivers"] = [
-                "碳中和政策",
-                "光伏经济性提升",
-                "全球能源转型",
-            ]
-        elif any(kw in name_lower for kw in ["面板", "显示", "京东方", "TCL", "OLED"]):
-            result["company_position"] = "显示面板制造"
-            result["upstream"] = ["玻璃基板", "偏光片", "驱动芯片", "发光材料"]
-            result["downstream"] = ["手机", "电视", "车载显示", "IT产品"]
-            result["chokepoints"] = [
-                {
-                    "type": "产能",
-                    "description": "高世代线投资门槛",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "全球产能主导",
-                "sanction_risk": "中",
-                "dual_chain_impact": "技术追赶中",
-            }
-            result["industry_drivers"] = ["大尺寸化", "OLED渗透", "车载需求"]
-        elif any(
-            kw in name_lower
-            for kw in ["互联网", "腾讯", "阿里", "百度", "字节", "京东"]
-        ):
-            result["company_position"] = "互联网平台"
-            result["upstream"] = ["服务器", "带宽", "云计算基础设施"]
-            result["downstream"] = ["个人用户", "企业客户", "广告主", "商家"]
-            result["chokepoints"] = [
-                {
-                    "type": "网络",
-                    "description": "用户生态与数据壁垒",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "纯国内业务为主",
-                "sanction_risk": "中",
-                "dual_chain_impact": "监管政策影响大",
-            }
-            result["industry_drivers"] = ["数字化转型", "电商渗透", "内容消费升级"]
-        elif any(kw in name_lower for kw in ["银行", "招商", "宁波", "平安银行"]):
-            result["company_position"] = "商业银行"
-            result["upstream"] = ["存款客户", "金融市场"]
-            result["downstream"] = ["企业贷款", "个人贷款", "中间业务"]
-            result["chokepoints"] = [
-                {"type": "牌照", "description": "银行牌照壁垒", "confidence": "high"}
-            ]
-            result["us_china_chain"] = {
-                "role": "纯国内业务",
-                "sanction_risk": "低",
-                "dual_chain_impact": "极小",
-            }
-            result["industry_drivers"] = ["息差变化", "资产质量", "中间业务发展"]
-        elif any(
-            kw in name_lower
-            for kw in ["证券", "券商", "中信", "华泰", "国泰", "海通", "广发"]
-        ):
-            result["company_position"] = "证券经纪/投行"
-            result["upstream"] = ["机构客户", "上市公司"]
-            result["downstream"] = ["个人投资者", "机构投资者", "企业客户"]
-            result["chokepoints"] = [
-                {
-                    "type": "牌照",
-                    "description": "证券业务牌照壁垒",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "纯国内业务",
-                "sanction_risk": "低",
-                "dual_chain_impact": "极小",
-            }
-            result["industry_drivers"] = [
-                "资本市场活跃度",
-                "注册制改革",
-                "财富管理转型",
-            ]
-        elif any(
-            kw in name_lower for kw in ["保险", "平安保险", "中国人寿", "太平洋保险"]
-        ):
-            result["company_position"] = "保险"
-            result["upstream"] = ["投保人", "资本市场"]
-            result["downstream"] = ["个人客户", "企业客户"]
-            result["chokepoints"] = [
-                {"type": "牌照", "description": "保险牌照壁垒", "confidence": "high"}
-            ]
-            result["us_china_chain"] = {
-                "role": "纯国内业务",
-                "sanction_risk": "低",
-                "dual_chain_impact": "极小",
-            }
-            result["industry_drivers"] = ["人口老龄化", "保障意识提升", "政策支持"]
-        elif any(
-            kw in name_lower
-            for kw in ["房地产", "万科", "保利", "招商蛇口", "金地", "华侨城"]
-        ):
-            result["company_position"] = "房地产开发"
-            result["upstream"] = ["地方政府", "建筑公司", "原材料供应商"]
-            result["downstream"] = ["购房者", "企业客户"]
-            result["chokepoints"] = [
-                {
-                    "type": "资金",
-                    "description": "资金密集+政策周期",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "纯国内业务",
-                "sanction_risk": "低",
-                "dual_chain_impact": "极小",
-            }
-            result["industry_drivers"] = ["政策调控", "城镇化", "改善性需求"]
-        elif any(
-            kw in name_lower
-            for kw in ["汽车", "比亚迪", "长城", "吉利", "长安", "上汽", "广汽"]
-        ):
-            result["company_position"] = "汽车制造"
-            result["upstream"] = ["零部件供应商", "钢铁", "芯片"]
-            result["downstream"] = ["个人消费者", "经销商", "集团采购"]
-            result["chokepoints"] = [
-                {
-                    "type": "技术",
-                    "description": "发动机/电动化技术",
-                    "confidence": "medium",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "国内为主",
-                "sanction_risk": "低",
-                "dual_chain_impact": "较小",
-            }
-            result["industry_drivers"] = ["新能源转型", "出口增长", "智能驾驶"]
-        elif any(
-            kw in name_lower for kw in ["家电", "格力", "美的", "海尔", "海信", "TCL"]
-        ):
-            result["company_position"] = "家电制造"
-            result["upstream"] = ["钢铁", "塑料", "电子元器件"]
-            result["downstream"] = ["个人消费者", "经销商", "企业客户"]
-            result["chokepoints"] = [
-                {
-                    "type": "品牌",
-                    "description": "家电品牌渠道壁垒",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "全球产能",
-                "sanction_risk": "低",
-                "dual_chain_impact": "较小",
-            }
-            result["industry_drivers"] = ["消费升级", "海外拓展", "智能家居"]
-        elif any(
-            kw in name_lower for kw in ["食品", "伊利", "蒙牛", "海天", "农夫山泉"]
-        ):
-            result["company_position"] = "食品饮料制造"
-            result["upstream"] = ["农产品", "原材料", "包装材料"]
-            result["downstream"] = ["个人消费者", "商超", "餐饮"]
-            result["chokepoints"] = [
-                {
-                    "type": "渠道",
-                    "description": "食品饮料渠道壁垒",
-                    "confidence": "high",
-                }
-            ]
-            result["us_china_chain"] = {
-                "role": "纯国内业务",
-                "sanction_risk": "低",
-                "dual_chain_impact": "极小",
-            }
-            result["industry_drivers"] = ["消费升级", "品牌集中度", "渠道下沉"]
-        elif any(kw in name_lower for kw in ["纺织", "服装", "李宁", "安踏", "波司登"]):
-            result["company_position"] = "纺织服装"
-            result["upstream"] = ["棉花", "化纤", "面料"]
-            result["downstream"] = ["个人消费者", "经销商", "品牌商"]
-            result["chokepoints"] = [
-                {"type": "品牌", "description": "服装品牌壁垒", "confidence": "medium"}
-            ]
-            result["us_china_chain"] = {
-                "role": "全球供应链",
-                "sanction_risk": "低",
-                "dual_chain_impact": "品牌出海",
-            }
-            result["industry_drivers"] = ["国货崛起", "运动消费", "品牌升级"]
-        else:
-            result["company_position"] = "待分析"
-            result["upstream"] = ["待分析"]
-            result["downstream"] = ["待分析"]
-            result["chokepoints"] = [
-                {
-                    "type": "unknown",
-                    "description": "需详细产业链分析",
-                    "confidence": "low",
-                }
-            ]
-
-        return result
+        v3 重构：原实现是 16 个 elif 分支（复杂度 16）；改为按模块级
+        ``_INDUSTRY_INFERENCE_TEMPLATES`` 顺序匹配首个命中即返回，行为等价。
+        """
+        for keywords, template in _INDUSTRY_INFERENCE_TEMPLATES:
+            if any(kw in name_lower for kw in keywords):
+                return dict(template)
+        return dict(_INDUSTRY_INFERENCE_FALLBACK)
 
     def _get_stock_knowledge_base(self) -> Dict[str, Dict[str, Any]]:
         """获取股票供应链知识库"""
@@ -1437,11 +1465,7 @@ class SupplyChainDataService:
         Returns:
             SupplyChainV2 实例（含 v1 兼容字段 + v2 结构化图谱 + KB 命中 + 数据完整度）
         """
-        from src.schemas.supply_chain import (
-            Chokepoint,
-            SupplyChainV2,
-            USChinaChain,
-        )
+        from src.schemas.supply_chain import SupplyChainV2
         from src.services.supply_chain.graph_builder import SupplyChainGraphBuilder
         from src.services.supply_chain.kb_retriever import (
             ColdStartStrategy,
@@ -1466,59 +1490,19 @@ class SupplyChainDataService:
                 stock_code, stock_name, fundamental_analysis
             )
 
-        # 3. 构建结构化图谱
-        builder = SupplyChainGraphBuilder()
-        # 从 v1 兼容字段（KB 硬编码或 LLM 推断）取公司位置 + 行业驱动
-        position_v1 = ""
-        industry_v1 = industry_hint or "未知行业"
-        drivers_v1: List[str] = []
-
-        if llm_data:
-            position_v1 = llm_data.get("company_position", "") or ""
-            drivers_v1 = llm_data.get("industry_drivers", []) or []
-
-        if not position_v1:
-            # 兜底：旧 KB 硬编码（_fetch_from_knowledge_base 的 V1 路径）
-            v1_kb = self._fetch_from_knowledge_base(stock_code, stock_name)
-            if v1_kb.get("company_position"):
-                position_v1 = str(v1_kb["company_position"])
-            if v1_kb.get("industry_drivers"):
-                drivers_v1 = list(v1_kb["industry_drivers"])
-
-        if not position_v1:
-            position_v1 = f"{stock_name}（{stock_code}）"
-
-        # v1 chokepoints（保留）
-        chokepoints_v1: List[Chokepoint] = []
-        for cp in llm_data.get("chokepoints") or []:
-            if isinstance(cp, dict):
-                try:
-                    chokepoints_v1.append(
-                        Chokepoint(
-                            type=cp.get("type", "tech"),
-                            description=str(cp.get("description", "")),
-                            confidence=cp.get("confidence", "medium"),
-                        )
-                    )
-                except Exception:
-                    continue
-
-        # us_china_chain（保留）
-        us_china_v1: Optional[USChinaChain] = None
-        uc = llm_data.get("us_china_chain") or {}
-        if isinstance(uc, dict) and uc:
-            try:
-                us_china_v1 = USChinaChain(
-                    role=str(uc.get("role", "待分析")),
-                    substitution_progress=uc.get("substitution_progress"),
-                    sanction_risk=uc.get("sanction_risk"),
-                    dual_chain_impact=uc.get("dual_chain_impact"),
-                )
-            except Exception:
-                us_china_v1 = None
+        # 3. 派生 v1 兼容字段（公司位置 / 行业 / drivers / chokepoints / us_china）
+        (
+            position_v1,
+            industry_v1,
+            drivers_v1,
+            chokepoints_v1,
+            us_china_v1,
+        ) = self._resolve_v1_legacy_fields(
+            stock_code, stock_name, industry_hint, llm_data
+        )
 
         # 4. 图谱构建（v2 核心）
-        graph = builder.build(
+        graph = SupplyChainGraphBuilder().build(
             ticker=stock_code,
             company=stock_name,
             industry=industry_v1,
@@ -1551,9 +1535,7 @@ class SupplyChainDataService:
         # 6. 组装 SupplyChainV2（v1 兼容字段 + v2 字段）
         v2 = SupplyChainV2(
             # v1 兼容
-            data_sources=["knowledge_base", "llm", "graph", "serenity"][
-                : 2 + (1 if enable_serenity else 0) + (1 if serenity_result else 0)
-            ],
+            data_sources=self._build_v2_data_sources(enable_serenity, serenity_result),
             company_position=position_v1,
             upstream=[n.name for n in graph.upstream],
             downstream=[n.name for n in graph.downstream],
@@ -1567,34 +1549,13 @@ class SupplyChainDataService:
             data_completeness=graph.data_completeness,
             serenity_score=serenity_result.final_score if serenity_result else None,
             serenity_verdict=serenity_result.verdict if serenity_result else None,
-            serenity_factor_details={
-                k: {
-                    "rating": v.rating,
-                    "points": v.points,
-                    "kb_relevance": v.kb_relevance,
-                    "llm_signal": v.llm_signal,
-                    "industry_prior": v.industry_prior,
-                    "kb_bonus_applied": v.kb_bonus_applied,
-                }
-                for k, v in (serenity_result.factors.items() if serenity_result else {})
-            }
-            if serenity_result
-            else {},
-            serenity_penalty_details={
-                k: {"rating": v.rating, "points": v.points}
-                for k, v in (
-                    serenity_result.penalties.items() if serenity_result else {}
-                )
-            }
-            if serenity_result
-            else {},
-            serenity_kb_bonus_applied={
-                k: v.kb_bonus_applied
-                for k, v in (serenity_result.factors.items() if serenity_result else {})
-                if v.kb_bonus_applied > 0
-            }
-            if serenity_result
-            else {},
+            serenity_factor_details=self._build_serenity_factor_details(
+                serenity_result
+            ),
+            serenity_penalty_details=self._build_serenity_penalty_details(
+                serenity_result
+            ),
+            serenity_kb_bonus_applied=self._build_serenity_kb_bonus(serenity_result),
             fetched_at=datetime.now(timezone.utc),
         )
 
@@ -1610,6 +1571,153 @@ class SupplyChainDataService:
         )
 
         return v2
+
+    @staticmethod
+    def _build_v2_data_sources(
+        enable_serenity: bool, serenity_result: Optional[Any]
+    ) -> List[str]:
+        """[拆分] 根据 enable_serenity / serenity_result 派生 data_sources 列表。"""
+        count = 2 + (1 if enable_serenity else 0) + (1 if serenity_result else 0)
+        return ["knowledge_base", "llm", "graph", "serenity"][:count]
+
+    @staticmethod
+    def _build_serenity_factor_details(
+        serenity_result: Optional[Any],
+    ) -> Dict[str, Any]:
+        """[拆分] 从 SerenityScoreResult 派生 factor_details dict。"""
+        if not serenity_result:
+            return {}
+        return {
+            k: {
+                "rating": v.rating,
+                "points": v.points,
+                "kb_relevance": v.kb_relevance,
+                "llm_signal": v.llm_signal,
+                "industry_prior": v.industry_prior,
+                "kb_bonus_applied": v.kb_bonus_applied,
+            }
+            for k, v in serenity_result.factors.items()
+        }
+
+    @staticmethod
+    def _build_serenity_penalty_details(
+        serenity_result: Optional[Any],
+    ) -> Dict[str, Any]:
+        """[拆分] 从 SerenityScoreResult 派生 penalty_details dict。"""
+        if not serenity_result:
+            return {}
+        return {
+            k: {"rating": v.rating, "points": v.points}
+            for k, v in serenity_result.penalties.items()
+        }
+
+    @staticmethod
+    def _build_serenity_kb_bonus(
+        serenity_result: Optional[Any],
+    ) -> Dict[str, Any]:
+        """[拆分] 从 SerenityScoreResult 派生 kb_bonus_applied dict（仅含 >0 项）。"""
+        if not serenity_result:
+            return {}
+        return {
+            k: v.kb_bonus_applied
+            for k, v in serenity_result.factors.items()
+            if v.kb_bonus_applied > 0
+        }
+
+    def _resolve_v1_legacy_fields(
+        self,
+        stock_code: str,
+        stock_name: str,
+        industry_hint: str,
+        llm_data: Dict[str, Any],
+    ) -> Tuple[str, str, List[str], List[Any], Optional[Any]]:
+        """[拆分] 派生 v1 兼容字段：position / industry / drivers / chokepoints / us_china。
+
+        来源优先级：LLM 推断 → 知识库硬编码 → 默认值（"{stock_name}（{code}）"）。
+        单条 chokepoint / us_china 解析失败时跳过该条，不影响整体。
+        """
+        position_v1, drivers_v1 = self._resolve_v1_position_and_drivers(
+            stock_code, stock_name, llm_data
+        )
+        industry_v1 = industry_hint or "未知行业"
+        chokepoints_v1 = self._build_v1_chokepoints(llm_data)
+        us_china_v1 = self._build_v1_us_china_chain(llm_data)
+        return (
+            position_v1,
+            industry_v1,
+            drivers_v1,
+            chokepoints_v1,
+            us_china_v1,
+        )
+
+    def _resolve_v1_position_and_drivers(
+        self,
+        stock_code: str,
+        stock_name: str,
+        llm_data: Dict[str, Any],
+    ) -> Tuple[str, List[str]]:
+        """[拆分] v1 position / drivers 派生（LLM → KB → 默认值）。"""
+        position_v1 = ""
+        drivers_v1: List[str] = []
+
+        if llm_data:
+            position_v1 = llm_data.get("company_position", "") or ""
+            drivers_v1 = llm_data.get("industry_drivers", []) or []
+
+        if not position_v1:
+            v1_kb = self._fetch_from_knowledge_base(stock_code, stock_name)
+            if v1_kb.get("company_position"):
+                position_v1 = str(v1_kb["company_position"])
+            if v1_kb.get("industry_drivers"):
+                drivers_v1 = list(v1_kb["industry_drivers"])
+
+        if not position_v1:
+            position_v1 = f"{stock_name}（{stock_code}）"
+
+        return position_v1, drivers_v1
+
+    @staticmethod
+    def _build_v1_chokepoints(
+        llm_data: Dict[str, Any],
+    ) -> List[Any]:
+        """[拆分] 从 LLM 数据派生 v1 chokepoints（单条失败容错跳过）。"""
+        from src.schemas.supply_chain import Chokepoint
+
+        out: List[Chokepoint] = []
+        for cp in llm_data.get("chokepoints") or []:
+            if not isinstance(cp, dict):
+                continue
+            try:
+                out.append(
+                    Chokepoint(
+                        type=cp.get("type", "tech"),
+                        description=str(cp.get("description", "")),
+                        confidence=cp.get("confidence", "medium"),
+                    )
+                )
+            except Exception:
+                continue
+        return out
+
+    @staticmethod
+    def _build_v1_us_china_chain(
+        llm_data: Dict[str, Any],
+    ) -> Optional[Any]:
+        """[拆分] 从 LLM 数据派生 v1 us_china_chain（解析失败返回 None）。"""
+        from src.schemas.supply_chain import USChinaChain
+
+        uc = llm_data.get("us_china_chain") or {}
+        if not isinstance(uc, dict) or not uc:
+            return None
+        try:
+            return USChinaChain(
+                role=str(uc.get("role", "待分析")),
+                substitution_progress=uc.get("substitution_progress"),
+                sanction_risk=uc.get("sanction_risk"),
+                dual_chain_impact=uc.get("dual_chain_impact"),
+            )
+        except Exception:
+            return None
 
     def _extract_llm_signals(self, llm_data: Dict[str, Any]) -> Dict[str, float]:
         """从 LLM 推断结果里抽取因子信号（v2 启发式映射）。"""

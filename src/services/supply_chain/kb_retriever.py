@@ -27,6 +27,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, cast
 
+import icontract
+
 from src.schemas.knowledge_base import (
     KnowledgeChunkHit,
     KnowledgeSearchRequest,
@@ -77,6 +79,14 @@ SPARSE_THRESHOLD = 0.3
 PARTIAL_THRESHOLD = 0.6
 
 
+@icontract.require(
+    lambda half_life_days: half_life_days is None or isinstance(half_life_days, int),
+    "half_life_days 必须为 int 或 None",
+)
+@icontract.ensure(
+    lambda result: 0.0 < result <= 1.0,
+    "recency_weight 必须落在 (0, 1]（None/负数 age 或非正 half_life 返回 1.0）",
+)
 def recency_weight(
     age_days: Optional[int], half_life_days: int = RECENCY_HALF_LIFE_DAYS
 ) -> float:

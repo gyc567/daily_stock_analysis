@@ -20,6 +20,8 @@ import logging
 import os
 from typing import Any, Dict, Optional, Tuple
 
+import icontract
+
 from src.schemas.supply_chain import (
     FactorKey,
     PenaltyKey,
@@ -81,6 +83,33 @@ FACTOR_KEYWORDS: FactorKeywordsMap = {
 }
 
 
+# 行业关键词 → 因子先验分（_industry_keyword_prior 用；顺序敏感：先匹配先用）
+_INDUSTRY_KEYWORD_TABLES: Tuple[Tuple[Tuple[str, ...], Dict[str, float]], ...] = (
+    (
+        ("半导体", "芯片"),
+        {
+            "chokepoint_severity": 0.85,
+            "expansion_difficulty": 0.8,
+            "supplier_concentration": 0.7,
+        },
+    ),
+    (
+        ("新能源", "电池", "锂"),
+        {
+            "demand_inflection": 0.7,
+            "expansion_difficulty": 0.7,
+        },
+    ),
+    (
+        ("白酒", "消费"),
+        {
+            "evidence_quality": 0.7,
+            "demand_inflection": 0.4,
+        },
+    ),
+)
+
+
 class SerenityScorer:
     """统一 Serenity 评分入口。
 
@@ -101,6 +130,30 @@ class SerenityScorer:
     def __init__(self, legacy_scorer: Optional[Any] = None) -> None:
         self._legacy_scorer = legacy_scorer  # 可选注入旧实现
 
+    @icontract.require(
+        lambda self, ticker: isinstance(ticker, str) and len(ticker.strip()) > 0,
+        "ticker 必须是非空字符串",
+    )
+    @icontract.require(
+        lambda self, company: isinstance(company, str) and len(company.strip()) > 0,
+        "company 必须是非空字符串",
+    )
+    @icontract.ensure(
+        lambda result: 0 <= result.final_score <= 100,
+        "final_score 必须落在 [0, 100]",
+    )
+    @icontract.ensure(
+        lambda result: (
+            result.verdict
+            in {
+                "顶级研究优先级",
+                "高研究优先级",
+                "值得跟踪",
+                "早期线索或低优先级",
+            }
+        ),
+        "verdict 必须落在 4 档中文评级之一",
+    )
     def score(
         self,
         ticker: str,
@@ -209,6 +262,10 @@ class SerenityScorer:
 
     # ---------- 内部 ----------
 
+    @icontract.ensure(
+        lambda result: 0.0 <= result <= 1.0,
+        "kb_relevance 必须落在 [0, 1] 区间（覆盖率 × 平均分 上限 1.0）",
+    )
     def _kb_relevance(self, kb_result: SupplyChainKBResult, fkey: FactorKey) -> float:
         """从 KB chunk 文本算因子相关度（命中关键词比例 × 命中 chunk 平均 score）。"""
         if not kb_result.hits:
@@ -232,6 +289,10 @@ class SerenityScorer:
         avg_chunk_score = chunk_score_sum / chunk_with_kw if chunk_with_kw else 0.0
         return min(1.0, kw_cov * (0.5 + 0.5 * avg_chunk_score))
 
+    @icontract.ensure(
+        lambda result: 0.0 <= result <= 1.0,
+        "industry_prior 必须落在 [0, 1]（行业先验权重，未超界）",
+    )
     def _industry_prior(
         self, fkey: FactorKey, industry_hint: str, graph: Optional[SupplyChainGraph]
     ) -> float:
@@ -239,35 +300,27 @@ class SerenityScorer:
 
         V2 简化：用 industry_hint 关键词匹配 + 图谱结构（节点数 / KB 覆盖率）做粗略估计。
         """
-        # 默认 0.5
-        prior = 0.5
-
-        industry = (industry_hint or "").lower()
-        if "半导体" in industry or "芯片" in industry:
-            if fkey == "chokepoint_severity":
-                prior = 0.85
-            elif fkey == "expansion_difficulty":
-                prior = 0.8
-            elif fkey == "supplier_concentration":
-                prior = 0.7
-        elif "新能源" in industry or "电池" in industry or "锂" in industry:
-            if fkey == "demand_inflection":
-                prior = 0.7
-            elif fkey == "expansion_difficulty":
-                prior = 0.7
-        elif "白酒" in industry or "消费" in industry:
-            if fkey == "evidence_quality":
-                prior = 0.7
-            elif fkey == "demand_inflection":
-                prior = 0.4
-
-        # 图谱结构加权：KB 覆盖率 + 节点数
+        prior = self._industry_keyword_prior(fkey, industry_hint)
         if graph is not None:
-            if graph.kb_coverage_score >= 0.8:
-                prior = min(1.0, prior + 0.1)
-            if len(graph.upstream) + len(graph.downstream) >= 8:
-                prior = min(1.0, prior + 0.05)
+            prior = self._apply_graph_bonus(prior, graph)
+        return prior
 
+    @staticmethod
+    def _industry_keyword_prior(fkey: FactorKey, industry_hint: str) -> float:
+        """[拆分] 行业关键词匹配的先验分（默认 0.5）。"""
+        industry = (industry_hint or "").lower()
+        for keywords, table in _INDUSTRY_KEYWORD_TABLES:
+            if any(kw in industry for kw in keywords):
+                return table.get(fkey, 0.5)  # type: ignore[arg-type]
+        return 0.5
+
+    @staticmethod
+    def _apply_graph_bonus(prior: float, graph: SupplyChainGraph) -> float:
+        """[拆分] 图谱结构加权：KB 覆盖率 + 节点数。"""
+        if graph.kb_coverage_score >= 0.8:
+            prior = min(1.0, prior + 0.1)
+        if len(graph.upstream) + len(graph.downstream) >= 8:
+            prior = min(1.0, prior + 0.05)
         return prior
 
     def _score_legacy(

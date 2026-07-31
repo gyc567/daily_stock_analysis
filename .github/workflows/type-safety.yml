@@ -68,6 +68,7 @@ jobs:
             -p src.services.research_scoring_service \
             -p src.services.analysis_service \
             -p src.services.supply_chain.scorecard \
+            -p src.services.supply_chain.industry_dna_loader \
             -p src.services.zhengxi.fund_data \
             -p src.services.alert_indicators \
             -p src.schemas.analysis_context_pack \

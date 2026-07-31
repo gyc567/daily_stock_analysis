@@ -101,6 +101,12 @@ docs/specs/
 /graphify-out/
 /src/graphify-out/
 
+# 供应链模块验证临时产物（pytest 跑批日志、报告 JSON）
+.verify_logs/
+.verify_logs_*/
+/data_reports/
+/verify_*.log
+
 # 运行日志 / 临时备份（仓库根散落的 *.log 与 static.backup.* 时间戳目录不入仓）
 /*.log
 /static.backup.*/

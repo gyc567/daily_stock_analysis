@@ -42,6 +42,7 @@ def _fake_result(**kw: Any) -> SimpleNamespace:
 # 纯函数：build_supply_chain_user_message
 # ============================================================
 
+
 class TestUserMessage:
     def test_without_hint_is_topic_only(self):
         msg = build_supply_chain_user_message("光模块产业链", None)
@@ -65,6 +66,7 @@ class TestUserMessage:
 # 纯函数：_status_from_result
 # ============================================================
 
+
 class TestStatusFromResult:
     def test_success(self):
         assert _status_from_result(True, "# x") == "success"
@@ -83,6 +85,7 @@ class TestStatusFromResult:
 # report_id 唯一化
 # ============================================================
 
+
 class TestResolveUniqueReportId:
     def test_absent_returns_seq_1(self, monkeypatch):
         mock_db = MagicMock()
@@ -96,8 +99,8 @@ class TestResolveUniqueReportId:
     def test_conflict_appends_sequence(self, monkeypatch):
         existing = {"sc_202606271530_1": True}
         mock_db = MagicMock()
-        mock_db.get_supply_chain_report.side_effect = (
-            lambda rid: object() if existing.get(rid) else None
+        mock_db.get_supply_chain_report.side_effect = lambda rid: (
+            object() if existing.get(rid) else None
         )
         monkeypatch.setattr(svc_mod, "get_db", lambda: mock_db)
         from src.services.supply_chain_report_service import _resolve_unique_report_id
@@ -109,6 +112,7 @@ class TestResolveUniqueReportId:
 # ============================================================
 # generate_report
 # ============================================================
+
 
 class TestGenerateReport:
     def _wire(self, monkeypatch, tmp_path, result):
@@ -125,7 +129,10 @@ class TestGenerateReport:
     def test_success_writes_md_and_saves_metadata(self, monkeypatch, tmp_path):
         fake_executor, mock_db = self._wire(monkeypatch, tmp_path, _fake_result())
         saved: Dict[str, Any] = {}
-        mock_db.save_supply_chain_report.side_effect = lambda **kw: (saved.update(kw), True)[1]
+        mock_db.save_supply_chain_report.side_effect = lambda **kw: (
+            saved.update(kw),
+            True,
+        )[1]
 
         out = SupplyChainReportService().generate_report("光模块产业链", "CPO 上游")
 
@@ -168,7 +175,9 @@ class TestGenerateReport:
             SupplyChainReportService().generate_report("   ")
 
     def test_partial_status_when_failed_with_content(self, monkeypatch, tmp_path):
-        self._wire(monkeypatch, tmp_path, _fake_result(success=False, content="# 部分报告"))
+        self._wire(
+            monkeypatch, tmp_path, _fake_result(success=False, content="# 部分报告")
+        )
         out = SupplyChainReportService().generate_report("光模块产业链")
         assert out["status"] == "partial"
 
@@ -209,6 +218,7 @@ class TestGenerateReport:
 # ============================================================
 # list / get / delete（代理层）
 # ============================================================
+
 
 class TestProxies:
     def test_list_reports(self, monkeypatch):
@@ -282,6 +292,7 @@ class TestProxies:
 # PDF
 # ============================================================
 
+
 class TestPdf:
     def test_existing_pdf_returned(self, monkeypatch, tmp_path):
         pdf = tmp_path / "r.pdf"
@@ -304,7 +315,9 @@ class TestPdf:
         mock_db.get_supply_chain_report.return_value = record
         monkeypatch.setattr(svc_mod, "get_db", lambda: mock_db)
         monkeypatch.setattr("src.md2pdf.markdown_to_pdf_file", lambda _md, out: out)
-        assert SupplyChainReportService().get_pdf_path("r") == str(md.with_suffix(".pdf"))
+        assert SupplyChainReportService().get_pdf_path("r") == str(
+            md.with_suffix(".pdf")
+        )
         mock_db.set_supply_chain_pdf_path.assert_called_once()
 
     def test_lazy_generate_failure_returns_none(self, monkeypatch, tmp_path):
@@ -356,6 +369,7 @@ class TestPdf:
 # 清理
 # ============================================================
 
+
 class TestPrune:
     def test_prune_and_clean_files(self, monkeypatch, tmp_path):
         md = tmp_path / "a.md"
@@ -394,6 +408,7 @@ class TestPrune:
 # 杂项：目录/executor 缓存
 # ============================================================
 
+
 class TestMisc:
     def test_get_dir_creates_and_returns(self, monkeypatch, tmp_path):
         target = tmp_path / "sc"
@@ -408,22 +423,92 @@ class TestMisc:
 
         monkeypatch.setattr(svc_mod, "_executor_instance", None)
         monkeypatch.setattr(svc_mod, "get_config", lambda: SimpleNamespace())
-        monkeypatch.setattr(fac, "build_supply_chain_executor", lambda _cfg: "FAKE_EXEC", raising=False)
+        monkeypatch.setattr(
+            fac, "build_supply_chain_executor", lambda _cfg: "FAKE_EXEC", raising=False
+        )
         from src.services.supply_chain_report_service import _get_executor
 
         assert _get_executor() == "FAKE_EXEC"
         # 第二次应命中缓存（不再调用 factory）
-        monkeypatch.setattr(fac, "build_supply_chain_executor", lambda _cfg: "SHOULD_NOT_CALL", raising=False)
+        monkeypatch.setattr(
+            fac,
+            "build_supply_chain_executor",
+            lambda _cfg: "SHOULD_NOT_CALL",
+            raising=False,
+        )
         assert _get_executor() == "FAKE_EXEC"
+
+
+class TestValidateDeepDivePayload:
+    """[v3 PR-C+] SupplyChainDeepDiveV3 schema 校验闭环。"""
+
+    def test_none_returns_none(self) -> None:
+        assert SupplyChainReportService._validate_deep_dive_payload(None) is None
+
+    def test_non_dict_returns_none(self) -> None:
+        assert (
+            SupplyChainReportService._validate_deep_dive_payload("not a dict") is None
+        )  # type: ignore[arg-type]
+        assert SupplyChainReportService._validate_deep_dive_payload(123) is None  # type: ignore[arg-type]
+        assert SupplyChainReportService._validate_deep_dive_payload([]) is None  # type: ignore[arg-type]
+
+    def test_backup_layer_dict_returns_none(self) -> None:
+        """含 _raw_markdown_section 的备份层 dict 不应被识别为 deep_dive_obj。"""
+        payload = {"_raw_markdown_section": "## §6 ..."}
+        assert SupplyChainReportService._validate_deep_dive_payload(payload) is None
+
+    def test_missing_required_keys_returns_none(self) -> None:
+        """缺少 ticker/company 顶层键 → 不识别。"""
+        assert (
+            SupplyChainReportService._validate_deep_dive_payload({"foo": "bar"}) is None
+        )
+
+    def test_valid_payload_validates_and_dumps(self) -> None:
+        """合法 SupplyChainDeepDiveV3 payload 通过校验并标准化。"""
+        payload = {
+            "ticker": "600519",
+            "company": "贵州茅台",
+            "sections_executed": ["product_matrix"],
+        }
+        out = SupplyChainReportService._validate_deep_dive_payload(payload)
+        assert out is not None
+        assert out["ticker"] == "600519"
+        assert out["company"] == "贵州茅台"
+        assert "aggregate_confidence" in out  # 由 Pydantic default 填充
+
+    def test_invalid_payload_fails_closed_returns_none(self) -> None:
+        """校验失败的 payload 返回 None（走备份层）。"""
+        # ticker 违反 pattern
+        bad = {"ticker": "!!!invalid!!!", "company": "X"}
+        assert SupplyChainReportService._validate_deep_dive_payload(bad) is None
+
+    def test_section_status_method_still_works_after_validation(self) -> None:
+        """验证后的 dump 可以重建 SupplyChainDeepDiveV3 并调 section_status。"""
+        from src.schemas.supply_chain import SupplyChainDeepDiveV3
+
+        payload = {
+            "ticker": "600519",
+            "company": "X",
+            "sections_executed": ["product_matrix", "market_position"],
+        }
+        out = SupplyChainReportService._validate_deep_dive_payload(payload)
+        assert out is not None
+        rebuilt = SupplyChainDeepDiveV3.model_validate(out)
+        status = rebuilt.section_status()
+        assert status["product_matrix"] == "executed"
+        assert status["financial_quality"] == "skipped"
 
 
 # ============================================================
 # Prompt 线索核验规则（B3：仅常量段，无线索时不生效）
 # ============================================================
 
+
 class TestClueRulesInPrompt:
     def test_system_prompt_template_contains_clue_rules(self):
-        from src.agent.supply_chain_executor import _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE as tpl
+        from src.agent.supply_chain_executor import (
+            _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE as tpl,
+        )
 
         assert "线索核验规则" in tpl
         assert "调查目标" in tpl

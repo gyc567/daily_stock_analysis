@@ -135,6 +135,13 @@ class SupplyChainReportService:
         """[v3 PR-C] 从 LLM 输出的完整报告中提取 §6-§10 + 脚注 段。
 
         灰度关闭 / 段不存在 → 返回 None。
+
+        数据持久化语义（两层兜底）：
+        - 备份层（必走）：把 §6-§10 段原文作为 ``_raw_markdown_section`` 存入 deep_dive_json，
+          保证 Markdown 渲染层永远有可用数据。
+        - 结构化层（可选）：当上游 executor 已经解析为 :class:`SupplyChainDeepDiveV3`
+          字段集合（含 ``ticker``/``company`` 顶层键，且不含 ``_raw_markdown_section``），
+          走 schema 校验闭环，写入 ``deep_dive_obj``；失败回退到备份层并记录 warning。
         """
         if not self._is_deep_dive_enabled():
             return None
@@ -146,12 +153,148 @@ class SupplyChainReportService:
             section = extract_deep_dive_section_from_markdown(markdown or "")
             if not section:
                 return None
-            # 浅解析：直接把 §6-§10 段原文存到 deep_dive_json 中作为 backup；
-            # 完整的 SupplyChainDeepDiveV3 构造由 executor 解析后传入（PR-C+ 增强预留）。
+            # 备份层：§6-§10 段原文（渲染层兜底用）
             return {"_raw_markdown_section": section}
         except Exception as exc:  # noqa: BLE001
             logger.warning("[SupplyChainReport v3] extract_deep_dive 失败: %s", exc)
             return None
+
+    @staticmethod
+    def _validate_deep_dive_payload(
+        payload: "Optional[Dict[str, Any]]",
+    ) -> "Optional[Dict[str, Any]]":
+        """[v3 PR-C+] 对 ``deep_dive_obj`` 形式的 payload 走 schema 校验闭环。
+
+        仅识别「顶层含 ticker/company 且不含 _raw_markdown_section」的 dict，
+        通过 :meth:`SupplyChainDeepDiveV3.model_validate` 走完整 @model_validator
+        （一致性 / TAM 不崩 / 占比加和容忍）后重新 dump。任何校验失败 → 返回 None，
+        让调用方走备份层渲染路径。返回的 dict 与输入是 schema 标准化后的结果，
+        可安全地 ``json.dumps`` 持久化。
+        """
+        if not isinstance(payload, dict):
+            return None
+        if "_raw_markdown_section" in payload:
+            return None
+        if not {"ticker", "company"}.issubset(payload.keys()):
+            return None
+        try:
+            from src.schemas.supply_chain import SupplyChainDeepDiveV3
+        except ImportError:
+            return None
+        try:
+            validated = SupplyChainDeepDiveV3.model_validate(payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[SupplyChainReport v3] deep_dive schema 校验失败, 走备份层: %s", exc
+            )
+            return None
+        # 使用 mode='json' 让 Pydantic 把 datetime/date 等转 ISO 字符串，
+        # 否则 json.dumps() 会抛 ``TypeError: Object of type datetime is not
+        # JSON serializable``（影响 fresh_at / sections_executed 等时间字段）。
+        return validated.model_dump(mode="json")
+
+    @staticmethod
+    def _resolve_generate_report_inputs(
+        raw_topic: str,
+        raw_hint: Optional[str],
+        raw_code: Optional[str],
+        raw_name: Optional[str],
+    ) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
+        """[拆分] 归一化生成报告入参：topic / hint / 6 位 A 股代码 / 名称。
+
+        Returns:
+            (topic, hint, code, name)
+        """
+        topic = (raw_topic or "").strip()
+        if not topic:
+            raise SupplyChainReportInputError("分析主题不能为空")
+        hint = (raw_hint or "").strip() or None
+        code: Optional[str] = None
+        if raw_code:
+            code = SupplyChainReportService._normalize_stock_code(raw_code)
+        name = (str(raw_name).strip() if raw_name else "") or None
+        # 名称未提供时，用代码兜底（让 helper 渲染为 ``600519（600519）...``）
+        if code and not name:
+            name = code
+        return topic, hint, code, name
+
+    @staticmethod
+    def _normalize_stock_code(raw_code: Any) -> Optional[str]:
+        """[拆分] 单股代码归一化（与 deep_research / policy_minesweeper 一致）。"""
+        try:
+            from data_provider.base import normalize_stock_code
+        except ImportError:
+            normalize_stock_code = None  # type: ignore[assignment]
+        normalized = (
+            normalize_stock_code(str(raw_code).strip())
+            if normalize_stock_code is not None
+            else str(raw_code).strip()
+        )
+        if normalized and normalized.isdigit() and len(normalized) == 6:
+            return normalized
+        if normalized:
+            logger.warning(
+                "[SupplyChainReport] stock_code %r 归一化后非 6 位 A 股，fallback 主题型",
+                raw_code,
+            )
+        return None
+
+    def _collect_deep_dive_json(self, markdown: str, result: Any) -> Optional[str]:
+        """[拆分] 合并 deep_dive 备份层 + 结构化层（schema 校验闭环）成 JSON 字符串。"""
+        deep_dive_data = self._extract_deep_dive_section(markdown)
+        deep_dive_obj = getattr(result, "deep_dive_obj", None)
+        validated_obj = self._validate_deep_dive_payload(deep_dive_obj)
+        if validated_obj is not None:
+            if deep_dive_data is None:
+                deep_dive_data = {}
+            deep_dive_data["deep_dive_obj"] = validated_obj
+        if deep_dive_data is None:
+            return None
+        import json as _json
+
+        return _json.dumps(deep_dive_data, ensure_ascii=False)
+
+    @staticmethod
+    def _write_markdown_file(md_path: Path, markdown: str) -> bool:
+        """[拆分] 把 markdown 写到磁盘，失败返回 False（不抛）。"""
+        if not markdown:
+            return False
+        try:
+            md_path.write_text(markdown, encoding="utf-8")
+            return True
+        except OSError as exc:
+            logger.error("[SupplyChainReport] 写报告文件失败 %s: %s", md_path, exc)
+            return False
+
+    @staticmethod
+    def _save_report_to_db(
+        report_id: str,
+        topic: str,
+        hint: Optional[str],
+        code: Optional[str],
+        name: Optional[str],
+        md_path: Path,
+        status: str,
+        result: Any,
+        result_error: Optional[str],
+        deep_dive_json: Optional[str],
+    ) -> None:
+        """[拆分] 落库 supply_chain_reports 表（含所有字段映射）。"""
+        get_db().save_supply_chain_report(
+            report_id=report_id,
+            topic=topic,
+            research_hint=hint,
+            stock_code=code,
+            stock_name=name,
+            md_path=str(md_path),
+            status=status,
+            total_steps=int(getattr(result, "total_steps", 0) or 0),
+            total_tokens=int(getattr(result, "total_tokens", 0) or 0),
+            provider=str(getattr(result, "provider", "") or ""),
+            model=getattr(result, "model", None),
+            error=result_error if status != "success" else None,
+            deep_dive_json=deep_dive_json,
+        )
 
     # ------------------------------------------------------------------
     # 生成
@@ -173,34 +316,9 @@ class SupplyChainReportService:
         两者至少给一个时，PDF 文件名遵循 ``股票名（代码）报告类型YYYYMMDD.pdf``；
         都为空时仍走主题型命名（向后兼容历史报告）。
         """
-        topic = (raw_topic or "").strip()
-        if not topic:
-            raise SupplyChainReportInputError("分析主题不能为空")
-        hint = (raw_hint or "").strip() or None
-        # 单股代码归一化（与 deep_research / policy_minesweeper 一致）
-        code: Optional[str] = None
-        if raw_code:
-            try:
-                from data_provider.base import normalize_stock_code
-            except ImportError:
-                normalize_stock_code = None  # type: ignore[assignment]
-            normalized = (
-                normalize_stock_code(str(raw_code).strip())
-                if normalize_stock_code is not None
-                else str(raw_code).strip()
-            )
-            if normalized and normalized.isdigit() and len(normalized) == 6:
-                code = normalized
-            elif normalized:
-                # 非 A 股代码：留空（fallback 主题型）
-                logger.warning(
-                    "[SupplyChainReport] stock_code %r 归一化后非 6 位 A 股，fallback 主题型",
-                    raw_code,
-                )
-        name = (str(raw_name).strip() if raw_name else "") or None
-        # 名称未提供时，用代码兜底（让 helper 渲染为 ``600519（600519）...``）
-        if code and not name:
-            name = code
+        topic, hint, code, name = self._resolve_generate_report_inputs(
+            raw_topic, raw_hint, raw_code, raw_name
+        )
 
         report_id = _resolve_unique_report_id(datetime.now())
         report_dir = get_supply_chain_report_dir()
@@ -218,38 +336,22 @@ class SupplyChainReportService:
 
         markdown = getattr(result, "content", "") or ""
         status = _status_from_result(bool(getattr(result, "success", False)), markdown)
-        # [v3 PR-C] 从 LLM 输出中提取 §6-§10 深度小节段（灰度开关控制）
-        deep_dive_data = self._extract_deep_dive_section(markdown)
-        import json as _json
+        deep_dive_json = self._collect_deep_dive_json(markdown, result)
 
-        deep_dive_json: Optional[str] = (
-            _json.dumps(deep_dive_data, ensure_ascii=False)
-            if deep_dive_data is not None
-            else None
-        )
-        write_ok = False
-        if markdown:
-            try:
-                md_path.write_text(markdown, encoding="utf-8")
-                write_ok = True
-            except OSError as exc:
-                logger.error("[SupplyChainReport] 写报告文件失败 %s: %s", md_path, exc)
+        write_ok = self._write_markdown_file(md_path, markdown)
 
         result_error: Optional[str] = getattr(result, "error", None)
         if write_ok:
-            get_db().save_supply_chain_report(
+            self._save_report_to_db(
                 report_id=report_id,
                 topic=topic,
-                research_hint=hint,
-                stock_code=code,
-                stock_name=name,
-                md_path=str(md_path),
+                hint=hint,
+                code=code,
+                name=name,
+                md_path=md_path,
                 status=status,
-                total_steps=int(getattr(result, "total_steps", 0) or 0),
-                total_tokens=int(getattr(result, "total_tokens", 0) or 0),
-                provider=str(getattr(result, "provider", "") or ""),
-                model=getattr(result, "model", None),
-                error=result_error if status != "success" else None,
+                result=result,
+                result_error=result_error,
                 deep_dive_json=deep_dive_json,
             )
             self._prune_and_clean_files(_MAX_REPORTS)

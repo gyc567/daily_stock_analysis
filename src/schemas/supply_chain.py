@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
+import icontract
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -180,7 +181,7 @@ class ChainNodeV3(BaseModel):
 class KBHitRef(BaseModel):
     """知识库命中引用（用于报告「知识库参考」小节）"""
 
-    model_config = ConfigDict(strict=True, frozen=True)
+    model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
 
     document_id: str = Field(...)
     document_title: str = Field(...)
@@ -201,7 +202,7 @@ class KBHitRef(BaseModel):
 class DataCompleteness(BaseModel):
     """数据完整度披露（v2 新增：让报告可信度可验证）。"""
 
-    model_config = ConfigDict(strict=True, frozen=True)
+    model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
 
     upstream_total: int = Field(default=0, ge=0)
     upstream_with_concentration: int = Field(default=0, ge=0)
@@ -301,7 +302,7 @@ class SupplyChainV2(BaseModel):
     保证调用方渐进迁移。
     """
 
-    model_config = ConfigDict(strict=True, frozen=True)
+    model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
 
     # v1 兼容
     data_sources: List[str] = Field(default_factory=list)
@@ -369,7 +370,7 @@ PenaltyKey = Literal[
 class SerenityFactorScore(BaseModel):
     """单个 Serenity 因子的评分 + 证据链"""
 
-    model_config = ConfigDict(strict=True, frozen=True)
+    model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
 
     key: FactorKey = Field(...)
     rating: float = Field(..., ge=0.0, le=5.0, description="原始 0-5 评分")
@@ -387,7 +388,7 @@ class SerenityFactorScore(BaseModel):
 class SerenityPenaltyScore(BaseModel):
     """单个惩罚项的评分"""
 
-    model_config = ConfigDict(strict=True, frozen=True)
+    model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
 
     key: PenaltyKey = Field(...)
     rating: float = Field(..., ge=0.0, le=5.0)
@@ -401,7 +402,7 @@ class SerenityScoreResult(BaseModel):
     两条调用路径（SupplyChainDataService / SupplyChainExecutor）共享同一 schema。
     """
 
-    model_config = ConfigDict(strict=True, frozen=True)
+    model_config = ConfigDict(strict=True, frozen=True, validate_assignment=True)
 
     ticker: str = Field(...)
     company: str = Field(...)
@@ -757,6 +758,10 @@ class SupplyChainDeepDiveV3(BaseModel):
             for sec in all_secs
         }
 
+    @icontract.ensure(
+        lambda result: result in {"high", "medium", "low"},
+        "compute_aggregate_confidence 必须返回 high/medium/low",
+    )
     def compute_aggregate_confidence(self) -> AggregateConfidence:
         """推导 aggregate_confidence（纯函数，不修改 self）。
 
@@ -771,34 +776,37 @@ class SupplyChainDeepDiveV3(BaseModel):
         if len(self.sections_executed) < 3:
             return "low"
         strong_levels = {"primary", "media", "analysis", "kb_doc"}
-        analysis_count = 0
-        for sec in self.sections_executed:
-            if sec == "product_matrix":
-                if any(
-                    p.evidence_strength in strong_levels for p in self.product_matrix
-                ):
-                    analysis_count += 1
-            elif sec == "market_position":
-                if any(
-                    p.evidence_strength in strong_levels for p in self.market_position
-                ):
-                    analysis_count += 1
-            elif sec == "key_partners":
-                if any(
-                    p.evidence_strength in strong_levels
-                    for p in self.key_customers + self.key_suppliers
-                ):
-                    analysis_count += 1
-            elif sec == "industry_outlook":
-                if any(
-                    p.evidence_strength in strong_levels for p in self.industry_outlook
-                ):
-                    analysis_count += 1
-            elif sec == "financial_quality":
-                if any(
-                    p.evidence_strength in strong_levels for p in self.financial_quality
-                ):
-                    analysis_count += 1
+        analysis_count = sum(
+            1
+            for sec in self.sections_executed
+            if self._section_has_strong_evidence(sec, strong_levels)
+        )
         if len(self.sections_executed) >= 4 and analysis_count >= 3:
             return "high"
         return "medium"
+
+    def _section_has_strong_evidence(
+        self, section: str, strong_levels: "set[str]"
+    ) -> bool:
+        """判断单 section 是否含 strong_levels 之一（拆分 compute_aggregate_confidence 用）。
+
+        items 显式标注为 Sequence[Any] 是为了避免 mypy 在 5 个 elif 分支上做
+        不正确的类型收窄（每个分支的 list 元素 schema 不同，无法用 union 表达）。
+        运行时所有元素都有 ``evidence_strength`` 字段（getattr 防御性兜底）。
+        """
+        items: Any
+        if section == "product_matrix":
+            items = self.product_matrix
+        elif section == "market_position":
+            items = self.market_position
+        elif section == "key_partners":
+            items = list(self.key_customers) + list(self.key_suppliers)
+        elif section == "industry_outlook":
+            items = self.industry_outlook
+        elif section == "financial_quality":
+            items = self.financial_quality
+        else:
+            return False
+        return any(
+            getattr(item, "evidence_strength", None) in strong_levels for item in items
+        )
