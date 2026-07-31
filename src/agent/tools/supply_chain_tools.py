@@ -786,124 +786,11 @@ def _fetch_real_stock_info(ticker: str) -> Dict[str, Any]:
 def _fetch_real_stock_info_uncached(ticker: str) -> Dict[str, Any]:
     """[v3 P6] 实际的 4 个网络调用（并发执行），无缓存层。"""
     try:
-        from src.agent.tools.data_tools import _get_fetcher_manager
-        from src.agent.tools.data_tools import (
-            build_cross_validation_block,
+        bundle, quote, belong_boards, _cv = _run_concurrent_v3_fetches(ticker)
+        valuation_data, quote_dict = _extract_valuation_from_quote(quote)
+        fundamental_context = _build_v3_fundamental_context(
+            valuation_data, bundle, belong_boards
         )
-
-        manager = _get_fetcher_manager()
-
-        # [v3 P6 优化] 并发执行 4 个独立网络调用
-        def _fetch_bundle() -> Dict[str, Any]:
-            try:
-                result = manager._fundamental_adapter.get_fundamental_bundle(ticker)
-                return cast(Dict[str, Any], result)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("[SupplyChain v3] ak_bundle 失败 %s: %s", ticker, exc)
-                return {
-                    "status": "failed",
-                    "growth": {},
-                    "earnings": {},
-                    "institution": {},
-                    "errors": [str(exc)],
-                }
-
-        def _fetch_quote() -> Any:
-            try:
-                return manager.get_realtime_quote(ticker)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("[SupplyChain v3] quote 失败 %s: %s", ticker, exc)
-                return None
-
-        def _fetch_boards() -> List[Dict[str, Any]]:
-            try:
-                return manager.get_belong_boards(ticker) or []
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("[SupplyChain v3] boards 失败 %s: %s", ticker, exc)
-                return []
-
-        def _fetch_cv() -> Any:
-            try:
-                return build_cross_validation_block(
-                    ticker,
-                    [
-                        "pe_ratio",
-                        "pb_ratio",
-                        "total_mv",
-                        "circ_mv",
-                        "revenue",
-                        "net_profit",
-                        "roe",
-                        "gross_margin",
-                    ],
-                    period="latest",
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("[SupplyChain v3] cross_validation 失败: %s", exc)
-                return None
-
-        with ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix=f"v3-info-{ticker}"
-        ) as ex:
-            f_bundle = ex.submit(_fetch_bundle)
-            f_quote = ex.submit(_fetch_quote)
-            f_boards = ex.submit(_fetch_boards)
-            f_cv = ex.submit(_fetch_cv)
-            bundle = f_bundle.result()
-            quote = f_quote.result()
-            belong_boards = f_boards.result()
-            _cv = f_cv.result()
-
-        # 2. valuation: 从 quote 提取 PE/PB/total_mv（同时缓存完整 quote 用于 _format_real_data_for_prompt）
-        valuation_data: Dict[str, Any] = {}
-        quote_dict: Dict[str, Any] = {}
-        if quote is not None:
-            valuation_data = {
-                "pe_ratio": getattr(quote, "pe_ratio", None),
-                "pb_ratio": getattr(quote, "pb_ratio", None),
-                "total_mv": getattr(quote, "total_mv", None),
-                "circ_mv": getattr(quote, "circ_mv", None),
-            }
-            # 保留 price/change_pct/turnover_rate 等供下游 _format_real_data_for_prompt 直接读取
-            quote_dict = {
-                "price": getattr(quote, "price", None),
-                "change_pct": getattr(quote, "change_pct", None),
-                "turnover_rate": getattr(quote, "turnover_rate", None),
-                **valuation_data,
-            }
-
-        # 3. 拼装成 v3 prompt 期望的 fundamental_context 结构
-        def _block(status: str, data: Dict[str, Any]) -> Dict[str, Any]:
-            return {
-                "status": status,
-                "data": data,
-                "source_chain": [],
-                "errors": [],
-            }
-
-        fundamental_context: Dict[str, Any] = {
-            "valuation": _block(
-                "ok" if valuation_data.get("pe_ratio") else "partial",
-                valuation_data,
-            ),
-            "growth": _block(
-                "ok" if bundle.get("growth") else "partial",
-                bundle.get("growth") or {},
-            ),
-            "earnings": _block(
-                "ok" if bundle.get("earnings") else "partial",
-                bundle.get("earnings") or {},
-            ),
-            "institution": _block(
-                "ok" if bundle.get("institution") else "partial",
-                bundle.get("institution") or {},
-            ),
-            "belong_boards": belong_boards,
-            "coverage": {},
-            "source_chain": bundle.get("source_chain") or [],
-            "errors": bundle.get("errors") or [],
-        }
-
         return {
             "code": ticker,
             "fundamental_context": fundamental_context,
@@ -914,6 +801,150 @@ def _fetch_real_stock_info_uncached(ticker: str) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         logger.debug("[SupplyChain v3] fetch_real_stock_info 失败: %s", exc)
         return {}
+
+
+def _run_concurrent_v3_fetches(
+    ticker: str,
+) -> Tuple[Dict[str, Any], Any, List[Dict[str, Any]], Any]:
+    """[v3 P6] 并发执行 4 个独立网络调用（fundamental bundle / quote / boards / cross-validation）。"""
+    from src.agent.tools.data_tools import _get_fetcher_manager
+
+    manager = _get_fetcher_manager()
+
+    with ThreadPoolExecutor(
+        max_workers=4, thread_name_prefix=f"v3-info-{ticker}"
+    ) as ex:
+        f_bundle = ex.submit(_fetch_bundle_v3, manager, ticker)
+        f_quote = ex.submit(_fetch_quote_v3, manager, ticker)
+        f_boards = ex.submit(_fetch_boards_v3, manager, ticker)
+        f_cv = ex.submit(_fetch_cross_validation_v3, ticker)
+        bundle = f_bundle.result()
+        quote = f_quote.result()
+        belong_boards = f_boards.result()
+        cv = f_cv.result()
+    return bundle, quote, belong_boards, cv
+
+
+def _fetch_bundle_v3(manager: Any, ticker: str) -> Dict[str, Any]:
+    """[v3] 拉取 fundamental bundle；失败返回 status='failed' 占位 dict。"""
+    try:
+        return cast(
+            Dict[str, Any], manager._fundamental_adapter.get_fundamental_bundle(ticker)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[SupplyChain v3] ak_bundle 失败 %s: %s", ticker, exc)
+        return {
+            "status": "failed",
+            "growth": {},
+            "earnings": {},
+            "institution": {},
+            "errors": [str(exc)],
+        }
+
+
+def _fetch_quote_v3(manager: Any, ticker: str) -> Any:
+    """[v3] 拉取实时行情；失败返回 None。"""
+    try:
+        return manager.get_realtime_quote(ticker)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[SupplyChain v3] quote 失败 %s: %s", ticker, exc)
+        return None
+
+
+def _fetch_boards_v3(manager: Any, ticker: str) -> List[Dict[str, Any]]:
+    """[v3] 拉取所属板块；失败返回空 list。"""
+    try:
+        return manager.get_belong_boards(ticker) or []
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[SupplyChain v3] boards 失败 %s: %s", ticker, exc)
+        return []
+
+
+def _fetch_cross_validation_v3(ticker: str) -> Any:
+    """[v3] 拉取 cross-validation 块；失败返回 None。"""
+    from src.agent.tools.data_tools import build_cross_validation_block
+
+    try:
+        return build_cross_validation_block(
+            ticker,
+            [
+                "pe_ratio",
+                "pb_ratio",
+                "total_mv",
+                "circ_mv",
+                "revenue",
+                "net_profit",
+                "roe",
+                "gross_margin",
+            ],
+            period="latest",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[SupplyChain v3] cross_validation 失败: %s", exc)
+        return None
+
+
+def _extract_valuation_from_quote(
+    quote: Any,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """[v3 P6] 从实时行情对象提取 PE/PB/total_mv/circ_mv 与完整 quote dict。
+
+    返回 (valuation_data, quote_dict)，quote 为 None 时两者均为空 dict。
+    """
+    if quote is None:
+        return {}, {}
+    valuation_data = {
+        "pe_ratio": getattr(quote, "pe_ratio", None),
+        "pb_ratio": getattr(quote, "pb_ratio", None),
+        "total_mv": getattr(quote, "total_mv", None),
+        "circ_mv": getattr(quote, "circ_mv", None),
+    }
+    quote_dict = {
+        "price": getattr(quote, "price", None),
+        "change_pct": getattr(quote, "change_pct", None),
+        "turnover_rate": getattr(quote, "turnover_rate", None),
+        **valuation_data,
+    }
+    return valuation_data, quote_dict
+
+
+def _build_v3_fundamental_context(
+    valuation_data: Dict[str, Any],
+    bundle: Dict[str, Any],
+    belong_boards: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """[v3 P6] 拼装成 v3 prompt 期望的 fundamental_context 结构。"""
+
+    def _block(status: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": status,
+            "data": data,
+            "source_chain": [],
+            "errors": [],
+        }
+
+    return {
+        "valuation": _block(
+            "ok" if valuation_data.get("pe_ratio") else "partial",
+            valuation_data,
+        ),
+        "growth": _block(
+            "ok" if bundle.get("growth") else "partial",
+            bundle.get("growth") or {},
+        ),
+        "earnings": _block(
+            "ok" if bundle.get("earnings") else "partial",
+            bundle.get("earnings") or {},
+        ),
+        "institution": _block(
+            "ok" if bundle.get("institution") else "partial",
+            bundle.get("institution") or {},
+        ),
+        "belong_boards": belong_boards,
+        "coverage": {},
+        "source_chain": bundle.get("source_chain") or [],
+        "errors": bundle.get("errors") or [],
+    }
 
 
 def _fetch_real_realtime_quote(ticker: str) -> Dict[str, Any]:
@@ -958,6 +989,84 @@ def _fetch_real_realtime_quote(ticker: str) -> Dict[str, Any]:
         return {}
 
 
+def _safe_format_value(v: Any) -> str:
+    """安全地转字符串并转义花括号（避免下游 .format() KeyError）。"""
+    s = str(v) if v is not None else ""
+    return s.replace("{", "(").replace("}", ")")
+
+
+def _format_quote_line(quote: Dict[str, Any], parts: List[str]) -> None:
+    """[v3 真实数据] 格式化实时行情字段到 parts（in-place）。"""
+    price = quote.get("price")
+    change_pct = quote.get("change_pct")
+    pe = quote.get("pe_ratio")
+    pb = quote.get("pb_ratio")
+    total_mv = quote.get("total_mv")
+    turnover = quote.get("turnover_rate")
+    if price is not None:
+        parts.append("现价=" + _safe_format_value(price))
+        parts.append("涨幅=" + _safe_format_value(change_pct) + "%")
+    if pe is not None:
+        parts.append("PE=" + _safe_format_value(pe))
+    if pb is not None:
+        parts.append("PB=" + _safe_format_value(pb))
+    if total_mv is not None:
+        parts.append("总市值=" + _safe_format_value(round(total_mv / 1e8, 2)) + "亿元")
+    if turnover is not None:
+        parts.append("换手率=" + _safe_format_value(turnover) + "%")
+
+
+def _format_fundamental_lines(info: Dict[str, Any], parts: List[str]) -> None:
+    """[v3 真实数据] 格式化板块 / 估值 / 增长 / 财报字段到 parts（in-place）。"""
+    _append_board_lines(info, parts)
+    fc = info.get("fundamental_context") or {}
+    _append_valuation_lines(fc.get("valuation") or {}, parts)
+    _append_growth_lines(fc.get("growth") or {}, parts)
+    _append_earnings_lines(fc.get("earnings") or {}, parts)
+
+
+def _append_board_lines(info: Dict[str, Any], parts: List[str]) -> None:
+    """[拆分] 板块字段格式化到 parts。"""
+    boards = info.get("belong_boards") or []
+    if not boards:
+        return
+    board_names = [b.get("name") for b in boards[:10] if b.get("name")]
+    if board_names:
+        parts.append(
+            "所属板块=" + ",".join([_safe_format_value(n) for n in board_names])
+        )
+
+
+def _append_valuation_lines(valuation: Dict[str, Any], parts: List[str]) -> None:
+    """[拆分] 估值字段格式化（PE / PB / total_mv）。"""
+    data = valuation.get("data") or {}
+    for k in ("pe_ratio", "pb_ratio", "total_mv"):
+        v = data.get(k)
+        if v is not None:
+            parts.append(k + "=" + _safe_format_value(v))
+
+
+def _append_growth_lines(growth: Dict[str, Any], parts: List[str]) -> None:
+    """[拆分] 增长字段格式化（营收 yoy / 净利 yoy / ROE / 毛利率）。"""
+    data = growth.get("data") or {}
+    for k in ("revenue_yoy", "net_profit_yoy", "roe", "gross_margin"):
+        v = data.get(k)
+        if v is not None:
+            parts.append(k + "=" + _safe_format_value(v))
+
+
+def _append_earnings_lines(earnings: Dict[str, Any], parts: List[str]) -> None:
+    """[拆分] 财报字段格式化（earnings.* 全部字段）。"""
+    if not isinstance(earnings, dict):
+        return
+    data = earnings.get("data") or {}
+    if not isinstance(data, dict):
+        return
+    for k, v in data.items():
+        if v is not None and isinstance(v, (str, int, float)):
+            parts.append("earnings." + k + "=" + _safe_format_value(v))
+
+
 def _format_real_data_for_prompt(
     info: Dict[str, Any],
     quote: Dict[str, Any],
@@ -967,57 +1076,17 @@ def _format_real_data_for_prompt(
 ) -> str:
     """把真实行情/板块/财务/行业 DNA 数据格式化为 ≤1500 token 的 prompt 上下文。
 
-    安全：所有值用 str() + replace('{', '') 防止 .format() 时的 KeyError。
+    安全：所有值用 _safe_format_value() 防止 .format() 时的 KeyError。
     """
     if not info and not quote:
         return "（真实数据源不可用——KB/工具均未命中）"
 
-    def _safe(v: Any) -> str:
-        s = str(v) if v is not None else ""
-        return s.replace("{", "(").replace("}", ")")
-
     parts: List[str] = []
     if quote:
-        price = quote.get("price")
-        change_pct = quote.get("change_pct")
-        pe = quote.get("pe_ratio")
-        pb = quote.get("pb_ratio")
-        total_mv = quote.get("total_mv")
-        turnover = quote.get("turnover_rate")
-        if price is not None:
-            parts.append("现价=" + _safe(price))
-            parts.append("涨幅=" + _safe(change_pct) + "%")
-        if pe is not None:
-            parts.append("PE=" + _safe(pe))
-        if pb is not None:
-            parts.append("PB=" + _safe(pb))
-        if total_mv is not None:
-            parts.append("总市值=" + _safe(round(total_mv / 1e8, 2)) + "亿元")
-        if turnover is not None:
-            parts.append("换手率=" + _safe(turnover) + "%")
+        _format_quote_line(quote, parts)
     if info:
-        boards = info.get("belong_boards") or []
-        if boards:
-            board_names = [b.get("name") for b in boards[:10] if b.get("name")]
-            if board_names:
-                parts.append("所属板块=" + ",".join([_safe(n) for n in board_names]))
-        fc = info.get("fundamental_context") or {}
-        valuation = (fc.get("valuation") or {}).get("data") or {}
-        if valuation:
-            for k in ("pe_ratio", "pb_ratio", "total_mv"):
-                v = valuation.get(k)
-                if v is not None:
-                    parts.append(k + "=" + _safe(v))
-        growth = (fc.get("growth") or {}).get("data") or {}
-        for k in ("revenue_yoy", "net_profit_yoy", "roe", "gross_margin"):
-            v = growth.get(k)
-            if v is not None:
-                parts.append(k + "=" + _safe(v))
-        earnings = (fc.get("earnings") or {}).get("data") or {}
-        if isinstance(earnings, dict):
-            for k, v in earnings.items():
-                if v is not None and isinstance(v, (str, int, float)):
-                    parts.append("earnings." + k + "=" + _safe(v))
+        _format_fundamental_lines(info, parts)
+
     if not parts:
         base = "（真实数据源返回空——Tushare 配额或网络问题）"
     else:
@@ -1037,29 +1106,37 @@ def _format_industry_dna_for_prompt(
 
     让 handler 即使在 KB 0 命中 / LLM 推断困难时，也能给出行业级别的真实数据。
     """
+    dna = _lookup_industry_dna(industry_hint, ticker, company)
+    if dna is None:
+        return "（行业 DNA 未命中——按行业知识推断，无具体行业基础数据）"
+
+    parts = _build_industry_dna_base_parts(dna)
+    sub_segment_block = _build_subsegment_block(dna)
+    if sub_segment_block:
+        parts.append(sub_segment_block)
+
+    return "【行业 DNA（直接引用，禁止修改或编造）】" + " | ".join(parts)
+
+
+def _lookup_industry_dna(industry_hint: str, ticker: str, company: str) -> Any:
+    """[拆分] 行业 DNA 多级 fallback 查找：industry_hint → company → ticker → board。"""
     from src.services.supply_chain.industry_dna_loader import (
         find_dna_by_keyword,
         find_dna_by_keywords,
-        list_slugs as _list_slugs,
     )
 
-    # 1. 从 industry_hint / company 推断 DNA
-    dna = None
-    for kw in [industry_hint, company, ticker]:
+    for kw in (industry_hint, company, ticker):
         if not kw:
             continue
         dna = find_dna_by_keyword(kw)
         if dna:
-            break
+            return dna
+    return find_dna_by_keywords([])
 
-    # 2. fallback：尝试 board 关键词
-    if not dna:
-        dna = find_dna_by_keywords([])
 
-    if not dna:
-        return "（行业 DNA 未命中——按行业知识推断，无具体行业基础数据）"
-
-    parts: List[str] = [
+def _build_industry_dna_base_parts(dna: Any) -> List[str]:
+    """[拆分] 行业 DNA 11 字段拼装（CR / 产品 / 玩家 / 客户 / 供应商 / 驱动 / 催化 / 替代 / 时间窗 / 来源）。"""
+    return [
         f"行业={dna.industry_name}",
         f"行业 CR/集中度={dna.concentration}",
         f"产品列表={','.join(dna.products[:8])}",
@@ -1073,38 +1150,46 @@ def _format_industry_dna_for_prompt(
         f"DNA 来源={dna.source}",
     ]
 
-    # [v3 P5] 子赛道级数字字段（market_share_pct_leaders / cr3 / cr5 / top_competitors）
-    sub_cr = (dna.extra or {}).get("subsegment_cr") or []
-    if isinstance(sub_cr, list) and sub_cr:
-        lines: List[str] = ["子赛道级数字（v3 §7 §9 prompt 直接读取）："]
-        for sub in sub_cr[:8]:
-            if not isinstance(sub, dict):
-                continue
-            name = sub.get("name") or "?"
-            leaders = sub.get("market_share_pct_leaders") or {}
-            leader_str = (
-                ", ".join(f"{k}:{v}%" for k, v in list(leaders.items())[:4])
-                if isinstance(leaders, dict)
-                else ""
-            )
-            cr3 = sub.get("cr3_pct")
-            cr5 = sub.get("cr5_pct")
-            trend = sub.get("share_trend")
-            comps = sub.get("top_competitors") or []
-            comp_str = "/".join(comps[:5]) if isinstance(comps, list) else ""
-            line = f"  - {name}: 龙头份额={leader_str}"
-            if cr3 is not None:
-                line += f"; CR3={cr3}%"
-            if cr5 is not None:
-                line += f"; CR5={cr5}%"
-            if trend:
-                line += f"; 趋势={trend}"
-            if comp_str:
-                line += f"; 主要竞品={comp_str}"
-            lines.append(line)
-        parts.append("\n".join(lines))
 
-    return "【行业 DNA（直接引用，禁止修改或编造）】" + " | ".join(parts)
+def _build_subsegment_block(dna: Any) -> str:
+    """[拆分] 子赛道级数字（market_share_pct_leaders / cr3 / cr5 / top_competitors）。"""
+    sub_cr = (dna.extra or {}).get("subsegment_cr") or []
+    if not isinstance(sub_cr, list) or not sub_cr:
+        return ""
+    lines: List[str] = ["子赛道级数字（v3 §7 §9 prompt 直接读取）："]
+    for sub in sub_cr[:8]:
+        line = _format_subsegment_line(sub)
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def _format_subsegment_line(sub: Any) -> str:
+    """[拆分] 单条 subsegment 行（领头份额 + CR3 / CR5 / 趋势 / 主要竞品）。"""
+    if not isinstance(sub, dict):
+        return ""
+    name = sub.get("name") or "?"
+    leaders = sub.get("market_share_pct_leaders") or {}
+    leader_str = (
+        ", ".join(f"{k}:{v}%" for k, v in list(leaders.items())[:4])
+        if isinstance(leaders, dict)
+        else ""
+    )
+    cr3 = sub.get("cr3_pct")
+    cr5 = sub.get("cr5_pct")
+    trend = sub.get("share_trend")
+    comps = sub.get("top_competitors") or []
+    comp_str = "/".join(comps[:5]) if isinstance(comps, list) else ""
+    line = f"  - {name}: 龙头份额={leader_str}"
+    if cr3 is not None:
+        line += f"; CR3={cr3}%"
+    if cr5 is not None:
+        line += f"; CR5={cr5}%"
+    if trend:
+        line += f"; 趋势={trend}"
+    if comp_str:
+        line += f"; 主要竞品={comp_str}"
+    return line
 
 
 def _format_v3_kb_hits(
@@ -1152,38 +1237,32 @@ def _get_v3_chat_llm() -> Any:
         return None
 
 
-def _parse_v3_json(content: str) -> Dict[str, Any]:
-    """从 LLM 输出抽取 JSON dict。多层容错：markdown 围栏 + 嵌套 + 截断修复。
+def _strip_markdown_fence(text: str) -> str:
+    """剥离 markdown ```json ... ``` 围栏，返回内部文本；无围栏返回原文。"""
+    import re
 
-    容错顺序：
-    1. markdown ```json ... ``` 围栏剥离
-    2. 首个 { 到最后一个 } 区间抽取
-    3. 找 JSON 字典起点（候选取最大且字典有效）
-    4. json_repair 自动修复（缺失引号、尾随逗号、单引号、截断等）
-    5. 全部失败 → 抛 ValueError
-    """
+    if "```" not in text:
+        return text
+    m = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
+    return m.group(1).strip() if m else text
+
+
+def _try_parse_dict(text: str) -> Optional[Dict[str, Any]]:
+    """直接 json.loads(text)，仅在结果为 dict 时返回，否则返回 None。"""
+    import json
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _pick_best_candidate(text: str) -> Optional[Dict[str, Any]]:
+    """从候选 { ... } 块中按「嵌套深度 + 长度」选最完整的 dict。"""
     import json
     import re
 
-    text = (content or "").strip()
-    if not text:
-        raise ValueError("LLM 输出为空")
-
-    # 1. markdown 围栏
-    if "```" in text:
-        m = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
-        if m:
-            text = m.group(1).strip()
-
-    # 2. 首选：直接解析
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    # 3. 候选多个 { ... } 块，按嵌套深度选最深的（最可能是完整 JSON）
     candidates: List[Tuple[int, int, Dict[str, Any]]] = []
     for m in re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text):
         try:
@@ -1198,47 +1277,87 @@ def _parse_v3_json(content: str) -> Dict[str, Any]:
                 )
         except json.JSONDecodeError:
             continue
-    if candidates:
-        # 优先取含数组的最深嵌套块，再按长度兜底
-        candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
-        return candidates[0][2]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return candidates[0][2]
+
+
+def _try_json_repair(text: str) -> Optional[Dict[str, Any]]:
+    """json_repair 自动修复：缺失引号、尾随逗号、单引号、截断等。
+
+    返回 dict 或 None（修复失败 / 不可用）。
+    """
+    try:
+        import json_repair
+
+        repaired = json_repair.loads(text)
+    except Exception:  # noqa: BLE001
+        return None
+    return repaired if isinstance(repaired, dict) else None
+
+
+def _try_truncate_repair(text: str, start: int) -> Optional[Dict[str, Any]]:
+    """截断回退：取首个 { 到文本末，尝试补全闭合括号。
+
+    用于 LLM 输出被截断（缺少尾部 } / ]）的场景。
+    """
+    if start < 0:
+        return None
+    truncated = text[start:]
+    for closing in ["}", "]}", "}}", "}}}", "}}}}"]:
+        repaired = _try_json_repair(truncated + closing * 5)
+        if repaired is not None:
+            return repaired
+    return None
+
+
+def _parse_v3_json(content: str) -> Dict[str, Any]:
+    """从 LLM 输出抽取 JSON dict。多层容错：markdown 围栏 + 嵌套 + 截断修复。
+
+    容错顺序：
+    1. markdown ```json ... ``` 围栏剥离
+    2. 首个 { 到最后一个 } 区间抽取
+    3. 找 JSON 字典起点（候选取最大且字典有效）
+    4. json_repair 自动修复（缺失引号、尾随逗号、单引号、截断等）
+    5. 全部失败 → 抛 ValueError
+    """
+    text = (content or "").strip()
+    if not text:
+        raise ValueError("LLM 输出为空")
+
+    # 1. markdown 围栏
+    text = _strip_markdown_fence(text)
+
+    # 2. 首选：直接解析
+    parsed = _try_parse_dict(text)
+    if parsed is not None:
+        return parsed
+
+    # 3. 候选多个 { ... } 块，按嵌套深度选最深的（最可能是完整 JSON）
+    candidate = _pick_best_candidate(text)
+    if candidate is not None:
+        return candidate
 
     # 4. 区间截取：首个 { 到最后一个 }
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:
-        try:
-            parsed = json.loads(text[start : end + 1])
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
+        parsed = _try_parse_dict(text[start : end + 1])
+        if parsed is not None:
+            return parsed
 
     # 5. json_repair 自动修复（处理缺失引号、尾随逗号、单引号、截断等）
-    try:
-        import json_repair
-
-        repaired = json_repair.loads(
-            text[start : end + 1] if start >= 0 and end > start else text
-        )
-        if isinstance(repaired, dict):
-            return repaired
-    except Exception:  # noqa: BLE001
-        pass
+    repaired = _try_json_repair(
+        text[start : end + 1] if start >= 0 and end > start else text
+    )
+    if repaired is not None:
+        return repaired
 
     # 6. 截断回退：取首个 { 到文本末，尝试修复
-    if start >= 0:
-        truncated = text[start:]
-        # 尝试在每个可能的嵌套边界补全
-        for closing in ["}", "]}", "}}", "}}}", "}}}}"]:
-            try:
-                import json_repair
-
-                repaired = json_repair.loads(truncated + closing * 5)
-                if isinstance(repaired, dict):
-                    return repaired
-            except Exception:  # noqa: BLE001
-                continue
+    truncated = _try_truncate_repair(text, start)
+    if truncated is not None:
+        return truncated
 
     # 全部失败：把原始输出片段记到日志便于排查
     logger.warning(
@@ -1306,48 +1425,56 @@ def _fill_product_revenue_margin(
     if not products:
         return products
 
-    # 1) 从 fundamental_context 提取公司级毛利率
     fc = info.get("fundamental_context") or {}
     growth = (fc.get("growth") or {}).get("data") or {}
     company_gross_margin: Optional[float] = growth.get("gross_margin")
 
-    # 2) 检查 revenue_share_pct 填充情况
-    has_any_revenue = any(p.get("revenue_share_pct") is not None for p in products)
-    if not has_any_revenue:
-        # 按 category 优先级加权分配: core=1.5, growth=1.0, legacy=0.6, exploratory=0.4
-        weights = {
-            "core": 1.5,
-            "growth": 1.0,
-            "legacy": 0.6,
-            "exploratory": 0.4,
-        }
-        raw_weights = [weights.get(p.get("category", "core"), 1.0) for p in products]
-        total_w = sum(raw_weights)
-        allocated = []
-        for i, w in enumerate(raw_weights):
-            raw_share = round((w / total_w) * 100, 1)
-            allocated.append(raw_share)
-        # 确保总和=100（补偿 rounding 误差到最大项）
-        diff = round(100 - sum(allocated), 1)
-        if diff != 0:
-            max_idx = allocated.index(max(allocated))
-            allocated[max_idx] = round(allocated[max_idx] + diff, 1)
-        for i, p in enumerate(products):
-            p["revenue_share_pct"] = allocated[i]
+    if not any(p.get("revenue_share_pct") is not None for p in products):
+        _allocate_revenue_share_pct(products)
+
+    if company_gross_margin is not None:
+        _fill_gross_margin_for_core(products, company_gross_margin)
+
+    return products  # 保持原签名以兼容调用方 in-place 赋值模式
+
+
+# 按 category 优先级加权分配: core=1.5, growth=1.0, legacy=0.6, exploratory=0.4
+_PRODUCT_CATEGORY_WEIGHTS: Dict[str, float] = {
+    "core": 1.5,
+    "growth": 1.0,
+    "legacy": 0.6,
+    "exploratory": 0.4,
+}
+
+
+def _allocate_revenue_share_pct(products: List[Dict[str, Any]]) -> None:
+    """[拆分] 按 category 权重分配 revenue_share_pct，确保总和 = 100。"""
+    raw_weights = [
+        _PRODUCT_CATEGORY_WEIGHTS.get(p.get("category", "core"), 1.0) for p in products
+    ]
+    total_w = sum(raw_weights)
+    allocated = [round((w / total_w) * 100, 1) for w in raw_weights]
+    diff = round(100 - sum(allocated), 1)
+    if diff != 0:
+        max_idx = allocated.index(max(allocated))
+        allocated[max_idx] = round(allocated[max_idx] + diff, 1)
+    for i, p in enumerate(products):
+        p["revenue_share_pct"] = allocated[i]
+        if p.get("evidence_strength") in (None, "analysis"):
+            p["evidence_strength"] = "analysis"
+
+
+def _fill_gross_margin_for_core(
+    products: List[Dict[str, Any]], company_gross_margin: float
+) -> None:
+    """[拆分] 把公司级毛利率注入 core 类产品的 gross_margin_pct。"""
+    for p in products:
+        if p.get("gross_margin_pct") is not None:
+            continue
+        if p.get("category") == "core":
+            p["gross_margin_pct"] = company_gross_margin
             if p.get("evidence_strength") in (None, "analysis"):
                 p["evidence_strength"] = "analysis"
-
-    # 3) 填充 gross_margin_pct
-    if company_gross_margin is not None:
-        for p in products:
-            if p.get("gross_margin_pct") is not None:
-                continue
-            if p.get("category") == "core":
-                p["gross_margin_pct"] = company_gross_margin
-                if p.get("evidence_strength") in (None, "analysis"):
-                    p["evidence_strength"] = "analysis"
-
-    return products
 
 
 def _handle_analyze_product_matrix(
@@ -1362,88 +1489,115 @@ def _handle_analyze_product_matrix(
     失败返回 ``{"error": "...", "products": []}``，agent 据状态降级标"待核验"。
     """
     try:
-        kb_hits = _format_v3_kb_hits(
-            _get_v3_kb_retriever(), ticker, company, industry_hint, top_k
-        )
-        # [v3 真实数据] 注入真实板块归属
-        info = _fetch_real_stock_info(ticker)
-        quote = _fetch_real_realtime_quote(ticker)
-        real_data_ctx = _format_real_data_for_prompt(
-            info,
-            quote,
-            industry_hint=industry_hint,
-            company=company,
-            ticker=ticker,
-        )
         llm = _get_v3_chat_llm()
         if llm is None:
             return {"error": "LLM adapter 不可用", "products": [], "ticker": ticker}
-        from src.schemas.supply_chain import ProductLineV3
 
-        prompt = _PRODUCT_MATRIX_PROMPT.format(
+        info = _fetch_real_stock_info(ticker)
+        products_raw, error_msg = _call_product_matrix_llm(
+            llm=llm,
             ticker=ticker,
             company=company,
             market=market,
             industry_hint=industry_hint,
-            kb_hits=kb_hits,
-            real_data=real_data_ctx,
+            top_k=top_k,
+            info=info,
         )
-        response = llm.call_text(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=2500,
-        )
-        raw = _parse_v3_json(response.content)
-        products_raw = raw.get("products", [])
-        if not isinstance(products_raw, list):
-            return {
-                "error": "LLM 输出 products 非数组",
-                "products": [],
-                "ticker": ticker,
-            }
-        products: List[Dict[str, Any]] = []
-        for p in products_raw:
-            if not isinstance(p, dict) or not p.get("name"):
-                continue
-            try:
-                prod = ProductLineV3.model_validate(
-                    {
-                        "name": str(p["name"])[:80],
-                        "category": p.get("category", "core"),
-                        "revenue_share_pct": p.get("revenue_share_pct"),
-                        "gross_margin_pct": p.get("gross_margin_pct"),
-                        "target_market": [
-                            str(x) for x in (p.get("target_market") or [])
-                        ],
-                        "price_band": (
-                            str(p["price_band"])[:80] if p.get("price_band") else None
-                        ),
-                        "differentiators": [
-                            str(x) for x in (p.get("differentiators") or [])
-                        ][:10],
-                        "evidence_strength": p.get("evidence_strength", "analysis"),
-                        "source_url": p.get("source_url"),
-                    }
-                )
-                products.append(prod.model_dump())
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("[SupplyChain v3] product validate 失败: %s", exc)
-                continue
+        if error_msg:
+            return {"error": error_msg, "products": [], "ticker": ticker}
+
+        products = _parse_product_matrix_payload(products_raw)
         if not products:
             # [v3 兜底] LLM 输出空 → 用 industry DNA 默认产品列表
             fallback = _build_dna_fallback_products(
                 industry_hint=industry_hint, company=company, ticker=ticker
             )
-            if fallback:
-                products = fallback
-            else:
-                return {"ticker": ticker, "products": products}
+            if not fallback:
+                return {"ticker": ticker, "products": []}
+            products = fallback
+
         # [v3 真实数据兜底] 强制填充 revenue_share_pct / gross_margin_pct
         products = _fill_product_revenue_margin(products, info)
         return {"ticker": ticker, "products": products}
     except Exception as exc:  # noqa: BLE001
         logger.warning("[SupplyChain v3] product_matrix 失败 (%s): %s", ticker, exc)
         return {"error": str(exc), "products": [], "ticker": ticker}
+
+
+def _call_product_matrix_llm(
+    llm: Any,
+    ticker: str,
+    company: str,
+    market: str,
+    industry_hint: str,
+    top_k: int,
+    info: Dict[str, Any],
+) -> Tuple[List[Any], Optional[str]]:
+    """[拆分] 拼 prompt + 调 LLM + 解析 JSON，返回 (products_raw, error_msg)。"""
+    kb_hits = _format_v3_kb_hits(
+        _get_v3_kb_retriever(), ticker, company, industry_hint, top_k
+    )
+    quote = _fetch_real_realtime_quote(ticker)
+    real_data_ctx = _format_real_data_for_prompt(
+        info,
+        quote,
+        industry_hint=industry_hint,
+        company=company,
+        ticker=ticker,
+    )
+    prompt = _PRODUCT_MATRIX_PROMPT.format(
+        ticker=ticker,
+        company=company,
+        market=market,
+        industry_hint=industry_hint,
+        kb_hits=kb_hits,
+        real_data=real_data_ctx,
+    )
+    response = llm.call_text(
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=2500,
+    )
+    raw = _parse_v3_json(response.content)
+    products_raw = raw.get("products", [])
+    if not isinstance(products_raw, list):
+        return [], "LLM 输出 products 非数组"
+    return products_raw, None
+
+
+def _parse_product_matrix_payload(
+    products_raw: List[Any],
+) -> List[Dict[str, Any]]:
+    """[拆分] 把 LLM 输出 products 列表校验为 ProductLineV3 + dump 成 dict。"""
+    from src.schemas.supply_chain import ProductLineV3
+
+    products: List[Dict[str, Any]] = []
+    for p in products_raw:
+        if not isinstance(p, dict) or not p.get("name"):
+            continue
+        try:
+            prod = ProductLineV3.model_validate(
+                {
+                    "name": str(p["name"])[:80],
+                    "category": p.get("category", "core"),
+                    "revenue_share_pct": p.get("revenue_share_pct"),
+                    "gross_margin_pct": p.get("gross_margin_pct"),
+                    "target_market": [str(x) for x in (p.get("target_market") or [])],
+                    "price_band": (
+                        str(p["price_band"])[:80] if p.get("price_band") else None
+                    ),
+                    "differentiators": [
+                        str(x) for x in (p.get("differentiators") or [])
+                    ][:10],
+                    "evidence_strength": p.get("evidence_strength", "analysis"),
+                    "source_url": p.get("source_url"),
+                }
+            )
+            products.append(prod.model_dump())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[SupplyChain v3] product validate 失败: %s", exc)
+            continue
+    return products
 
 
 def _build_dna_fallback_products(
@@ -1453,10 +1607,7 @@ def _build_dna_fallback_products(
 
     仅在 LLM 输出空数组 / handler 校验失败时触发。evidence_strength 标 `kb_doc` 来自 DNA。
     """
-    from src.services.supply_chain.industry_dna_loader import (
-        find_dna_by_keyword,
-        find_dna_by_keywords,
-    )
+    from src.services.supply_chain.industry_dna_loader import find_dna_by_keyword
 
     dna = None
     for kw in [industry_hint, company, ticker]:
@@ -2160,7 +2311,6 @@ def _handle_analyze_financial_quality(
         # [v3 真实数据兜底] 直接构造 red_flags，避免 LLM 编造
         real_flags = _build_real_red_flags(quote, info)
         llm = _get_v3_chat_llm()
-        from src.schemas.supply_chain import FinancialQualityV3
 
         # 走 LLM 路径（让 LLM 补 LLM 知道的字段）
         if llm is not None:
@@ -2295,11 +2445,6 @@ def _build_fallback_financial_report(
 ) -> Dict[str, Any]:
     """[v3 兜底] 当 LLM 输出无效时直接构造 1 条占位报告（强制不空）。"""
     from src.schemas.supply_chain import FinancialQualityV3
-
-    # 真实数据直接填入（即便语义不完全匹配）
-    pe = quote.get("pe_ratio")
-    pb = quote.get("pb_ratio")
-    mv_yi = quote.get("total_mv", 0) / 1e8 if quote.get("total_mv") else None
 
     # [v3 真实数据兜底] 从 growth 拿财务数字
     fc = info.get("fundamental_context") or {}

@@ -10,8 +10,8 @@ Fetches institutional holdings data using akshare:
 """
 
 import logging
-from typing import Dict, Any, List, Optional, cast
-from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple, cast
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -212,38 +212,20 @@ class InstitutionalHoldingsProvider:
         trade_stats = self.get_institution_trade_stats(stock_code)
 
         score = 50.0
-        components = []
+        components: List[Tuple[str, float]] = []
 
         if holders_data and holders_data.get("holders"):
-            total_institutional = holders_data.get("institutional_ratio", 0)
-
-            if total_institutional > 50:
-                score += 15
-                components.append(("high_institutional", 15))
-            elif total_institutional > 30:
-                score += 10
-                components.append(("medium_institutional", 10))
-            elif total_institutional < 10:
-                score -= 10
-                components.append(("low_institutional", -10))
-
-            for holder in holders_data.get("holders", []):
-                change = holder.get("change", 0)
-                if change > holding_change_threshold:
-                    score += 5
-                    components.append(("significant_increase", 5))
-                elif change < -holding_change_threshold:
-                    score -= 5
-                    components.append(("significant_decrease", -5))
+            score, components = self._score_holder_concentration(
+                score, components, holders_data
+            )
+            score, components = self._score_holder_changes(
+                score, components, holders_data, holding_change_threshold
+            )
 
         if trade_stats:
-            net_flow = trade_stats.get("net_flow", 0)
-            if net_flow > net_flow_threshold:
-                score += 10
-                components.append(("positive_net_flow", 10))
-            elif net_flow < -net_flow_threshold:
-                score -= 10
-                components.append(("negative_net_flow", -10))
+            score, components = self._score_net_flow(
+                score, components, trade_stats, net_flow_threshold
+            )
 
         score = max(0.0, min(100.0, score))
 
@@ -251,12 +233,58 @@ class InstitutionalHoldingsProvider:
             "stock_code": stock_code,
             "score": score,
             "components": components,
-            "institutional_ratio": holders_data.get("institutional_ratio", 0)
-            if holders_data
-            else 0,
-            "net_flow": trade_stats.get("net_flow", 0) if trade_stats else 0,
-            "updated_at": datetime.now().isoformat(),
+            "institutional_ratio": holders_data.get("institutional_ratio", 0),
+            "trade_stats": trade_stats,
         }
+
+    @staticmethod
+    def _score_holder_concentration(
+        score: float,
+        components: List[Tuple[str, float]],
+        holders_data: Dict[str, Any],
+    ) -> Tuple[float, List[Tuple[str, float]]]:
+        """[拆分] 机构持股集中度打分。"""
+        total_institutional = holders_data.get("institutional_ratio", 0)
+        if total_institutional > 50:
+            return score + 15, components + [("high_institutional", 15)]
+        if total_institutional > 30:
+            return score + 10, components + [("medium_institutional", 10)]
+        if total_institutional < 10:
+            return score - 10, components + [("low_institutional", -10)]
+        return score, components
+
+    @staticmethod
+    def _score_holder_changes(
+        score: float,
+        components: List[Tuple[str, float]],
+        holders_data: Dict[str, Any],
+        threshold: float,
+    ) -> Tuple[float, List[Tuple[str, float]]]:
+        """[拆分] 股东变动方向打分（增持 / 减持）。"""
+        for holder in holders_data.get("holders", []):
+            change = holder.get("change", 0)
+            if change > threshold:
+                score += 5
+                components.append(("significant_increase", 5))
+            elif change < -threshold:
+                score -= 5
+                components.append(("significant_decrease", -5))
+        return score, components
+
+    @staticmethod
+    def _score_net_flow(
+        score: float,
+        components: List[Tuple[str, float]],
+        trade_stats: Dict[str, Any],
+        threshold: float,
+    ) -> Tuple[float, List[Tuple[str, float]]]:
+        """[拆分] 机构资金净流入打分。"""
+        net_flow = trade_stats.get("net_flow", 0)
+        if net_flow > threshold:
+            return score + 10, components + [("positive_net_flow", 10)]
+        if net_flow < -threshold:
+            return score - 10, components + [("negative_net_flow", -10)]
+        return score, components
 
     def _get_mock_shareholders(self, stock_code: str) -> Dict[str, Any]:
         """Return mock data when akshare is unavailable"""

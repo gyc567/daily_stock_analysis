@@ -37,6 +37,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol, Sequence, Tuple
 
+import icontract
+
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
@@ -55,6 +57,18 @@ _ASHARE_FIRST_DIGITS = frozenset("034689")
 _NAME_NOISE_RE = re.compile(r"[\s\-_/\\,，。·、()（）]+")
 
 
+@icontract.ensure(
+    lambda result: (
+        result is None
+        or (
+            isinstance(result, str)
+            and len(result) == 6
+            and result.isdigit()
+            and result[0] in "034689"
+        )
+    ),
+    "normalize_a_share_code 必须返回 None 或 6 位 A 股代码（首位 0/3/4/6/8/9）",
+)
 def normalize_a_share_code(code: Any) -> Optional[str]:
     """把股票代码归一为 A 股 6 位字符串。
 
@@ -90,6 +104,10 @@ BOARD_MATCH_EXACT = "exact"
 BOARD_MATCH_CONTAINS = "contains"
 
 
+@icontract.ensure(
+    lambda result: result is None or result in {"exact", "contains"},
+    "board_match_level 必须返回 None / 'exact' / 'contains'",
+)
 def board_match_level(keyword: Any, board_name: Any) -> Optional[str]:
     """判定 keyword 与板块名的匹配等级。
 
@@ -128,9 +146,11 @@ def code_in_constituents(code: str, constituents: Sequence[Any]) -> bool:
     return False
 
 
-def constituent_overlap_ratio(
-    a: Sequence[Any], b: Sequence[Any]
-) -> float:
+@icontract.ensure(
+    lambda result: 0.0 <= result <= 1.0,
+    "constituent_overlap_ratio 必须落在 [0, 1]",
+)
+def constituent_overlap_ratio(a: Sequence[Any], b: Sequence[Any]) -> float:
     """两个成分股集合的 Jaccard 重合度（交集 / 并集）。
 
     任一为空且另一非空时并集非空但交集为空 → ``0.0``；双空 → ``0.0``。
@@ -240,6 +260,27 @@ class SupplyChainSourceProbe(Protocol):
 # ------------------------------------------------------------------
 # 判定纯函数（决策表）
 # ------------------------------------------------------------------
+@icontract.ensure(
+    lambda result: (
+        result.status
+        in {
+            "confirmed",
+            "partial",
+            "conflict",
+            "unverified",
+            "not_applicable",
+        }
+    ),
+    "judge_verification.status 必须落在 5 档判定之一",
+)
+@icontract.ensure(
+    lambda result: result.confidence in {"high", "medium", "low"},
+    "judge_verification.confidence 必须落在 3 档置信度之一",
+)
+@icontract.ensure(
+    lambda result: 0.0 <= result.overlap_ratio <= 1.0,
+    "judge_verification.overlap_ratio 必须落在 [0, 1]",
+)
 def judge_verification(
     code: str,
     name: str,
@@ -268,34 +309,76 @@ def judge_verification(
 
     if em_hit and ths_hit:
         return _result(
-            code, name, "confirmed", "high", em, ths, overlap, matched_by,
+            code,
+            name,
+            "confirmed",
+            "high",
+            em,
+            ths,
+            overlap,
+            matched_by,
             "东方财富和同花顺均支持该公司属于相关板块，双源确认",
         )
 
     if em.available and ths.available:
         if not em_hit and not ths_hit:
             return _result(
-                code, name, "unverified", "low", em, ths, overlap, matched_by,
+                code,
+                name,
+                "unverified",
+                "low",
+                em,
+                ths,
+                overlap,
+                matched_by,
                 "东方财富和同花顺均可用，但两源均未命中目标公司，待核验",
             )
         if em_found and ths_found:
             return _result(
-                code, name, "conflict", "low", em, ths, overlap, matched_by,
+                code,
+                name,
+                "conflict",
+                "low",
+                em,
+                ths,
+                overlap,
+                matched_by,
                 "东方财富/同花顺口径冲突：两源均定位到相关板块，但对目标公司归属不一致",
             )
         return _result(
-            code, name, "partial", "medium", em, ths, overlap, matched_by,
+            code,
+            name,
+            "partial",
+            "medium",
+            em,
+            ths,
+            overlap,
+            matched_by,
             "单源支持，待另一源核验",
         )
 
     if em_hit or ths_hit:
         return _result(
-            code, name, "partial", "medium", em, ths, overlap, matched_by,
+            code,
+            name,
+            "partial",
+            "medium",
+            em,
+            ths,
+            overlap,
+            matched_by,
             "单源支持（另一源不可用），待另一源核验",
         )
 
     return _result(
-        code, name, "unverified", "low", em, ths, overlap, matched_by,
+        code,
+        name,
+        "unverified",
+        "low",
+        em,
+        ths,
+        overlap,
+        matched_by,
         "东方财富和同花顺均不可用或无命中，待核验",
     )
 
@@ -366,12 +449,15 @@ class EastMoneyProbe:
         provider = self._resolve()
         boards = provider.get_concept_boards() or []
         matched_boards = [
-            b for b in boards
+            b
+            for b in boards
             if board_match_level(keyword, b.get("name", "")) is not None
         ]
         constituents: list[str] = []
         for board in matched_boards:
-            constituents.extend(provider.get_concept_constituents(board.get("name", "")) or [])
+            constituents.extend(
+                provider.get_concept_constituents(board.get("name", "")) or []
+            )
         return SourceEvidence(
             source=self.name,
             available=True,
@@ -397,7 +483,9 @@ class ThsAkshareProbe:
     name = "akshare_ths"
 
     # 同花顺概念详情页（分页 ``/order/desc/page/{page}/``，成分股由正则 >(\d{6})< 解析）。
-    _THS_DETAIL_URL = "http://q.10jqka.com.cn/gn/detail/code/{code}/order/desc/page/{page}/"
+    _THS_DETAIL_URL = (
+        "http://q.10jqka.com.cn/gn/detail/code/{code}/order/desc/page/{page}/"
+    )
     _THS_CODE_RE = re.compile(r">(\d{6})<")
     _DEFAULT_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
     # 同花顺概念页每页约 11 只，单概念成分股封顶翻页数（防异常页无限翻）。
@@ -427,7 +515,9 @@ class ThsAkshareProbe:
             import requests
 
             url = self._THS_DETAIL_URL.format(code=concept_code, page=page)
-            resp = requests.get(url, headers={"User-Agent": self._DEFAULT_UA}, timeout=8)
+            resp = requests.get(
+                url, headers={"User-Agent": self._DEFAULT_UA}, timeout=8
+            )
             return resp.content.decode("gbk", errors="ignore")
 
         return _real_get
@@ -482,7 +572,9 @@ class ThsAkshareProbe:
                 except Exception as exc:  # noqa: BLE001 — 单页抓取失败不拖垮其它
                     logger.debug(
                         "[SupplyChainCrossValidate] THS scrape %s p%d failed: %s",
-                        concept_code, page, exc,
+                        concept_code,
+                        page,
+                        exc,
                     )
                     break
                 page_codes = self._THS_CODE_RE.findall(html or "")

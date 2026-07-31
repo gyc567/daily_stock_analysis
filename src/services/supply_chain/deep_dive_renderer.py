@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.schemas.supply_chain import (
     FinancialQualityV3,
@@ -85,6 +85,117 @@ def _cn(value: Any, table: Dict[str, str], default: str = "—") -> str:
 # ============================================================
 
 
+def _render_industry_position_block(
+    deep_dive: SupplyChainDeepDiveV3, lines: List[str]
+) -> None:
+    """[拆分] §5.1 行业定位（基于 product_matrix 派生）。"""
+    if not deep_dive.product_matrix:
+        return
+    core = [p for p in deep_dive.product_matrix if p.category == "core"]
+    growth = [p for p in deep_dive.product_matrix if p.category == "growth"]
+    anchor = core[0] if core else deep_dive.product_matrix[0]
+    position_bits: List[str] = []
+    if anchor.revenue_share_pct is not None:
+        position_bits.append(
+            f"核心产品「{anchor.name}」营收占比 {anchor.revenue_share_pct:.0f}%"
+        )
+    if anchor.gross_margin_pct is not None:
+        position_bits.append(f"毛利率 {anchor.gross_margin_pct:.0f}%")
+    if anchor.target_market:
+        position_bits.append(f"目标市场 {anchor.target_market[0]}")
+    if growth:
+        position_bits.append(f"成长曲线产品 {len(growth)} 个")
+    if not position_bits:
+        return
+    lines.append("")
+    lines.append("### 5.1 行业定位")
+    lines.append("")
+    lines.append("；".join(position_bits) + "。")
+
+
+def _render_competitor_block(
+    deep_dive: SupplyChainDeepDiveV3, lines: List[str]
+) -> None:
+    """[拆分] §5.2 / §5.3 核心竞争优势 + 与主要竞争对手对比。"""
+    if not deep_dive.market_position:
+        return
+    lines.append("")
+    lines.append("### 5.2 核心竞争优势 与 §5.3 与主要竞争对手对比")
+    lines.append("")
+    lines.append("| 子赛道 | 排名 | 地位 | 主要竞品 | 替代风险 |")
+    lines.append("|---|---:|---|---|---|")
+    for m in deep_dive.market_position:
+        rank_text = f"第 {m.market_rank}" if m.market_rank is not None else "未披露排名"
+        share_text = (
+            f"份额 {m.market_share_pct:.0f}%"
+            if m.market_share_pct is not None
+            else "份额待核验"
+        )
+        leadership = _leadership_label(m.market_rank, m.market_share_pct)
+        comp = "、".join(m.top_competitors[:3]) if m.top_competitors else "—"
+        risk = _cn(m.substitution_risk, _RISK_CN, "未知")
+        lines.append(
+            f"| {m.subsegment} | {rank_text} | "
+            f"{leadership}（{share_text}）| {comp} | {risk} |"
+        )
+    leaders = [
+        m
+        for m in deep_dive.market_position
+        if m.market_rank == 1 and m.market_share_pct is not None
+    ]
+    if leaders:
+        bits = [
+            f"{m.subsegment} 龙头（市占 {m.market_share_pct:.0f}%）" for m in leaders
+        ]
+        lines.append("")
+        lines.append("公司在上述子赛道处于龙头地位：" + "；".join(bits) + "。")
+
+
+def _leadership_label(market_rank: Optional[int], market_share: Optional[float]) -> str:
+    """[拆分] 根据排名 + 份额派生「龙头/领先/跟随」标签。"""
+    if market_rank == 1 and market_share is not None:
+        return "龙头"
+    if market_rank is not None and market_rank <= 3:
+        return "领先"
+    return "跟随"
+
+
+def _render_sources_block(deep_dive: SupplyChainDeepDiveV3, lines: List[str]) -> None:
+    """[拆分] §5.4 数据来源（汇总证据强度）。"""
+    sources = sorted(
+        {
+            str(m.evidence_strength)
+            for m in deep_dive.market_position
+            if m.evidence_strength
+        }
+        | {
+            str(p.evidence_strength)
+            for p in deep_dive.product_matrix
+            if p.evidence_strength
+        }
+    )
+    if not sources:
+        return
+    lines.append("")
+    lines.append("### 5.4 数据来源")
+    lines.append("")
+    lines.append(
+        "上述摘要基于结构化数据自动派生，证据强度："
+        + "、".join(_cn(s, _EVIDENCE_CN, s) for s in sources)
+        + "。具体数字与证据见 §6-§10。"
+    )
+
+
+# §5 标题 marker（LLM 已写过 §5 → 不重复渲染）
+_S5_MARKERS = (
+    "## 5.",
+    "### 5.",
+    "## 五、",
+    "## 二、5",
+    "## 二、基本面分析\n\n### 5",
+)
+
+
 def render_market_position_summary(
     deep_dive: SupplyChainDeepDiveV3,
     llm_markdown: str = "",
@@ -103,104 +214,12 @@ def render_market_position_summary(
     """
     if not deep_dive.market_position and not deep_dive.product_matrix:
         return ""
-    if llm_markdown:
-        markers = [
-            "## 5.",
-            "### 5.",
-            "## 五、",
-            "## 二、5",
-            "## 二、基本面分析\n\n### 5",
-        ]
-        if any(m in llm_markdown for m in markers):
-            return ""
+    if llm_markdown and any(m in llm_markdown for m in _S5_MARKERS):
+        return ""
     lines: List[str] = ["## 5. 市场地位与竞品"]
-    # §5.1 行业定位（基于 product_matrix + market_position 综合）
-    if deep_dive.product_matrix:
-        core = [p for p in deep_dive.product_matrix if p.category == "core"]
-        growth = [p for p in deep_dive.product_matrix if p.category == "growth"]
-        anchor = core[0] if core else (deep_dive.product_matrix[0])
-        position_bits: List[str] = []
-        if anchor.revenue_share_pct is not None:
-            position_bits.append(
-                f"核心产品「{anchor.name}」营收占比 {anchor.revenue_share_pct:.0f}%"
-            )
-        if anchor.gross_margin_pct is not None:
-            position_bits.append(f"毛利率 {anchor.gross_margin_pct:.0f}%")
-        if anchor.target_market:
-            position_bits.append(f"目标市场 {anchor.target_market[0]}")
-        if growth:
-            position_bits.append(f"成长曲线产品 {len(growth)} 个")
-        if position_bits:
-            lines.append("")
-            lines.append("### 5.1 行业定位")
-            lines.append("")
-            lines.append("；".join(position_bits) + "。")
-    # §5.2 / §5.3 核心竞争优势 + 与主要竞争对手对比（合并：基于 market_position）
-    if deep_dive.market_position:
-        lines.append("")
-        lines.append("### 5.2 核心竞争优势 与 §5.3 与主要竞争对手对比")
-        lines.append("")
-        lines.append("| 子赛道 | 排名 | 地位 | 主要竞品 | 替代风险 |")
-        lines.append("|---|---:|---|---|---|")
-        for m in deep_dive.market_position:
-            rank_text = (
-                f"第 {m.market_rank}" if m.market_rank is not None else "未披露排名"
-            )
-            share_text = (
-                f"份额 {m.market_share_pct:.0f}%"
-                if m.market_share_pct is not None
-                else "份额待核验"
-            )
-            leadership = (
-                "龙头"
-                if (m.market_rank == 1 and m.market_share_pct is not None)
-                else (
-                    "领先"
-                    if (m.market_rank is not None and m.market_rank <= 3)
-                    else "跟随"
-                )
-            )
-            comp = "、".join(m.top_competitors[:3]) if m.top_competitors else "—"
-            risk = _cn(m.substitution_risk, _RISK_CN, "未知")
-            lines.append(
-                f"| {m.subsegment} | {rank_text} | "
-                f"{leadership}（{share_text}）| {comp} | {risk} |"
-            )
-        # 集中描述（避免再列重复表格）
-        leaders = [
-            m
-            for m in deep_dive.market_position
-            if m.market_rank == 1 and m.market_share_pct is not None
-        ]
-        if leaders:
-            bits = [
-                f"{m.subsegment} 龙头（市占 {m.market_share_pct:.0f}%）"
-                for m in leaders
-            ]
-            lines.append("")
-            lines.append("公司在上述子赛道处于龙头地位：" + "；".join(bits) + "。")
-    # §5.4 数据来源
-    sources = sorted(
-        {
-            str(m.evidence_strength)
-            for m in deep_dive.market_position
-            if m.evidence_strength
-        }
-        | {
-            str(p.evidence_strength)
-            for p in deep_dive.product_matrix
-            if p.evidence_strength
-        }
-    )
-    if sources:
-        lines.append("")
-        lines.append("### 5.4 数据来源")
-        lines.append("")
-        lines.append(
-            "上述摘要基于结构化数据自动派生，证据强度："
-            + "、".join(_cn(s, _EVIDENCE_CN, s) for s in sources)
-            + "。具体数字与证据见 §6-§10。"
-        )
+    _render_industry_position_block(deep_dive, lines)
+    _render_competitor_block(deep_dive, lines)
+    _render_sources_block(deep_dive, lines)
     if len(lines) == 1:
         return ""
     return "\n".join(lines)
@@ -438,6 +457,39 @@ def render_section_status(deep_dive: SupplyChainDeepDiveV3) -> str:
 # ============================================================
 
 
+def _collect_deep_dive_sections(
+    deep_dive: SupplyChainDeepDiveV3, llm_markdown: str
+) -> List[str]:
+    """[拆分] 按顺序收集 §5/§6/§7/§8/§9/§10 各小节 Markdown（空节跳过）。"""
+    sections: List[str] = []
+    summary = render_market_position_summary(deep_dive, llm_markdown)
+    if summary:
+        sections.append(summary)
+    if deep_dive.product_matrix:
+        sections.append(render_product_matrix(deep_dive.product_matrix))
+    if deep_dive.market_position:
+        sections.append(render_market_position(deep_dive.market_position))
+    if deep_dive.key_customers or deep_dive.key_suppliers:
+        sections.append(_render_key_partners(deep_dive))
+    if deep_dive.industry_outlook:
+        sections.append(render_industry_outlook(deep_dive.industry_outlook))
+    if deep_dive.financial_quality:
+        sections.append(render_financial_quality(deep_dive.financial_quality))
+    return sections
+
+
+def _render_key_partners(deep_dive: SupplyChainDeepDiveV3) -> str:
+    """[拆分] §8 关键客户与供应商（合并 customer + supplier 两个子表）。"""
+    customer_md = render_key_customers(deep_dive.key_customers)
+    supplier_md = render_key_suppliers(deep_dive.key_suppliers)
+    partner_parts = ["## 8. 关键客户与供应商", ""]
+    if customer_md:
+        partner_parts.append(customer_md)
+    if supplier_md:
+        partner_parts.append(supplier_md)
+    return "\n\n".join(partner_parts)
+
+
 def render_deep_dive_sections(
     deep_dive: SupplyChainDeepDiveV3,
     llm_markdown: str = "",
@@ -449,29 +501,7 @@ def render_deep_dive_sections(
     - ``llm_markdown`` 用于 §5 检测：LLM 已写 §5 时不重复生成（避免白话摘要重复）
     """
     try:
-        sections: List[str] = []
-        # §5 白话摘要兜底：LLM 没写时由 §7 数据派生（避免报告出现「§5 漏写」）
-        summary = render_market_position_summary(deep_dive, llm_markdown)
-        if summary:
-            sections.append(summary)
-        if deep_dive.product_matrix:
-            sections.append(render_product_matrix(deep_dive.product_matrix))
-        if deep_dive.market_position:
-            sections.append(render_market_position(deep_dive.market_position))
-        if deep_dive.key_customers or deep_dive.key_suppliers:
-            customer_md = render_key_customers(deep_dive.key_customers)
-            supplier_md = render_key_suppliers(deep_dive.key_suppliers)
-            partner_header = "## 8. 关键客户与供应商"
-            partner_parts = [partner_header, ""]
-            if customer_md:
-                partner_parts.append(customer_md)
-            if supplier_md:
-                partner_parts.append(supplier_md)
-            sections.append("\n\n".join(partner_parts))
-        if deep_dive.industry_outlook:
-            sections.append(render_industry_outlook(deep_dive.industry_outlook))
-        if deep_dive.financial_quality:
-            sections.append(render_financial_quality(deep_dive.financial_quality))
+        sections = _collect_deep_dive_sections(deep_dive, llm_markdown)
         # 数据完整性披露脚注（始终输出，即使所有 section 都为空）
         sections.append(render_section_status(deep_dive))
         return "\n\n".join(s for s in sections if s)
