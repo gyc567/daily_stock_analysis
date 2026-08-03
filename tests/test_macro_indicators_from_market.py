@@ -147,6 +147,53 @@ class TestInferMonetaryPolicyFromIndices:
         )
         assert result is None
 
+    def test_target_code_with_sh_prefix(self) -> None:
+        """sh 前缀的代码也能被识别"""
+        result = _infer_monetary_policy_from_indices(
+            [
+                {"code": "sh000300", "change_pct": 3.0},
+                {"code": "sz399006", "change_pct": 4.0},
+            ]
+        )
+        assert result == "accommodative"
+
+    def test_target_code_with_sz_prefix(self) -> None:
+        """sz 前缀的代码也能被识别"""
+        result = _infer_monetary_policy_from_indices(
+            [{"code": "sz399001", "change_pct": -3.0}]
+        )
+        assert result == "tight"
+
+    def test_target_code_with_bj_prefix_ignored(self) -> None:
+        """bj 前缀 + 非目标代码被忽略"""
+        result = _infer_monetary_policy_from_indices(
+            [{"code": "bj999999", "change_pct": 3.0}]
+        )
+        # bj 前缀 + 不在白名单 → 忽略 → 返回 None
+        assert result is None
+
+    def test_mixed_prefix_formats(self) -> None:
+        """sh/sz/无前缀混合，应都识别"""
+        result = _infer_monetary_policy_from_indices(
+            [
+                {"code": "sh000300", "change_pct": 3.0},  # sh
+                {"code": "sz399006", "change_pct": 4.0},  # sz
+                {"code": "000001", "change_pct": 2.5},  # 无前缀
+            ]
+        )
+        assert result == "accommodative"
+
+    def test_neutral_in_real_today_data(self) -> None:
+        """真实今日数据：所有指数 -0.5% ~ -5.0%，均值 -1.7% → neutral"""
+        result = _infer_monetary_policy_from_indices(
+            [
+                {"code": "sh000001", "change_pct": -0.59},
+                {"code": "sh000300", "change_pct": -0.981},
+                {"code": "sz399006", "change_pct": -1.238},
+            ]
+        )
+        assert result == "neutral"
+
     def test_empty_list_returns_none(self) -> None:
         assert _infer_monetary_policy_from_indices([]) is None
 

@@ -106,13 +106,31 @@ def _infer_monetary_policy_from_indices(
     """
     if not main_indices or not isinstance(main_indices, list):
         return None
-    target_codes = {"000300", "399006", "000001", "000016", "399001", "000688"}
+    # 接受 6 位代码 + sh/sz/bj 前缀（不同数据源格式）
+    _NORMALIZE_CODE = {
+        "000001": "000001",
+        "sh000001": "000001",
+        "sz000001": "000001",
+        "399001": "399001",
+        "sz399001": "399001",
+        "399006": "399006",
+        "sz399006": "399006",
+        "000016": "000016",
+        "sh000016": "000016",
+        "000300": "000300",
+        "sh000300": "000300",
+        "000688": "000688",
+        "sh000688": "000688",
+    }
+    target_codes = set(_NORMALIZE_CODE.keys()) | {
+        v for v in _NORMALIZE_CODE.values() if v not in _NORMALIZE_CODE
+    }
     changes: List[float] = []
     for idx in main_indices:
         if not isinstance(idx, dict):
             continue
         code = str(idx.get("code", "")).strip()
-        if code and code not in target_codes:
+        if code and code not in target_codes and code not in _NORMALIZE_CODE:
             continue
         chg = idx.get("change_pct")
         if chg is None and "change" in idx:
