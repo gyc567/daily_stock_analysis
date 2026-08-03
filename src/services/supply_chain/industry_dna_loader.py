@@ -256,6 +256,48 @@ def get_all_dna() -> Dict[str, IndustryDNA]:
     return dict(_load_all_dna())
 
 
+# P5-fix: 行业政策倾向枚举（供个股六维详情·宏观与地缘 sector_policy 兜底）
+_VALID_POLICY_LEANS: frozenset[str] = frozenset(
+    {"supportive", "neutral", "restrictive"}
+)
+
+
+def lookup_industry_policy_lean(
+    industry_hint: str,
+) -> Optional[str]:
+    """按行业名/关键词查找行业政策倾向（supportive / neutral / restrictive）。
+
+    P5-fix: 个股六维详情 macro 维度 sector_policy 兜底。
+    命中路径：industry_hint 关键词 → find_dna_by_keywords → dna.extra["policy_lean"]。
+    找不到或值非法 → 返回 None（不抛异常）。
+
+    Args:
+        industry_hint: 行业名/关键词（如"医药"、"新能源"、"半导体"）。
+                       支持单字符串或多个候选（按顺序优先匹配）。
+
+    Returns:
+        "supportive" | "neutral" | "restrictive" | None
+    """
+    if not industry_hint or not isinstance(industry_hint, str):
+        return None
+    # 多关键词候选（按"医药、半导体、新能源"逗号分隔的字符串拆开）
+    candidates = [
+        s.strip() for s in industry_hint.replace("，", ",").split(",") if s.strip()
+    ]
+    if not candidates:
+        return None
+    dna = find_dna_by_keywords(candidates)
+    if dna is None:
+        return None
+    lean = dna.extra.get("policy_lean")
+    if not isinstance(lean, str):
+        return None
+    lean = lean.strip().lower()
+    if lean not in _VALID_POLICY_LEANS:
+        return None
+    return lean
+
+
 def clear_cache() -> None:
     """清空所有 lru_cache（用于测试或热更新）。"""
     load_dna.cache_clear()

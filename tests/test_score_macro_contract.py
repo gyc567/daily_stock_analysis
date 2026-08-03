@@ -211,7 +211,10 @@ class TestEdgeCases:
 
     def test_unicode_keyword_match(self) -> None:
         """unicode 关键词应正确命中（无大小写问题）。"""
-        assert _extract_first_match("央行宣布降准", _MACRO_MONETARY_PATTERNS) == "accommodative"
+        assert (
+            _extract_first_match("央行宣布降准", _MACRO_MONETARY_PATTERNS)
+            == "accommodative"
+        )
         assert _extract_first_match("加息 25bp", _MACRO_MONETARY_PATTERNS) == "tight"
         assert _extract_first_match("保持中性", _MACRO_MONETARY_PATTERNS) == "neutral"
 
@@ -242,6 +245,7 @@ class TestEdgeCases:
     def test_to_safe_dict_legacy_payload_compatible(self) -> None:
         """老 JSON 不含 macro 字段时，反序列化安全。"""
         import json
+
         legacy_payload = {
             "region": "cn",
             "trade_date": "2026-01-01",
@@ -295,7 +299,10 @@ class TestFalsePositiveGuard:
 
     def test_real_loose_with_no_negative(self) -> None:
         """正常宽松语境必须命中。"""
-        assert _extract_first_match("央行宣布降准，宽松信号明确", _MACRO_MONETARY_PATTERNS) == "accommodative"
+        assert (
+            _extract_first_match("央行宣布降准，宽松信号明确", _MACRO_MONETARY_PATTERNS)
+            == "accommodative"
+        )
 
     def test_sector_false_positive_guard(self) -> None:
         """sector_policy:「政策限制性改革」不应误判为 restrictive。"""
@@ -303,15 +310,14 @@ class TestFalsePositiveGuard:
             _infer_sector_policy,
             _SECTOR_FALSE_POSITIVE_PHRASES,
         )
+
         # 验证黑名单生效
         text = "推动政策限制性改革"
         # 没有真正的"政策限制"短语（独立出现）→ 应 None
         assert "政策限制" in text
         # 但 _infer_sector_policy 会找到 "政策限制" 因为 FP 短语含 "政策限制"
         # 这里验证整体推断
-        result = _infer_sector_policy(
-            fundamental_text=text, industry_drivers=[]
-        )
+        result = _infer_sector_policy(fundamental_text=text, industry_drivers=[])
         assert result is None
 
     def test_sector_real_restrictive_with_fp_present(self) -> None:
@@ -378,6 +384,7 @@ class TestCrossMarketScenarios:
     def test_sector_policy_supportive_only_via_fundamental(self) -> None:
         """sector_policy 仅从 fundamental_analysis 推断（与 monetary/liquidity 独立）。"""
         from src.services.research_framework_integration import _infer_sector_policy
+
         result = _infer_sector_policy(
             fundamental_text="公司受国家政策扶持，所在行业获得产业政策利好",
             industry_drivers=[],
@@ -386,6 +393,7 @@ class TestCrossMarketScenarios:
 
     def test_sector_policy_restrictive_only_via_fundamental(self) -> None:
         from src.services.research_framework_integration import _infer_sector_policy
+
         result = _infer_sector_policy(
             fundamental_text="近期监管收紧，行业政策限制加大",
             industry_drivers=[],
@@ -417,7 +425,9 @@ class TestCrossMarketScenarios:
         
         大盘整体估值偏高，建议控制仓位。
         """
-        assert _extract_first_match(markdown, _MACRO_MONETARY_PATTERNS) == "accommodative"
+        assert (
+            _extract_first_match(markdown, _MACRO_MONETARY_PATTERNS) == "accommodative"
+        )
         assert _extract_first_match(markdown, _MACRO_LIQUIDITY_PATTERNS) == "abundant"
 
 
@@ -438,7 +448,13 @@ class TestUIInvariantContract:
     def _is_missing_only(indicators: list, lang: str = "zh") -> bool:
         if not indicators or len(indicators) == 0:
             return False
-        real = [i for i in indicators if not TestUIInvariantContract._is_missing_summary(i.get("summary", ""), lang)]
+        real = [
+            i
+            for i in indicators
+            if not TestUIInvariantContract._is_missing_summary(
+                i.get("summary", ""), lang
+            )
+        ]
         return len(indicators) > 0 and len(real) == 0
 
     def test_legacy_zh_shows_missing_only(self) -> None:
@@ -475,3 +491,51 @@ class TestUIInvariantContract:
         for ind in result["indicators"]:
             assert ind["summary"]
             assert "数据缺失" not in ind["summary"]
+
+
+class TestScoreMacroObservability:
+    """P5-fix: score_macro 5 键全缺失时打 warning（节流版）"""
+
+    def setup_method(self) -> None:
+        """重置节流缓存，确保每个测试独立"""
+        from src.scoring.indicators.macro import _MACRO_MISSING_LOG_THROTTLE
+
+        _MACRO_MISSING_LOG_THROTTLE.clear()
+
+    def test_warning_emitted_on_all_missing(self, caplog) -> None:
+        """所有 5 键 None 时应打 1 条 warning"""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="src.scoring.indicators.macro"):
+            score_macro()
+        # 节流：第一次调用必打
+        assert any(
+            "all 5 inputs missing" in record.message for record in caplog.records
+        )
+
+    def test_warning_throttled_within_60s(self, caplog) -> None:
+        """60s 内同 evidence 前缀最多打 1 条"""
+        import logging
+        from src.scoring.indicators.macro import _MACRO_MISSING_LOG_THROTTLE
+
+        # 清空节流缓存
+        _MACRO_MISSING_LOG_THROTTLE.clear()
+
+        with caplog.at_level(logging.WARNING, logger="src.scoring.indicators.macro"):
+            score_macro(evidence="test_throttle_evidence_xxx")
+            score_macro(evidence="test_throttle_evidence_xxx")
+            score_macro(evidence="test_throttle_evidence_xxx")
+
+        # 1 条 evidence 对应 1 条 warning（节流生效）
+        warning_count = sum(
+            1 for r in caplog.records if "all 5 inputs missing" in r.message
+        )
+        assert warning_count == 1
+
+    def test_no_warning_when_data_present(self, caplog) -> None:
+        """任一字段填入时不应打 warning"""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="src.scoring.indicators.macro"):
+            score_macro(monetary_policy="neutral")
+        assert not any("all 5 inputs missing" in r.message for r in caplog.records)

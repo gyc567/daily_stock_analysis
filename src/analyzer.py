@@ -773,6 +773,8 @@ _SIX_DIM_KEYS: Tuple[str, ...] = (
     "moat_strength",
     "customer_concentration",
     "us_china_risk",
+    "us_china_impact",  # P5-fix: 宏观与地缘维度中美冲击（区别于 us_china_risk 产业链脱钩）
+    "regulatory_risk",  # P5-fix: 宏观与地缘维度国内监管风险
     "chokepoint_type",
     "cognitive_difference",
     "recent_catalysts",
@@ -788,6 +790,8 @@ _ENUM_LIKE_KEYS = frozenset(
         "moat_type",
         "moat_strength",
         "us_china_risk",
+        "us_china_impact",  # P5-fix
+        "regulatory_risk",  # P5-fix
         "chokepoint_type",
         "cognitive_difference",
         "news_sentiment",
@@ -888,6 +892,13 @@ _KNOWN_ENUM_TOKENS = frozenset(
         "positive",
         "neutral",
         "negative",
+        # us_china_impact (P5-fix)
+        "minimal",
+        "limited",
+        "significant",
+        "severe",
+        # regulatory_risk (P5-fix)
+        # 注: low/medium/high/none 已在上面注册
     }
 )
 
@@ -4268,14 +4279,16 @@ class GeminiAnalyzer:
 - 禁止使用 ```json ... ``` 包裹；你的最终输出必须以 左花括号 开头、以 右花括号 结尾。
 - 不要在 JSON 前面或后面写任何解释、注释、Markdown 标题或第二段 JSON。
 
-## 长线六维·主观键值（P2-fix，2026-07-18）
+## 长线六维·主观键值（P2-fix，2026-07-18 + P5-fix，2026-08-03 扩 2 键）
 本系统在做"长线六维详情"打分时，还需要你（LLM）**额外输出**以下键，供评分系统量化补充 ⑤ 六维详情 面板。
 所有键都写在与决策仪表盘**并列**的根级 JSON 字段 `six_dimension_inputs` 下，按下面 schema 输出。如果对某只股票无法判断，对应值可设为 `null`（不要瞎编）：
 - `chain_position`: `upstream | bottleneck | midstream | downstream | commodity`，无上下游则 `null`
 - `moat_type`: `patent | technology | brand | network | switching_cost | license | regulatory | null`
 - `moat_strength`: `strong | moderate | weak | null`
 - `customer_concentration`: 0.0~1.0 赫希曼指数（HHI，前 N 大客户占比平方和），无法估算则 `null`
-- `us_china_risk`: `high | medium | low | none`，出口/制裁敏感度
+- `us_china_risk`: `high | medium | low | none`，出口/制裁敏感度（个股产业链层面）
+- `us_china_impact`（P5-fix 新增）: `minimal | limited | significant | severe | null`，宏观与地缘层面中美关系对大盘/板块的整体冲击（**与 `us_china_risk` 不同**：前者描述产业链脱钩风险，后者描述整体宏观地缘冲击；不要混淆）
+- `regulatory_risk`（P5-fix 新增）: `low | medium | high | null`，国内监管风险（数据安全/反垄断/医药集采/教育双减等政策事件对个股/行业的整体压制程度）
 - `chokepoint_type`: `patent | capacity | geo | tech | cert`，是否卡点
 - `cognitive_difference`: `market_underestimating | market_fair | market_overestimating`
 - `recent_catalysts`: 字符串数组，列最近 30 天内 1~3 个事件驱动；`risk_alerts` 已写过的不要重复

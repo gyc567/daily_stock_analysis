@@ -82,6 +82,12 @@ policy_catalysts:
   - 行业准入与产能审批
   - 食品安全监管
   - 出口退税政策
+
+# P5-fix: 行业政策倾向（供个股六维详情·宏观与地缘 sector_policy 兜底）
+# 取值约束: supportive | neutral | restrictive
+# 白酒：消费税改革预期 + 反腐压制但边际企稳 → neutral
+policy_lean: neutral
+policy_lean_rationale: 消费税改革是潜在利空（从生产环节改至消费环节），反腐冲击已边际企稳；行业本身品牌护城河强，整体政策面中性
 substitution_threats:
   - 进口烈酒（干邑/威士忌）
   - 其他高端消费品（奢侈品/艺术品）
