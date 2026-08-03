@@ -1247,6 +1247,8 @@ def _merge_six_dim(raw_data: Dict[str, Any], six: Dict[str, Any]) -> None:
         "moat_type": "moat_type",
         "moat_strength": "moat_strength",
         "us_china_risk": "us_china_risk",
+        "us_china_impact": "us_china_impact",  # P5-fix: 宏观与地缘维度
+        "regulatory_risk": "regulatory_risk",  # P5-fix: 宏观与地缘维度
         "chokepoint_type": "chokepoint_type",
         "cognitive_difference": "cognitive_difference",
         "news_sentiment": "news_sentiment",
