@@ -10,8 +10,16 @@ This dimension evaluates:
 """
 
 from typing import Optional, Dict, Any
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_NEUTRAL_SCORE = 50.0
+
+# P5-fix: 节流版告警（同进程 60s 内同调用点最多打 1 条 warning，避免日志洪水）
+_MACRO_MISSING_LOG_THROTTLE: Dict[str, float] = {}
+_MACRO_MISSING_LOG_TTL_SECONDS = 60.0
 
 
 def score_macro(
@@ -46,13 +54,13 @@ def score_macro(
             {
                 "name": "货币政策",
                 "score": mp_score,
-                "weight": 0.25,
+                "weight": 0.22,
                 "basis": "rule",
                 "summary": f"货币政策立场:{monetary_policy}",
             }
         )
-        total_score += mp_score * 0.25
-        total_weight += 0.25
+        total_score += mp_score * 0.22
+        total_weight += 0.22
 
     if liquidity_indicator:
         liquidity_score = _score_liquidity(liquidity_indicator)
@@ -60,13 +68,13 @@ def score_macro(
             {
                 "name": "流动性",
                 "score": liquidity_score,
-                "weight": 0.20,
+                "weight": 0.18,
                 "basis": "rule",
                 "summary": f"市场流动性:{liquidity_indicator}",
             }
         )
-        total_score += liquidity_score * 0.20
-        total_weight += 0.20
+        total_score += liquidity_score * 0.18
+        total_weight += 0.18
 
     if sector_policy:
         policy_score = _score_sector_policy(sector_policy)
@@ -74,13 +82,13 @@ def score_macro(
             {
                 "name": "行业政策",
                 "score": policy_score,
-                "weight": 0.25,
+                "weight": 0.22,
                 "basis": "rule",
                 "summary": f"行业政策:{sector_policy}",
             }
         )
-        total_score += policy_score * 0.25
-        total_weight += 0.25
+        total_score += policy_score * 0.22
+        total_weight += 0.22
 
     if us_china_impact:
         impact_score = _score_us_china_impact(us_china_impact)
@@ -88,17 +96,33 @@ def score_macro(
             {
                 "name": "中美影响",
                 "score": impact_score,
-                "weight": 0.30,
+                "weight": 0.28,
                 "basis": "llm",
                 "summary": f"中美关系影响:{us_china_impact}",
             }
         )
-        total_score += impact_score * 0.30
-        total_weight += 0.30
+        total_score += impact_score * 0.28
+        total_weight += 0.28
+
+    if regulatory_risk:
+        rr_score = _score_regulatory_risk(regulatory_risk)
+        indicators.append(
+            {
+                "name": "监管风险",
+                "score": rr_score,
+                "weight": 0.10,
+                "basis": "llm",
+                "summary": f"监管风险:{regulatory_risk}",
+            }
+        )
+        total_score += rr_score * 0.10
+        total_weight += 0.10
 
     if total_weight > 0:
         final_score = total_score / total_weight
     else:
+        # P5-fix: 5 键全缺失时打 warning（节流版），便于线上发现 macro_data_health 异常
+        _log_macro_missing_inputs_evidence(evidence)
         final_score = DEFAULT_NEUTRAL_SCORE
         indicators.append(
             {
@@ -158,3 +182,36 @@ def _score_us_china_impact(impact: str) -> float:
         "severe": 20,
     }
     return float(impact_map.get(impact.lower(), DEFAULT_NEUTRAL_SCORE))
+
+
+def _score_regulatory_risk(risk: str) -> float:
+    """Score regulatory risk (low risk → high score).
+
+    监管风险越低，分数越高（更利好个股）。
+    """
+    risk_map = {
+        "low": 80,
+        "medium": 50,
+        "high": 25,
+    }
+    return float(risk_map.get(risk.lower(), DEFAULT_NEUTRAL_SCORE))
+
+
+def _log_macro_missing_inputs_evidence(evidence: Optional[str]) -> None:
+    """P5-fix: 节流版 warning。
+
+    同进程同 evidence 前缀 60s 内最多打 1 条；防 11 只自选股批量触发日志洪水。
+    触发条件：score_macro 5 键全缺失 → UI 会显示"该维度暂无可用数据"。
+    """
+    key = (evidence or "")[:64]  # 截前 64 字符当 key
+    now = time.monotonic()
+    last = _MACRO_MISSING_LOG_THROTTLE.get(key)
+    if last is not None and (now - last) < _MACRO_MISSING_LOG_TTL_SECONDS:
+        return
+    _MACRO_MISSING_LOG_THROTTLE[key] = now
+    logger.warning(
+        "[score_macro] all 5 inputs missing (monetary/liquidity/sector/us_china/regulatory), "
+        "falling back to neutral 50; UI will show 'no data' placeholder. "
+        "macro_data_health broken? evidence=%r",
+        key,
+    )

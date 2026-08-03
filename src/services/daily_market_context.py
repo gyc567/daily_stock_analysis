@@ -64,6 +64,130 @@ _RISK_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
 )
 
 
+# P4-fix: 宏观与地缘维度入参抽取（供个股六维评分使用）
+# 顺序敏感：宽松 > 中性 > 紧缩（宽松关键词优先级最高，避免"稳健中性偏宽松"误判为中性）
+_MACRO_MONETARY_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    (
+        "accommodative",
+        (
+            "宽松",
+            "降准",
+            "降息",
+            "下调存款准备金率",
+            "下调利率",
+            "accommodative",
+            "easing",
+            "dovish",
+            "宽松货币政策",
+            "中性偏松",
+        ),
+    ),
+    (
+        "tight",
+        (
+            "紧缩",
+            "加息",
+            "上调存款准备金率",
+            "上调利率",
+            "去杠杆",
+            "tight",
+            "hawkish",
+            "紧缩货币政策",
+            "收紧货币",
+        ),
+    ),
+    (
+        "neutral",
+        (
+            "稳健中性",
+            "稳健的货币政策",
+            "中性",
+            "稳健",
+            "neutral",
+            "保持稳定",
+        ),
+    ),
+)
+
+_MACRO_LIQUIDITY_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    (
+        "abundant",
+        (
+            "流动性充裕",
+            "资金面宽松",
+            "资金充裕",
+            "流动性宽松",
+            "合理充裕",
+            "流动性合理充裕",
+            "放量",
+            "abundant",
+            "ample liquidity",
+            "liquidity ample",
+        ),
+    ),
+    (
+        "scarce",
+        (
+            "流动性紧张",
+            "资金面紧张",
+            "流动性枯竭",
+            "资金紧张",
+            "收紧",
+            "scarce",
+            "tight liquidity",
+        ),
+    ),
+    (
+        "moderate",
+        (
+            "流动性适中",
+            "资金面平稳",
+            "流动性平稳",
+            "moderate",
+        ),
+    ),
+)
+
+_MACRO_SECTOR_PATTERNS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    (
+        "supportive",
+        (
+            "政策支持",
+            "政策扶持",
+            "产业政策利好",
+            "国家支持",
+            "鼓励发展",
+            "补贴",
+            "supportive",
+            "policy support",
+            "favorable policy",
+            "政策利好",
+        ),
+    ),
+    (
+        "restrictive",
+        (
+            "监管收紧",
+            "政策限制",
+            "监管趋严",
+            "去杠杆",
+            "限制",
+            "restrictive",
+            "regulatory tightening",
+            "监管限制",
+        ),
+    ),
+    (
+        "neutral",
+        (
+            "中性",
+            "无明显政策影响",
+            "neutral",
+        ),
+    ),
+)
+
+
 def run_market_review(**kwargs: Any) -> Any:
     """Lazy wrapper to avoid importing analyzer while prompt modules import this formatter."""
     from src.core.market_review import run_market_review as _run_market_review
@@ -85,6 +209,11 @@ class DailyMarketContext:
     history_id: Optional[int] = None
     query_id: Optional[str] = None
     full_report: Optional[str] = None
+    # P4-fix: 宏观与地缘维度入参（供个股六维评分 score_macro 使用）
+    # 取值见 _MACRO_*_PATTERNS；为 None 时回退到中性分
+    monetary_policy: Optional[str] = None
+    liquidity_indicator: Optional[str] = None
+    sector_policy: Optional[str] = None
 
     def to_safe_dict(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -96,6 +225,12 @@ class DailyMarketContext:
         }
         if self.position_cap:
             payload["position_cap"] = self.position_cap
+        if self.monetary_policy:
+            payload["monetary_policy"] = self.monetary_policy
+        if self.liquidity_indicator:
+            payload["liquidity_indicator"] = self.liquidity_indicator
+        if self.sector_policy:
+            payload["sector_policy"] = self.sector_policy
         return payload
 
 
@@ -624,6 +759,8 @@ class DailyMarketContextService:
         )
         risk_tags = _extract_risk_tags(risk_signal_text)
         position_cap = _extract_position_cap(risk_signal_text)
+        # P4-fix: 从市场复盘文本抽宏观与地缘入参（个股无关的横切指标）
+        macro = _extract_macro_indicators(risk_signal_text)
         full_report = _extract_full_market_report(
             scoped_payload=scoped_payload,
             fallback_full_report=fallback_full_report,
@@ -639,6 +776,9 @@ class DailyMarketContextService:
             history_id=history_id if isinstance(history_id, int) else None,
             query_id=query_id if isinstance(query_id, str) and query_id else None,
             full_report=full_report,
+            monetary_policy=macro.get("monetary_policy"),
+            liquidity_indicator=macro.get("liquidity_indicator"),
+            sector_policy=None,
         )
 
 
@@ -673,6 +813,8 @@ def format_daily_market_context_prompt_section(
     )
     position_cap = str(payload.get("position_cap") or "").strip()
     source = str(payload.get("source") or "").strip()
+    monetary_policy = str(payload.get("monetary_policy") or "").strip()
+    liquidity_indicator = str(payload.get("liquidity_indicator") or "").strip()
 
     if language == "en":
         label = _REGION_LABEL_EN.get(region, region)
@@ -690,6 +832,10 @@ def format_daily_market_context_prompt_section(
             lines.append(f"- Risk tags: {', '.join(risk_tags)}")
         if position_cap:
             lines.append(f"- Position cap: {position_cap}")
+        if monetary_policy:
+            lines.append(f"- Monetary stance: {monetary_policy}")
+        if liquidity_indicator:
+            lines.append(f"- Liquidity: {liquidity_indicator}")
         lines.append(
             "- Guardrail: if this context is conservative or high risk, avoid aggressive buy advice and prefer smaller position sizing or confirmation."
         )
@@ -712,6 +858,10 @@ def format_daily_market_context_prompt_section(
         lines.append(f"- 风险标签：{', '.join(risk_tags)}")
     if position_cap:
         lines.append(f"- 仓位提示：{position_cap}")
+    if monetary_policy:
+        lines.append(f"- 货币政策：{monetary_policy}")
+    if liquidity_indicator:
+        lines.append(f"- 市场流动性：{liquidity_indicator}")
     lines.append(
         "- 约束：若大盘环境偏谨慎、退潮、观望或高风险，避免给出激进买入建议，优先控制仓位并等待确认。"
     )
@@ -1033,6 +1183,94 @@ def _extract_risk_tags(text: str) -> List[str]:
         if any(pattern.lower() in lowered for pattern in patterns):
             tags.append(tag)
     return tags
+
+
+def _extract_macro_indicators(text: str) -> Dict[str, Optional[str]]:
+    """P4-fix: 从市场复盘文本中抽取 monetary_policy / liquidity_indicator。
+
+    三选一映射（顺序敏感），无命中返回 None。
+    """
+    return {
+        "monetary_policy": _extract_first_match(text, _MACRO_MONETARY_PATTERNS),
+        "liquidity_indicator": _extract_first_match(text, _MACRO_LIQUIDITY_PATTERNS),
+    }
+
+
+# P4-fix: 已知的「子串误命中」黑名单——这些短语里包含我们的关键词但语义不同。
+# 例如 "宽松性改革" 包含 "宽松" 但语义是改革不是货币政策。
+# 当黑名单短语整体命中时，跳过本次关键词匹配。
+_MACRO_FALSE_POSITIVE_PHRASES: Tuple[str, ...] = (
+    "宽松性改革",
+    "不限购",
+    "不限行",
+    "无加息",
+    "无降息",
+    "无降准",
+)
+
+
+def _extract_first_match(
+    text: str, patterns: Tuple[Tuple[str, Tuple[str, ...]], ...]
+) -> Optional[str]:
+    """在 patterns 顺序中找到首个命中标签；未命中返回 None。
+
+    P4-fix v3: 中文无空格分隔，使用更长短语优先 + 黑名单短语过滤。
+    匹配策略：
+    1. 按关键词长度降序尝试：长短语（如「宽松货币政策」）先于短词（如「宽松」）
+    2. 每次匹配前校验「是否存在至少一个非 FP 上下文里的命中」
+       ——只有当 keyword 的所有出现位置都落在 FP 黑名单短语中时才视为误命中
+    """
+    if not text:
+        return None
+    lowered = text.lower()
+    for tag, keywords in patterns:
+        # 按长度降序：先匹配长短语
+        sorted_kws = sorted(keywords, key=len, reverse=True)
+        for kw in sorted_kws:
+            kw_lower = kw.lower()
+            if kw_lower not in lowered:
+                continue
+            # 校验至少存在一个非 FP 上下文里的命中
+            if not _has_non_fp_hit(lowered, kw_lower):
+                continue
+            return tag
+    return None
+
+
+def _has_non_fp_hit(text: str, keyword: str) -> bool:
+    """检查 keyword 在 text 中是否至少有一个命中位置不在任何 FP 短语内。
+
+    例如 text = "宽松性改革" + "，央行宽松货币政策" + "宽松性改革"
+    - 第一个 "宽松" 落在 FP "宽松性改革" 中 → 跳过
+    - 第二个 "宽松" 落在 "宽松货币政策" 中（不是 FP）→ 视为正向命中
+    """
+    start = 0
+    while True:
+        idx = text.find(keyword, start)
+        if idx == -1:
+            return False
+        if not _is_inside_fp_phrase(text, idx, len(keyword)):
+            return True
+        start = idx + 1
+
+
+def _is_inside_fp_phrase(text: str, idx: int, kw_len: int) -> bool:
+    """idx 处 keyword 的命中是否完全落在某个 FP 黑名单短语内。"""
+    for fp in _MACRO_FALSE_POSITIVE_PHRASES:
+        fp_lower = fp.lower()
+        if fp_lower not in text:
+            continue
+        # 找 FP 在 text 中的所有出现位置
+        fp_pos = 0
+        while True:
+            fp_idx = text.find(fp_lower, fp_pos)
+            if fp_idx == -1:
+                break
+            # 检查 keyword 命中是否被 FP 范围覆盖
+            if fp_idx <= idx and idx + kw_len <= fp_idx + len(fp_lower):
+                return True
+            fp_pos = fp_idx + 1
+    return False
 
 
 def _extract_position_cap(text: str) -> Optional[str]:
