@@ -637,6 +637,9 @@ class StockAnalysisPipeline:
                 daily_market_context,
                 report_language=report_language,
             )
+            # P5-fix: 注入大盘指数 + 市场统计（供 macro 维度 liquidity/monetary 推断）
+            # 单只股分析也走这条路径（fail-open：拿不到时不抛异常）
+            self._attach_market_overview(enhanced_context, market)
             if portfolio_context is not None:
                 enhanced_context["portfolio_context"] = dict(portfolio_context)
 
@@ -1672,6 +1675,40 @@ class StockAnalysisPipeline:
             return
         target_context["daily_market_context"] = safe_context
         target_context["daily_market_context_summary"] = prompt_section
+
+    def _attach_market_overview(
+        self,
+        target_context: Dict[str, Any],
+        market: str,
+    ) -> None:
+        """P5-fix: 注入大盘指数 + 市场统计（供 macro 维度推断 liquidity/monetary）。
+
+        单只股分析与批量分析都走这条路径；优先复用 main_indices（已有限时
+        缓存），market_stats 单次拉取。失败时静默（target_context 不变），
+        不影响后续 LLM / 评分流程。
+
+        Args:
+            target_context: enhanced_context（就地修改）
+            market: 市场代码（cn / hk / us）
+        """
+        if not market:
+            return
+        try:
+            indices = self.fetcher_manager.get_main_indices(market) or []
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "[market_overview] get_main_indices(%s) failed: %s", market, exc
+            )
+            indices = []
+        if indices:
+            target_context["main_indices"] = list(indices)
+        try:
+            stats = self.fetcher_manager.get_market_stats(purpose=f"stock:{market}")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[market_overview] get_market_stats failed: %s", exc)
+            stats = None
+        if stats:
+            target_context["market_stats"] = dict(stats)
 
     def _agent_result_to_analysis_result(
         self,

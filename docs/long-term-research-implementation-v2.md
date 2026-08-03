@@ -808,6 +808,37 @@ def get_weight_sum() -> float:
 - `monetary_policy` / `liquidity_indicator` 在批量场景下仍依赖 daily_market_context（待 PR-A）
 - 11 只自选股模拟：9/11 命中 `sector_policy`（was 1/11），剩 2 只（东材科技 新材料 / 002957 科瑞技术 智能制造）需扩 KB
 
+#### 3.2.3 客观 macro 指标从大盘指数 + 总成交额推断（P5-fix 第二阶段，2026-08-03）
+
+**问题**：P5 第一阶段（`sector_policy`）已可被行业 KB 兜底，但 `monetary_policy` / `liquidity_indicator` 仍依赖 `daily_market_context`（大盘分析产物），在批量场景下 `daily_market_context = None` → 永远缺失。
+
+**修复**：
+
+| 入参 | 数据源 | 推断函数 | 阈值 |
+| --- | --- | --- | --- |
+| `liquidity_indicator` | `DataFetcherManager.get_market_stats()` 的 `total_amount` | `_infer_liquidity_from_market_stats` | >=1.5 万亿→abundant / >=0.8 万亿→moderate / 否则 scarce |
+| `monetary_policy` | `DataFetcherManager.get_main_indices()` 沪深 300 / 创业板指 / 上证指数 change_pct 均值 | `_infer_monetary_policy_from_indices` | >+2%→accommodative / <-2%→tight / 否则 neutral |
+
+**⚠️ 临时近似**：`monetary_policy` 真值需要央行 OMO/利率/PMI 等数据，pipeline 暂无 fetcher；用指数涨跌近似是粗糙信号，CHANGELOG 明确标注。接入真实利率数据后只需替换 `_infer_monetary_policy_from_indices` 函数体。
+
+**注入点**：`src/core/pipeline.py` 新增 `_attach_market_overview(target_context, market)`，在 `_attach_daily_market_context` 后立即调（pipeline.py:642）。单只/批量分析都走这条路径，fail-open 静默失败（fetcher 异常时 target_context 不变）。
+
+**优先级链**（`src/services/research_framework_integration.py` `_extract_raw_data_from_context` 922-955 行）：
+1. P4 daily_market_context 显式值（最高）
+2. P5 客观推断（main_indices / market_stats 推断）
+3. LLM 主观值（`_enrich_raw_data_from_llm_output`，最低）
+
+**契约**：
+- `setdefault` 注入保证高优先级不被低优先级覆盖
+- `infer_objective_macro_indicators` 任意异常输入返回 `{"liquidity_indicator": None, "monetary_policy": None}`（不抛异常）
+- 软导入 `src.services.macro_indicators_from_market`，模块缺失不破坏现有调用链
+
+**验证**：
+- 36 个 `tests/test_macro_indicators_from_market.py` 用例（边界 + 异常）
+- 10 个 `tests/test_pipeline_attach_market_overview.py` 用例（注入 + 失败处理）
+- 5 个 `tests/test_macro_dimension_data_source.py::TestObjectiveMacroIndicatorsIntegration` 端到端
+- 综合 51 个新测试，全部通过
+
 ### 3.3 数据持久化 (`src/repositories/position_ledger_repo.py`)
 
 ```python

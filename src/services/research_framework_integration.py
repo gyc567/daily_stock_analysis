@@ -920,7 +920,7 @@ def _extract_raw_data_from_context(
         _capital_merge(raw_data, cap)
 
     # ---- P4-fix: 宏观与地缘维度入参 ----
-    # 优先级：daily_market_context（客观） > industry_drivers + fundamental（个股行业） > LLM 主观值（_enrich_raw_data_from_llm_output）
+    # 优先级：daily_market_context（客观） > main_indices/market_stats（个股路径） > LLM 主观值（_enrich_raw_data_from_llm_output）
     # 用 setdefault 给 LLM 主观值保留覆盖机会（_enrich_raw_data_from_llm_output 后跑）
     dmc = context.get("daily_market_context") or {}
     if isinstance(dmc, dict):
@@ -928,6 +928,26 @@ def _extract_raw_data_from_context(
             v = dmc.get(key)
             if isinstance(v, str) and v.strip():
                 raw_data.setdefault(key, v.strip())
+
+    # P5-fix: 当 daily_market_context 不可用时，从个股路径推断 monetary/liquidity
+    # 优先级 2: 增强上下文 main_indices + market_stats（由 pipeline._attach_market_overview 注入）
+    if not raw_data.get("monetary_policy") and not raw_data.get("liquidity_indicator"):
+        try:
+            from src.services.macro_indicators_from_market import (
+                infer_objective_macro_indicators,
+            )
+
+            overview = infer_objective_macro_indicators(
+                main_indices=context.get("main_indices"),
+                market_stats=context.get("market_stats"),
+            )
+            for key in ("monetary_policy", "liquidity_indicator"):
+                v = overview.get(key)
+                if isinstance(v, str) and v.strip():
+                    raw_data.setdefault(key, v.strip())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[macro] infer_objective_macro_indicators failed: %s", exc)
+
     # sector_policy 走个股行业维度（个股 macro 评分需要 sector 而不是横切大盘）
     drivers = _extract_industry_drivers(result, context)
     industry_hint, sector_rankings = _resolve_sector_policy_hints(

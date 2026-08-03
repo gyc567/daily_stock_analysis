@@ -157,3 +157,100 @@ def test_full_pipeline_macro_not_missing_summary() -> None:
     assert macro_dim["score"] > 60.0
     # indicators 至少有 3 个真实打分项
     assert len(macro_dim["indicators"]) >= 3
+
+
+# ============================================================
+# P5-fix: 客观 macro 指标从 main_indices/market_stats 推断
+# ============================================================
+
+
+class TestObjectiveMacroIndicatorsIntegration:
+    """P5-fix: _extract_raw_data_from_context 接入 main_indices/market_stats"""
+
+    def test_macro_liquidity_injected_from_market_stats(self) -> None:
+        """无 daily_market_context 时，从 market_stats 推断 liquidity_indicator"""
+        from src.services.research_framework_integration import (
+            _extract_raw_data_from_context,
+        )
+        result = _make_result(fundamental_analysis="公司主营业务稳定")
+        context = {
+            "market_stats": {"total_amount": 18000.0},  # 1.8万亿 → abundant
+            "main_indices": [],  # 空
+        }
+        raw_data = _extract_raw_data_from_context(result, context)
+        assert raw_data.get("liquidity_indicator") == "abundant"
+
+    def test_macro_monetary_injected_from_indices(self) -> None:
+        """无 daily_market_context 时，从 main_indices 推断 monetary_policy"""
+        from src.services.research_framework_integration import (
+            _extract_raw_data_from_context,
+        )
+        result = _make_result(fundamental_analysis="公司主营业务稳定")
+        context = {
+            "market_stats": {},  # 空
+            "main_indices": [
+                {"code": "000300", "change_pct": 3.0},
+                {"code": "399006", "change_pct": 4.0},
+            ],
+        }
+        raw_data = _extract_raw_data_from_context(result, context)
+        assert raw_data.get("monetary_policy") == "accommodative"
+
+    def test_macro_daily_market_context_takes_priority(self) -> None:
+        """P4 daily_market_context 路径优先于 P5 客观推断"""
+        from src.services.research_framework_integration import (
+            _extract_raw_data_from_context,
+        )
+        result = _make_result(fundamental_analysis="无政策描述")
+        context = {
+            "daily_market_context": {
+                "monetary_policy": "tight",  # P4 显式值
+                "liquidity_indicator": "scarce",
+            },
+            "main_indices": [
+                {"code": "000300", "change_pct": 3.0},  # P5 推断会是 accommodative
+            ],
+            "market_stats": {"total_amount": 18000.0},  # P5 推断会是 abundant
+        }
+        raw_data = _extract_raw_data_from_context(result, context)
+        # P4 值应保留（setdefault 不覆盖）
+        assert raw_data.get("monetary_policy") == "tight"
+        assert raw_data.get("liquidity_indicator") == "scarce"
+
+    def test_macro_all_sources_present(self) -> None:
+        """完整 5 键 macro 注入（4 个客观 + 1 个 LLM 路径占位）"""
+        from src.services.research_framework_integration import (
+            _extract_raw_data_from_context,
+        )
+        result = _make_result(
+            fundamental_analysis="公司主营业务稳定增长"
+        )
+        context = {
+            "market_stats": {"total_amount": 18000.0},
+            "main_indices": [
+                {"code": "000300", "change_pct": 3.0},
+                {"code": "399006", "change_pct": 4.0},
+            ],
+            "fundamental_context": {
+                "boards": [
+                    {"name": "半导体", "code": "BK001"},
+                ],
+            },
+        }
+        raw_data = _extract_raw_data_from_context(result, context)
+        assert raw_data.get("monetary_policy") == "accommodative"
+        assert raw_data.get("liquidity_indicator") == "abundant"
+        assert raw_data.get("sector_policy") == "supportive"  # 半导体 KB
+
+    def test_macro_no_data_no_crash(self) -> None:
+        """无任何 macro 数据时仍正常返回（走中性分占位）"""
+        from src.services.research_framework_integration import (
+            _extract_raw_data_from_context,
+        )
+        result = _make_result(fundamental_analysis="无政策描述")
+        context = {}  # 完全空
+        raw_data = _extract_raw_data_from_context(result, context)
+        # monetary/liquidity/sector 都应 None（不抛异常）
+        assert raw_data.get("monetary_policy") is None
+        assert raw_data.get("liquidity_indicator") is None
+        assert raw_data.get("sector_policy") is None
