@@ -92,6 +92,12 @@ policy_catalysts:
   - DRG/DIP 支付改革
   - FDA 审评政策（出海）
   - 中医药传承发展
+
+# P5-fix: 行业政策倾向（供个股六维详情·宏观与地缘 sector_policy 兜底）
+# 取值约束: supportive | neutral | restrictive
+# 医药行业整体受集采压制（量价博弈）→ restrictive
+policy_lean: restrictive
+policy_lean_rationale: 集采常态化压制仿制药价格，DRG/DIP 改革限制定价空间；创新药与出海受鼓励但占比有限，整体偏 restrictive
 substitution_threats:
   - 仿制药替代原研（专利到期）
   - 生物类似药

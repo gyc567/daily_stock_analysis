@@ -87,6 +87,12 @@ policy_catalysts:
   - 一带一路出口支持
   - 国产替代清单
   - 国家集成电路战略（PCB 配套）
+
+# P5-fix: 行业政策倾向（供个股六维详情·宏观与地缘 sector_policy 兜底）
+# 取值约束: supportive | neutral | restrictive
+# 玻纤：双碳+风电需求+新材料专项 → supportive
+policy_lean: supportive
+policy_lean_rationale: 双碳目标驱动风电/新能源车用玻纤需求；新材料专项 + 一带一路支持出口，PCB 配套受益集成电路战略
 substitution_threats:
   - 碳纤维（航空/高端，受成本限制）
   - 玄武岩纤维（少量替代）

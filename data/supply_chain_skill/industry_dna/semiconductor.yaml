@@ -104,6 +104,12 @@ policy_catalysts:
   - 国产替代清单
   - 信创政策
   - 美国 CHIPS Act
+
+# P5-fix: 行业政策倾向（供个股六维详情·宏观与地缘 sector_policy 兜底）
+# 取值约束: supportive | neutral | restrictive
+# 半导体受国产替代 + 大基金三期 + 科创板 → supportive
+policy_lean: supportive
+policy_lean_rationale: 大基金三期注资、国产替代清单、信创采购倾斜支持，但美国出口管制带来外延风险，整体偏 supportive（国家战略导向）
 substitution_threats:
   - 先进封装（CoWoS → TGV/玻璃基板）
   - HBM 替代 HBM3E/HBM4

@@ -528,31 +528,262 @@ def _infer_sector_policy(
     *,
     fundamental_text: Optional[str],
     industry_drivers: List[str],
+    industry_hint: Optional[str] = None,
+    sector_rankings: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[str]:
-    """P4-fix: 从基本面文本与产业驱动词推断 sector_policy。
+    """P5-fix: 多源兜底推断 sector_policy。
 
-    顺序敏感（与 daily_market_context 一致：宽松/收紧 > 中性）。
-    返回 None 表示无任何命中。
-    P4-fix v3: 更长短语优先 + 黑名单过滤，避免子串误命中。
+    优先级（高 → 低）：
+    1. fundamental_text / industry_drivers regex 匹配（语义最丰富）
+    2. industry_hint → 行业 KB 静态 policy_lean（稳定兜底）
+    3. sector_rankings → 所属板块涨跌幅推断（动态兜底）
+    4. 全部失败 → None（走中性分占位）
+
+    Args:
+        fundamental_text: LLM 生成的基本面分析文本
+        industry_drivers: 产业驱动因素列表
+        industry_hint: 行业提示（如"医药"、"半导体"、"新能源"）
+        sector_rankings: 板块涨跌幅列表 [{"name": str, "change_pct": float}, ...]
+
+    Returns:
+        "supportive" | "neutral" | "restrictive" | None
     """
+    # 优先级 1: regex 匹配 LLM 文本
     parts: List[str] = []
     if fundamental_text:
         parts.append(fundamental_text)
     if industry_drivers:
         parts.append(" ".join(industry_drivers))
-    if not parts:
-        return None
-    joined = "\n".join(parts).lower()
-    for tag, kws in _SECTOR_POLICY_PATTERNS:
-        sorted_kws = sorted(kws, key=len, reverse=True)
-        for kw in sorted_kws:
-            kw_lower = kw.lower()
-            if kw_lower not in joined:
-                continue
-            if not _has_sector_non_fp_hit(joined, kw_lower):
-                continue
-            return tag
+    if parts:
+        joined = "\n".join(parts).lower()
+        for tag, kws in _SECTOR_POLICY_PATTERNS:
+            sorted_kws = sorted(kws, key=len, reverse=True)
+            for kw in sorted_kws:
+                kw_lower = kw.lower()
+                if kw_lower not in joined:
+                    continue
+                if not _has_sector_non_fp_hit(joined, kw_lower):
+                    continue
+                return tag
+
+    # 优先级 2: 行业 KB 静态 policy_lean 兜底
+    if industry_hint:
+        lean = _lookup_industry_policy_lean_safe(industry_hint)
+        if lean:
+            return lean
+
+    # 优先级 3: 板块涨跌幅推断（动态）
+    if sector_rankings:
+        rank_lean = _infer_sector_policy_from_rankings(sector_rankings)
+        if rank_lean:
+            return rank_lean
+
     return None
+
+
+def _lookup_industry_policy_lean_safe(industry_hint: str) -> Optional[str]:
+    """P5-fix: 软导入行业 KB 加载器，避免 research_framework_integration 直接依赖。
+
+    当 industry_dna_loader 不可用或文件缺失时返回 None，不抛异常。
+    """
+    try:
+        from src.services.supply_chain.industry_dna_loader import (
+            lookup_industry_policy_lean,
+        )
+
+        return lookup_industry_policy_lean(industry_hint)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[sector_policy] lookup_industry_policy_lean failed for hint=%r: %s",
+            industry_hint,
+            exc,
+        )
+        return None
+
+
+def _infer_sector_policy_from_rankings(
+    sector_rankings: Optional[List[Any]],
+) -> Optional[str]:
+    """P5-fix: 板块涨跌幅推断。
+
+    阈值（中证 800 / 申万一级板块经验值）：
+    - 涨幅 > 2%：可能受政策催化 → supportive
+    - 跌幅 < -2%：可能受政策压制 → restrictive
+    - 其它：neutral
+    """
+    if not sector_rankings:
+        return None
+    # 取涨幅中位数
+    changes: List[float] = []
+    for r in sector_rankings:
+        if not isinstance(r, dict):
+            continue
+        chg = r.get("change_pct")
+        if chg is None and "change" in r:
+            chg = r.get("change")
+        if isinstance(chg, (int, float)):
+            changes.append(float(chg))
+    if not changes:
+        return None
+    median = sorted(changes)[len(changes) // 2]
+    if median > 2.0:
+        return "supportive"
+    if median < -2.0:
+        return "restrictive"
+    return "neutral"
+
+
+# P5-fix: 行业关键词候选池（用于从 sector_position / boards 抽取行业提示）
+# 顺序敏感：优先匹配更具体的行业
+_INDUSTRY_HINT_KEYWORDS: Tuple[str, ...] = (
+    "新能源电池",
+    "新能源车",
+    "新能源",
+    "玻璃纤维",
+    "玻纤",
+    "创新药",
+    "CXO",
+    "CDMO",
+    "CRO",
+    "生物制药",
+    "生物药",
+    "疫苗",
+    "医疗器械",
+    "体外诊断",
+    "IVD",
+    "中成药",
+    "中药",
+    "原料药",
+    "集成电路",
+    "半导体设备",
+    "半导体材料",
+    "半导体",
+    "电子级树脂",
+    "复合材料",
+    "新材料",
+    "光伏",
+    "风电",
+    "储能",
+    "动力电池",
+    "高端白酒",
+    "次高端",
+    "白酒",
+    "啤酒",
+    "红酒",
+    "OLED",
+    "MicroLED",
+    "面板",
+    "显示器件",
+    "智能穿戴",
+    "智能制造",
+    "工业气体",
+    "集成电路设备",
+    "EDA",
+)
+
+
+def _build_industry_hint(
+    *,
+    sector_position: str,
+    boards: List[Dict[str, Any]],
+) -> Optional[str]:
+    """P5-fix: 从 sector_position + boards 抽取行业提示字符串。
+
+    优先级：sector_position 关键词匹配 > boards 名称。
+    返回逗号分隔的候选字符串（供 lookup_industry_policy_lean 多关键词搜索）。
+    """
+    hits: List[str] = []
+    # 1) 从 sector_position 抽取
+    if sector_position and isinstance(sector_position, str):
+        for kw in _INDUSTRY_HINT_KEYWORDS:
+            if kw in sector_position and kw not in hits:
+                hits.append(kw)
+    # 2) 从 boards 抽取（取前 10 个有意义的板块，过滤宽基/概念类）
+    _NOISY_BOARD_KEYWORDS = (
+        "板块",
+        "概念",
+        "综",
+        "成分",
+        "罗素",
+        "股通",
+        "融资融券",
+        "MSCI",
+        "央视",
+        "中盘",
+        "大盘",
+        "小盘",
+        "富时",
+        "GDR",
+        "指数",
+        "新消费",
+    )
+    seen_kw: set[str] = set(hits)
+    for b in boards or []:
+        if not isinstance(b, dict):
+            continue
+        name = str(b.get("name", "")).strip()
+        if not name:
+            continue
+        if any(nk in name for nk in _NOISY_BOARD_KEYWORDS):
+            continue
+        for kw in _INDUSTRY_HINT_KEYWORDS:
+            if kw in name and kw not in seen_kw:
+                hits.append(kw)
+                seen_kw.add(kw)
+        if len(hits) >= 3:
+            break
+    if not hits:
+        return None
+    return ",".join(hits[:3])
+
+
+def _resolve_sector_policy_hints(
+    *,
+    result: AnalysisResult,
+    context: Dict[str, Any],
+) -> Tuple[Optional[str], Optional[List[Dict[str, Any]]]]:
+    """P5-fix: 从 context 中提取 industry_hint + sector_rankings 供 _infer_sector_policy 使用。
+
+    industry_hint 来源：
+    1. result.sector_position（LLM 自由文本）
+    2. enhanced_context.fundamental_context.boards（板块名列表）
+
+    sector_rankings 来源：
+    1. context["sector_rankings"]（顶层）
+    2. enhanced_context.sector_rankings
+    """
+    # 1) industry_hint
+    boards: List[Dict[str, Any]] = []
+    fc = context.get("fundamental_context") or {}
+    if isinstance(fc, dict):
+        raw_boards = fc.get("boards")
+        if isinstance(raw_boards, list):
+            boards = [b for b in raw_boards if isinstance(b, dict)]
+    # 兼容顶层 boards
+    if not boards:
+        top_boards = context.get("belong_boards") or context.get("boards")
+        if isinstance(top_boards, list):
+            boards = [b for b in top_boards if isinstance(b, dict)]
+    industry_hint = _build_industry_hint(
+        sector_position=getattr(result, "sector_position", "") or "",
+        boards=boards,
+    )
+
+    # 2) sector_rankings
+    rankings: Optional[List[Dict[str, Any]]] = None
+    for path in ("sector_rankings",):
+        v = context.get(path)
+        if isinstance(v, list) and v:
+            rankings = [r for r in v if isinstance(r, dict)]
+            break
+    if rankings is None:
+        ec = context.get("enhanced_context") or {}
+        if isinstance(ec, dict):
+            v = ec.get("sector_rankings")
+            if isinstance(v, list) and v:
+                rankings = [r for r in v if isinstance(r, dict)]
+
+    return industry_hint, rankings
 
 
 _SECTOR_FALSE_POSITIVE_PHRASES: Tuple[str, ...] = (
@@ -699,9 +930,14 @@ def _extract_raw_data_from_context(
                 raw_data.setdefault(key, v.strip())
     # sector_policy 走个股行业维度（个股 macro 评分需要 sector 而不是横切大盘）
     drivers = _extract_industry_drivers(result, context)
+    industry_hint, sector_rankings = _resolve_sector_policy_hints(
+        result=result, context=context
+    )
     sector_policy = _infer_sector_policy(
         fundamental_text=result.fundamental_analysis,
         industry_drivers=drivers,
+        industry_hint=industry_hint,
+        sector_rankings=sector_rankings,
     )
     if sector_policy is not None:
         raw_data.setdefault("sector_policy", sector_policy)

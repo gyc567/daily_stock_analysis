@@ -18,6 +18,8 @@ keywords:
   - 蜂巢
   - 磷酸铁锂
   - 三元
+  - 新能源
+  - 新能源车
 products:
   - 动力电池（NCM/LFP/钠离子）
   - 储能电池（电力/工商业/户用）
@@ -96,6 +98,12 @@ policy_catalysts:
   - 储能政策（独立储能/容量电价）
   - 欧盟新电池法规
   - 美国 IRA 法案
+
+# P5-fix: 行业政策倾向（供个股六维详情·宏观与地缘 sector_policy 兜底）
+# 取值约束: supportive | neutral | restrictive
+# 新能源电池：双碳目标 + 储能/电动车补贴 + IRA → supportive
+policy_lean: supportive
+policy_lean_rationale: 双碳战略 + 新能源车补贴延续 + 独立储能/容量电价政策直接利好动力/储能电池；海外 IRA 法案是机会也是壁垒
 substitution_threats:
   - 钠离子电池（成本）
   - 固态电池（长期）
