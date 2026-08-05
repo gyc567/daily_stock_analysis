@@ -138,6 +138,43 @@ gh pr checks <pr_number>
 gh run view <run_id> --log-failed
 ```
 
+### 本地开发（启动前后端）
+
+使用 `scripts/start-dev.sh` 脚本启动前后端服务：
+
+```bash
+cd /Users/jie/code/daily_stock_analysis
+
+# 启动前后端
+./scripts/start-dev.sh
+
+# 仅启动前端
+./scripts/start-dev.sh frontend
+
+# 仅启动后端
+./scripts/start-dev.sh backend
+
+# 停止所有服务
+./scripts/start-dev.sh stop
+```
+
+**访问地址：**
+- 前端：http://localhost:5173
+- 后端 API：http://localhost:8000
+- 后端 API 文档：http://localhost:8000/docs
+
+**日志文件：**
+- 后端日志：`logs/backend.log`
+- 前端日志：`apps/dsa-web/frontend.log`
+
+**Python 虚拟环境：** `~/dsa-venv`（使用 uv 创建）
+
+**手动停止服务：**
+```bash
+pkill -f "uvicorn server:app"
+pkill -f vite
+```
+
 ## 5. 默认工作流
 
 1. 先判断任务类型：`fix / feat / refactor / docs / chore / test / review`
