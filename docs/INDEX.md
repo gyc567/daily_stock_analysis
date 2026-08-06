@@ -65,6 +65,7 @@
 | [Loop Engineering 集成](loop-engineering-integration.md) | Loop Engineering 框架集成方案 |
 | [Loop Engineering 设计指南](loop-design-guide.md) | 新 Loop 设计原则与检查清单 |
 | [Loop Engineering 运营手册](loop-operating.md) | 日常运营指南与问题处理 |
+| [Loop Engineering 用户指南](loop-user-guide.md) | 与 AI 协作使用 Loop 的教程 |
 | [Loop Engineering 失败模式](loop-failure-modes.md) | Loop 失败模式与应对策略 |
 
 ## 多语言

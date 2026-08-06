@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [文档] Loop Engineering Phase 2 完成：新增 `.github/workflows/loop-triage.yml`（每日 Issue/PR 分流）和 `.github/workflows/loop-ci-sweeper.yml`（CI 失败分析）。
 - [文档] Loop Engineering Phase 3 完成：新增 `.github/workflows/loop-dep-sweeper.yml`（依赖检查工作流）；更新 `scripts/check_ai_assets.py` 添加 Loop Skills 检查。
 - [文档] Loop Engineering Phase 4 完成：新增 `docs/loop-failure-modes.md`（10 种失败模式与应对策略）、`docs/loop-operating.md`（日常运营手册）和 `docs/loop-design-guide.md`（新 Loop 设计指南与检查清单）。Loop Ready Score 达到 80/110 (L2)。
+- [文档] Loop Engineering 用户指南：新增 `docs/loop-user-guide.md`，包含快速开始、核心文件速查、日常使用场景（7 个场景）、AI 协作模板（4 个模板）、命令速查、故障排查和最佳实践。
 - [文档] Loop Engineering Phase 1 完成：新增核心文件（LOOP.md/STATE.md/LOOP_BUDGET.md/LOOP_CONSTRAINTS.md/gate.yaml/loop-run-log.md）、4 个 Loop Skills（loop-triage/loop-verify/loop-context/loop-plan）和 3 个脚本（loop-gate.sh/loop-audit.sh/loop-budget.sh）。Loop Ready Score 从 0 提升至 74/100。
 
 - [文档] Loop Engineering 集成方案：引入 loop-engineering 框架，创建完整集成文档 `docs/loop-engineering-integration.md`，包含背景与目标、概念术语、现有资产审计、文件体系设计、安全机制、核心文件模板（LOOP.md/STATE.md/LOOP_BUDGET.md/LOOP_CONSTRAINTS.md/gate.yaml/loop-run-log.md）、Skills 设计、工作流设计、实施计划、预期收益、验证迭代等章节；更新 `docs/INDEX.md` 参考与开发部分添加 Loop Engineering 相关文档入口。
