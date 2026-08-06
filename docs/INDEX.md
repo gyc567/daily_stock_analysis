@@ -60,6 +60,14 @@
 | 文档 | 内容 |
 | --- | --- |
 | [API 规格](architecture/api_spec.json) | FastAPI OpenAPI 规格产物 |
+| [API 规格](architecture/api_spec.json) | FastAPI OpenAPI 规格产物 |
+| [贡献指南](CONTRIBUTING.md) | Issue、PR、测试、文档同步和协作要求 |
+| [Loop Engineering 集成](loop-engineering-integration.md) | Loop Engineering 框架集成方案 |
+| [Loop Engineering 设计指南](loop-design-guide.md) | 新 Loop 设计原则与检查清单 |
+| [Loop Engineering 运营手册](loop-operating.md) | 日常运营指南与问题处理 |
+| [Loop Engineering 失败模式](loop-failure-modes.md) | Loop 失败模式与应对策略 |
+
+## 多语言
 | [贡献指南](CONTRIBUTING.md) | Issue、PR、测试、文档同步和协作要求 |
 
 ## 多语言

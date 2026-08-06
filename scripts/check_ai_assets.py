@@ -27,6 +27,13 @@ REQUIRED_SKILL_FILES = {
     "fix-issue/SKILL.md",
 }
 
+REQUIRED_LOOP_SKILL_FILES = {
+    "loop-triage/SKILL.md",
+    "loop-verify/SKILL.md",
+    "loop-context/SKILL.md",
+    "loop-plan/SKILL.md",
+}
+
 REQUIRED_GITIGNORE_SNIPPETS = (
     ".claude/*",
     "!.claude/skills/",
@@ -113,11 +120,24 @@ def ensure_no_tracked_claude_artifacts() -> None:
         fail(f"tracked .claude artifact outside skills/: {path}")
 
 
+def ensure_loop_skill_files() -> None:
+    """检查 Loop-specific skills 是否存在"""
+    for relative_path in REQUIRED_LOOP_SKILL_FILES:
+        path = CLAUDE_SKILLS_DIR / relative_path
+        if not path.exists():
+            fail(f"missing loop skill asset: {path.relative_to(ROOT)}")
+        if path.is_file():
+            content = path.read_text(encoding="utf-8")
+            if "LOOP_CONSTRAINTS.md" not in content:
+                fail(f"{path.relative_to(ROOT)} must reference LOOP_CONSTRAINTS.md")
+
+
 def main() -> None:
     ensure_symlink()
     ensure_copilot_entry()
     ensure_instruction_files()
     ensure_skill_files()
+    ensure_loop_skill_files()
     ensure_gitignore_rules()
     ensure_no_tracked_claude_artifacts()
     print("[ai-assets] OK")

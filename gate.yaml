@@ -1,0 +1,49 @@
+# gate.yaml — Loop Gate Configuration
+# 机械执行的安全门禁配置
+# 参考: docs/loop-engineering-integration.md
+
+version: 1
+
+# 禁止路径（绝对不能自动修改）
+denylist:
+  - ".env"
+  - ".env.*"
+  - "**/secrets/**"
+  - "**/credentials/**"
+  - "**/*_key*"
+  - "**/*_secret*"
+  - "auth/**"
+  - "bot/**"
+  - "data_provider/**"
+  - "src/config/**"
+  - "src/services/notification/**"
+  - "src/services/bot/**"
+
+# 需要人类审核的路径
+require-review:
+  - ".github/workflows/**"
+  - "docker/**"
+  - "scripts/ci_gate.sh"
+  - "src/reports/**"
+  - "src/analyzer/**"
+  - "main.py"
+
+# 最大文件修改数（防止大规模无人值守修改）
+max-files: 10
+
+# 允许自动合并（仅限这些路径）
+auto-merge-allowlist:
+  - "docs/**/*.md"
+  - "scripts/**/*.sh"
+  - "src/**/*.py"
+  - "tests/**/*"
+  - "package.json"
+  - "requirements.txt"
+
+# 自动合并条件
+auto-merge-conditions:
+  - "ci-passed: true"
+  - "tests-passed: true"
+  - "review-approved: true"
+  - "denylist-check: passed"
+  - "max-files-check: passed"

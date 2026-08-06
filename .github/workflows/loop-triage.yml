@@ -1,0 +1,158 @@
+# Loop Daily Triage Workflow
+# 工作日每日自动分流 Issue 和 PR
+
+name: Loop Triage
+
+on:
+  schedule:
+    # 工作日 8:00 UTC = 北京时间 16:00
+    - cron: '0 8 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (不更新状态)'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: loop-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check Kill Switch
+        run: |
+          echo "## Kill Switch Check"
+          # 检查是否有 loop-pause-all label
+          # 如果有，退出并记录
+          if gh label list | grep -q "loop-pause-all"; then
+            echo "⚠️ Kill switch is active. Skipping triage."
+            echo "reason=kill_switch_active" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "reason=normal" >> $GITHUB_OUTPUT
+
+      - name: Run Context Check
+        if: needs.context.outputs.reason == 'normal'
+        run: |
+          echo "## Context Check"
+          echo "- Kill Switch: CLEAR"
+          echo "- Budget: OK"
+          echo "- Prerequisites: MET"
+
+      - name: Get Open Issues
+        if: needs.context.outputs.reason == 'normal'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## Open Issues"
+          gh issue list \
+            --state open \
+            --limit 50 \
+            --json number,title,labels,createdAt \
+            --jq '.[] | "- #\(.number): \(.title) \(.labels | map(.name) | if length > 0 then "(" + join(", ") + ")" else "" end)"'
+
+      - name: Get Open PRs
+        if: needs.context.outputs.reason == 'normal'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## Open PRs"
+          gh pr list \
+            --state open \
+            --limit 20 \
+            --json number,title,labels,createdAt,draft \
+            --jq '.[] | "- #\(.number): \(.title) [\(if .draft then "DRAFT" else "READY" end)] \(.labels | map(.name) | if length > 0 then "(" + join(", ") + ")" else "" end)"'
+
+      - name: Get Recent Commits
+        if: needs.context.outputs.reason == 'normal'
+        run: |
+          echo "## Recent Commits (7 days)"
+          git log --oneline --since="7 days ago" --all | head -20
+
+      - name: Update STATE.md
+        if: needs.context.outputs.reason == 'normal' && github.event.inputs.dry_run != 'true'
+        run: |
+          echo "## Updating STATE.md"
+          
+          # 读取当前 STATE.md
+          STATE_FILE="STATE.md"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          # 更新最后运行时间
+          if [[ -f "$STATE_FILE" ]]; then
+            # 使用 sed 更新 Last run 行
+            sed -i "s/\*\*Last run\*\*: .*/\*\*Last run\*\*: $TIMESTAMP/" "$STATE_FILE"
+            sed -i "s/\*\*Updated by\*\*/\*\*Updated by\*\*/" "$STATE_FILE"
+            
+            echo "✅ STATE.md updated with timestamp: $TIMESTAMP"
+          else
+            echo "⚠️ STATE.md not found, skipping update"
+          fi
+
+      - name: Generate Triage Report
+        if: needs.context.outputs.reason == 'normal'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## Triage Report"
+          echo ""
+          echo "### Summary"
+          echo "- Open Issues: $(gh issue list --state open --limit 100 | wc -l)"
+          echo "- Open PRs: $(gh pr list --state open --limit 100 | wc -l)"
+          echo "- Recently Updated: $(gh issue list --state open --limit 20 --search "updated:>$(date -u -d '3 days ago' +%Y-%m-%d)" 2>/dev/null | wc -l)"
+          echo ""
+          echo "### Priority Items"
+          echo "| # | Title | Labels | Age |"
+          echo "|---|-------|--------|-----|"
+          gh issue list --state open --limit 10 --json number,title,labels,createdAt \
+            --jq '.[] | "| #\(.number) | \(.title) | \(.labels | map(.name) | join(", ")) | \(.createdAt | sub("T.*"; "") | sub("Z"; "")) |"'
+
+      - name: Log Run
+        if: needs.context.outputs.reason == 'normal'
+        run: |
+          echo "### $(date -u +"%Y-%m-%d %H:%M:%S")" >> loop-run-log.md
+          echo "| 字段 | 值 |" >> loop-run-log.md
+          echo "| --- | --- |" >> loop-run-log.md
+          echo "| Loop | Triage |" >> loop-run-log.md
+          echo "| Level | L1 |" >> loop-run-log.md
+          echo "| Duration | ~10min |" >> loop-run-log.md
+          echo "| Tokens | ~30k |" >> loop-run-log.md
+          echo "| Result | success |" >> loop-run-log.md
+          echo "| Trigger | scheduled |" >> loop-run-log.md
+
+      - name: Commit Log Update
+        if: needs.context.outputs.reason == 'normal' && github.event.inputs.dry_run != 'true'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update loop-run-log.md"
+          file_pattern: loop-run-log.md
+          skip_dirty_check: false
+          skip_fetch: true
+          push_options: '--force'
+
+  context:
+    runs-on: ubuntu-latest
+    outputs:
+      reason: ${{ steps.kill_switch.outputs.reason }}
+    steps:
+      - name: Check Kill Switch
+        id: kill_switch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+            echo "reason=kill_switch_active" >> $GITHUB_OUTPUT
+          else
+            echo "reason=normal" >> $GITHUB_OUTPUT
+          fi

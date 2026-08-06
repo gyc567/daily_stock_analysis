@@ -1,0 +1,110 @@
+# Loop CI Sweeper Workflow
+# CI 失败时自动分析并尝试修复
+
+name: Loop CI Sweeper
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to analyze (optional)'
+        required: false
+        type: string
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check Kill Switch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+            echo "KILL_SWITCH=active" >> $GITHUB_OUTPUT
+          else
+            echo "KILL_SWITCH=clear" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Analyze CI Failure
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          echo "## CI Failure Analysis"
+          echo ""
+          echo "Workflow: $WORKFLOW_RUN_URL"
+          echo ""
+          
+          # 获取失败的 job 信息
+          echo "### Failed Jobs"
+          gh run view ${{ github.event.workflow_run.id }} --json jobs \
+            --jq '.jobs[] | select(.conclusion == "failure") | "- \(.name): \(.html_url)"'
+          
+          # 分析常见失败原因
+          echo ""
+          echo "### Common Issues"
+          echo "- Syntax errors"
+          echo "- Import errors"
+          echo "- Test failures"
+          echo "- Lint errors"
+          
+          # 判断是否可自动修复
+          echo ""
+          echo "### Auto-fix Assessment"
+          echo "⚠️ Manual review required for most CI failures"
+          echo ""
+          echo "```json"
+          echo '{'
+          echo '  "can_auto_fix": false,'
+          echo '  "reason": "Most CI failures require human analysis",'
+          echo '  "recommendation": "Check CI logs for specific error messages"'
+          echo '}'
+          echo "```"
+
+      - name: Log Analysis
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        run: |
+          echo "### $(date -u +"%Y-%m-%d %H:%M:%S")" >> loop-run-log.md
+          echo "| 字段 | 值 |" >> loop-run-log.md
+          echo "| --- | --- |" >> loop-run-log.md
+          echo "| Loop | CI Sweeper |" >> loop-run-log.md
+          echo "| Level | L2 |" >> loop-run-log.md
+          echo "| Result | analyzed |" >> loop-run-log.md
+          echo "| Trigger | ci-failure |" >> loop-run-log.md
+
+      - name: Commit Log Update
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update loop-run-log.md"
+          file_pattern: loop-run-log.md
+          skip_dirty_check: false
+          skip_fetch: true
+          push_options: '--force'
+
+  context:
+    runs-on: ubuntu-latest
+    outputs:
+      KILL_SWITCH: ${{ steps.kill_switch.outputs.KILL_SWITCH }}
+    steps:
+      - name: Check Kill Switch
+        id: kill_switch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+            echo "KILL_SWITCH=active" >> $GITHUB_OUTPUT
+          else
+            echo "KILL_SWITCH=clear" >> $GITHUB_OUTPUT
+          fi

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [文档] Loop Engineering Phase 2 完成：新增 `.github/workflows/loop-triage.yml`（每日 Issue/PR 分流）和 `.github/workflows/loop-ci-sweeper.yml`（CI 失败分析）。
+- [文档] Loop Engineering Phase 3 完成：新增 `.github/workflows/loop-dep-sweeper.yml`（依赖检查工作流）；更新 `scripts/check_ai_assets.py` 添加 Loop Skills 检查。
+- [文档] Loop Engineering Phase 4 完成：新增 `docs/loop-failure-modes.md`（10 种失败模式与应对策略）、`docs/loop-operating.md`（日常运营手册）和 `docs/loop-design-guide.md`（新 Loop 设计指南与检查清单）。Loop Ready Score 达到 80/110 (L2)。
+- [文档] Loop Engineering Phase 1 完成：新增核心文件（LOOP.md/STATE.md/LOOP_BUDGET.md/LOOP_CONSTRAINTS.md/gate.yaml/loop-run-log.md）、4 个 Loop Skills（loop-triage/loop-verify/loop-context/loop-plan）和 3 个脚本（loop-gate.sh/loop-audit.sh/loop-budget.sh）。Loop Ready Score 从 0 提升至 74/100。
+
+- [文档] Loop Engineering 集成方案：引入 loop-engineering 框架，创建完整集成文档 `docs/loop-engineering-integration.md`，包含背景与目标、概念术语、现有资产审计、文件体系设计、安全机制、核心文件模板（LOOP.md/STATE.md/LOOP_BUDGET.md/LOOP_CONSTRAINTS.md/gate.yaml/loop-run-log.md）、Skills 设计、工作流设计、实施计划、预期收益、验证迭代等章节；更新 `docs/INDEX.md` 参考与开发部分添加 Loop Engineering 相关文档入口。
+
+- [修复] 六维详情"宏观与地缘"维度数据源补齐（P5-fix 第三阶段）：
 - [修复] 六维详情"宏观与地缘"维度数据源补齐（P5-fix 第三阶段）：扩 LLM `six_dimension_inputs` schema，开放 2 个 LLM 主观键 `us_china_impact`（minimal/limited/significant/severe，宏观与地缘层面中美关系整体冲击，与 `us_china_risk` 产业链脱钩风险区分）和 `regulatory_risk`（low/medium/high，国内监管风险）。`src/analyzer.py` `_SIX_DIM_KEYS` 加 2 键、`_ENUM_LIKE_KEYS` 加 2 键、`_KNOWN_ENUM_TOKENS` 加 4 个 `us_china_impact` 枚举值（`minimal`/`limited`/`significant`/`severe`），SYSTEM_PROMPT 章节（line 4282）追加 2 键 schema + 显式 disambiguation 提示。`src/services/research_framework_integration.py` `_merge_six_dim` `_STR_KEYS` 加 2 键映射（仅当 raw_data 未填时 setdefault，保留 P4/P5 客观值优先权）。这样 macro 维度 5 键全部可填：客观 3 键（P5 第一阶段 sector_policy + P5 第二阶段 monetary/liquidity）+ 主观 2 键（us_china_impact/regulatory_risk 本阶段）。
 - [测试] 新增 `tests/test_six_dimension_inputs_p5_keys.py`（30 用例）：`_SIX_DIM_KEYS` 含 2 新键 + `_ENUM_LIKE_KEYS` 含 2 新键 + `_KNOWN_ENUM_TOKENS` 4 枚举值 + `_coerce_six_dim_value` 4×2 枚举解析（含 null/parenthetical/prose noise 鲁棒性）+ `_merge_six_dim` 7 用例（含不覆盖已有值、防御性输入）+ prompt 文本含 2 新键 + 显式 disambiguation。
 - [修复] main_indices 代码前缀兼容（生产实测发现 bug）：`_infer_monetary_policy_from_indices` 原 target_codes 只接受 6 位裸代码（`000300`），但实际数据源返回 `sh000300` / `sz399006` / `bj000xxx` 等带前缀格式，导致**所有 main_indices 被过滤为 non-target，永远返回 None**。修复后用 `_NORMALIZE_CODE` 映射表同时接受带/不带前缀的代码，monetary_policy 真实命中率 0% → 100%。

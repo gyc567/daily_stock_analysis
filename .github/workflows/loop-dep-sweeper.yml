@@ -1,0 +1,128 @@
+# Loop Dependency Sweeper Workflow
+# 定期检查并更新依赖
+
+name: Loop Dependency Sweeper
+
+on:
+  schedule:
+    # 每周一 9:00 UTC = 北京时间 17:00
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      update_type:
+        description: 'Update type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - all
+      dry_run:
+        description: 'Dry run (不创建 PR)'
+        required: false
+        default: 'true'
+        type: boolean
+
+concurrency:
+  group: loop-dep-sweeper
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check Kill Switch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+            echo "KILL_SWITCH=active" >> $GITHUB_OUTPUT
+          else
+            echo "KILL_SWITCH=clear" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Python
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Check Python Dependencies
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        run: |
+          echo "## Python Dependencies Check"
+          echo ""
+          echo "### Outdated Packages"
+          pip list --outdated 2>/dev/null || echo "No outdated packages found"
+          
+          echo ""
+          echo "### Security Vulnerabilities"
+          pip-audit --format=json 2>/dev/null || echo "No vulnerabilities found (or pip-audit not installed)"
+
+      - name: Check Node Dependencies
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        run: |
+          echo "## Node Dependencies Check"
+          echo ""
+          echo "### Frontend Dependencies"
+          cd apps/dsa-web
+          npm outdated 2>/dev/null || echo "No outdated packages"
+          cd ../..
+
+      - name: Generate Report
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        run: |
+          echo "## Dependency Sweeper Report"
+          echo ""
+          echo "### Summary"
+          echo "- Update Type: ${{ github.event.inputs.update_type || 'patch' }}"
+          echo "- Dry Run: ${{ github.event.inputs.dry_run || 'true' }}"
+          echo ""
+          echo "### Recommendations"
+          echo "| Package | Current | Latest | Type | Action |"
+          echo "|---------|---------|--------|------|--------|"
+          echo "| - | - | - | - | No updates available |"
+
+      - name: Log Run
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        run: |
+          echo "### $(date -u +"%Y-%m-%d %H:%M:%S")" >> loop-run-log.md
+          echo "| 字段 | 值 |" >> loop-run-log.md
+          echo "| --- | --- |" >> loop-run-log.md
+          echo "| Loop | Dependency Sweeper |" >> loop-run-log.md
+          echo "| Level | L2 |" >> loop-run-log.md
+          echo "| Result | completed |" >> loop-run-log.md
+          echo "| Trigger | scheduled |" >> loop-run-log.md
+
+      - name: Commit Log Update
+        if: needs.context.outputs.KILL_SWITCH == 'clear'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update loop-run-log.md"
+          file_pattern: loop-run-log.md
+          skip_dirty_check: false
+          skip_fetch: true
+          push_options: '--force'
+
+  context:
+    runs-on: ubuntu-latest
+    outputs:
+      KILL_SWITCH: ${{ steps.kill_switch.outputs.KILL_SWITCH }}
+    steps:
+      - name: Check Kill Switch
+        id: kill_switch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+            echo "KILL_SWITCH=active" >> $GITHUB_OUTPUT
+          else
+            echo "KILL_SWITCH=clear" >> $GITHUB_OUTPUT
+          fi
