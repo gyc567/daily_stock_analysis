@@ -32,7 +32,65 @@
 - 标题应描述实际变更内容，建议不添加 `[codex]`、`codex`、`autocode`、`copilot` 或其他工具/agent 来源前缀。
 - 该规范仅用于协作可读性与一致性提示，不应单独作为 review process blocker。
 
-## 1.2 贡献质量底线
+## 1.2 极简主义（Ponytail）
+
+> "The best code is the code you never wrote." — Ponytail
+
+本仓库采用 **Ponytail** 极简主义原则，在保持质量和安全护栏的前提下，尽可能减少不必要的代码。
+
+### 核心规则
+
+**永远不要添加**：
+- ❌ 工具函数库（`utils.py`, `helpers.py`）—— 标准库已够用
+- ❌ 抽象基类（只有 1 个实现者）
+- ❌ 设计模式（无实际使用场景）
+- ❌ 包装器（包装已有标准库或依赖）
+- ❌ 类型别名（只有一处使用时）
+- ❌ 单独的常量文件（直接内联）
+
+**永远要删除**：
+- ✅ 未使用的导入
+- ✅ 死代码（未调用函数、未使用变量）
+- ✅ 调试代码（`print`, `console.log`, 注释掉的代码）
+- ✅ 冗余注释（代码本身已说明意图）
+- ✅ 过时的 TODO（已不再是计划）
+
+### 安全区（不可删除）
+
+| 类型 | 原因 |
+|------|------|
+| Pydantic models | 三层防御 Layer 3 |
+| 类型注解 | 三层防御 Layer 1 |
+| icontract 装饰器 | 三层防御 Layer 2 |
+| 测试代码 | 质量底线 |
+| CI/部署配置 | 部署安全 |
+| `gate.yaml` 相关 | Loop 安全护栏 |
+
+### 与三层防御的关系
+
+**三层防御 > 极简主义**。当极简主义规则与三层防御冲突时，以三层防御为准：
+
+```
+Ponytail 删除建议 ──┐
+                    ├───▶ 三层防御检查 ──▶ 最终决策
+Pydantic/类型注解 ─┘         │
+                              ▼
+                      防御层完整 → 允许
+                      防御层缺失 → 拒绝
+```
+
+### 快速自检
+
+```bash
+# PR 提交前自检
+./scripts/ponytail-check.sh review
+
+# 仓库全面审计
+./scripts/ponytail-check.sh audit
+```
+
+详见 `.claude/skills/ponytail-review/SKILL.md` 和 `.claude/skills/ponytail-audit/SKILL.md`。
+## 1.3 贡献质量底线
 
 - 本仓库不接受以堆叠代码量、扩大 diff 面、补丁式响应 review 来替代真实设计收敛的 PR。
 - 贡献质量以是否解决明确问题、是否最小化影响面、是否保持现有契约一致、是否覆盖真实风险路径为准；不以新增行数、文件数量、功能宣传或“看起来完整”为准。
@@ -41,7 +99,7 @@
 - review 反馈后，不接受只在被指出的位置追加局部 patch。作者必须重新检查同一业务语义涉及的所有入口、配置、测试、文档、workflow 和用户可见路径。
 - 如果一个 PR 在多轮 review 后仍持续出现同类契约漂移、重复 fallback、测试绕过真实风险层、PR body 与实际 diff 不一致等问题，维护者可以要求关闭重做，而不是继续逐点 review。
 
-## 1.3 类型-契约-数据三层防御（强制）
+## 1.4 类型-契约-数据三层防御（强制）
 
 所有新增 / 修改代码必须遵守 `docs/type-contract-data-defense.md` 的「类型-契约-数据」三层防御体系（CI 门禁 `.github/workflows/type-safety.yml` 跑 pyright + mypy + 契约测试强制）。**每层只管自己该管的事，不重复校验**：
 

@@ -58,8 +58,6 @@ Loop Engineering 的核心是**用系统替代人工提示**，让开发者专�
 | 4. MCP/Connector | 外部集成 | GitHub API |
 | 5. Sub-agents | Maker/Checker | 分离实现与验证 |
 | 6. Memory/State | 持久状态 | `STATE.md` |
-| 5. Sub-agents | Maker/Checker | 分离实现与验证 |
-| 6. Memory/State | 持久状态 | `STATE.md` |
 
 ---
 
@@ -70,6 +68,8 @@ Loop Engineering 的核心是**用系统替代人工提示**，让开发者专�
 | Skill | 状态 | 说明 |
 |-------|------|------|
 | analyze-issue | ✅ 已有 | Issue 分析 |
+| ponytail-review | ✅ 新增 | PR diff 审查 |
+| ponytail-audit | ✅ 新增 | 仓库技术债务审计 |
 | analyze-pr | ✅ 已有 | PR 审查 |
 | fix-issue | ✅ 已有 | Issue 修复 |
 

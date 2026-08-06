@@ -13,7 +13,7 @@
 
 ## Loop Ready Score
 
-当前分数: **70** / 100
+当前分数: **80** / 110
 
 详见 `scripts/loop/loop-audit.sh`
 

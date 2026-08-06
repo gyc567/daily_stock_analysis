@@ -9,8 +9,9 @@
 - [3. 日常使用场景](#3-日常使用场景)
 - [4. AI 协作模板](#4-ai-协作模板)
 - [5. 命令速查](#5-命令速查)
-- [6. 故障排查](#6-故障排查)
-- [7. 最佳实践](#7-最佳实践)
+- [6. Ponytail 极简主义](#6-ponytail-极简主义)
+- [7. 故障排查](#7-故障排查)
+- [8. 最佳实践](#8-最佳实践)
 
 ---
 
@@ -497,7 +498,128 @@ gh label delete loop-pause-all
 
 ---
 
-## 6. 故障排查
+
+---
+
+## 6. Ponytail 极简主义
+
+> "The best code is the code you never wrote."
+
+Ponytail 是 AGENTS.md §1.2 定义的极简主义规则，帮助减少代码冗余、降低维护成本。
+
+### 6.1 核心规则
+
+**永远不要添加**：
+- ❌ `utils.py`、`helpers.py`、`common.py`
+- ❌ 抽象基类（只有 1 个实现者）
+- ❌ 包装标准库的函数
+- ❌ 单独的常量文件
+
+**永远要删除**：
+- ✅ 未使用的导入
+- ✅ 死代码（未调用的函数）
+- ✅ `print()`、`console.log`
+- ✅ 注释掉的旧代码
+- ✅ 过时的 TODO/FIXME
+
+**永远不删除（安全区）**：
+- ✅ Pydantic models
+- ✅ 类型注解
+- ✅ icontract 装饰器
+- ✅ 测试代码
+- ✅ CI 配置
+
+### 6.2 每日使用
+
+**提交前检查**：
+```bash
+./scripts/ponytail-check.sh review
+```
+
+**仓库审计**：
+```bash
+./scripts/ponytail-check.sh audit
+```
+
+### 6.3 常见场景
+
+#### 场景：添加新工具函数
+
+❌ 错误做法：
+```python
+# src/utils.py
+def format_date(d): return d.strftime("%Y-%m-%d")
+def parse_date(t): return datetime.strptime(t, "%Y-%m-%d")
+```
+
+✅ 正确做法：
+```python
+# 直接在需要的地方使用
+from datetime import datetime
+def get_report_date(): return datetime.now().strftime("%Y-%m-%d")
+```
+
+#### 场景：清理调试代码
+
+```bash
+# 检查
+./scripts/ponytail-check.sh review
+
+# 发现 print 语句后
+grep -rn "print(" src/ --include="*.py"
+# 编辑删除
+```
+
+### 6.4 Ponytail 与三层防御
+
+**优先级**：三层防御 > Ponytail 极简主义
+
+当 Ponytail 建议删除某代码，但该代码属于三层防御时，**以三层防御为准**：
+```
+Pydantic models ──▶ 不可删除
+类型注解 ─────────▶ 不可删除
+icontract ─────────▶ 不可删除
+测试代码 ─────────▶ 不可删除
+```
+
+### 6.5 Loop 集成
+
+| Workflow | Ponytail 做什么 |
+|----------|----------------|
+| `loop-triage` | 运行全面审计，识别技术债务 |
+| `loop-ci-sweeper` | 审查 PR diff，提供删除建议 |
+
+### 6.6 快速参考
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Ponytail 快速参考                              │
+├─────────────────────────────────────────────────────────────┤
+│  提交前: ./scripts/ponytail-check.sh review               │
+│  审计:   ./scripts/ponytail-check.sh audit                │
+│                                                             │
+│  ❌ utils.py / helpers.py / common.py                     │
+│  ❌ 抽象基类（1个实现）                                    │
+│  ❌ 包装标准库                                             │
+│  ✅ print / console.log → 删除                            │
+│  ✅ 未使用导入 → 删除                                      │
+│  ✅ 死代码 → 删除                                          │
+│  ❌ Pydantic / 类型注解 / 测试 → 保留                      │
+│                                                             │
+│  优先级: 三层防御 > Ponytail 极简主义                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 6.7 相关文件
+
+- [Ponytail 整合文档](./ponytail-integration.md) - 完整集成说明
+- [AGENTS.md §1.2](../AGENTS.md#12-极简主义ponytail) - 极简主义规则
+- `.claude/skills/ponytail-review/SKILL.md` - Diff 审查 Skill
+- `.claude/skills/ponytail-audit/SKILL.md` - 仓库审计 Skill
+
+---
+
+## 7. 故障排查
 
 ### 问题 1: AI 修改了不该改的文件
 
@@ -623,7 +745,7 @@ grep "CI Sweeper" loop-run-log.md | tail -10
 
 ---
 
-## 7. 最佳实践
+## 8. 最佳实践
 
 ### 7.1 与 AI 协作的黄金法则
 
@@ -686,6 +808,9 @@ grep -i "fail\|error\|issue" loop-run-log.md | tail -20
 │  📊 状态检查                                                │
 │     ./scripts/loop/loop-audit.sh                           │
 │                                                             │
+│  🎨 Ponytail 检查                                          │
+│     ./scripts/ponytail-check.sh review                     │
+│                                                             │
 │  🚫 紧急停止                                                │
 │     gh label create loop-pause-all --color ff0000           │
 │                                                             │
@@ -714,7 +839,8 @@ grep -i "fail\|error\|issue" loop-run-log.md | tail -20
 - [Loop Engineering 设计指南](./loop-design-guide.md) - 创建新 Loop 的指南
 - [Loop Engineering 运营手册](./loop-operating.md) - 日常运营指南
 - [Loop Engineering 失败模式](./loop-failure-modes.md) - 失败模式与应对
+- [Ponytail 整合文档](./ponytail-integration.md) - 极简主义完整集成
 
 ---
 
-*本文档与 LOOP_CONSTRAINTS.md、gate.yaml、LOOP.md、STATE.md 保持同步更新。*
+*本文档与 LOOP_CONSTRAINTS.md、gate.yaml、LOOP.md、STATE.md、AGENTS.md 保持同步更新。*

@@ -260,3 +260,74 @@ grep -A 5 "高优先级" STATE.md
 ---
 
 *本文档是 [loop-engineering-integration.md](./loop-engineering-integration.md) 的补充。*
+
+---
+
+## 11. Ponytail 误删
+
+**症状**: 必要的抽象层、类型注解或测试被删除；代码"能工作"但缺少安全网。
+
+**严重度**: S2 → S3（静默引入技术债务）
+
+**原因**:
+- Agent 把"删除"规则应用到了防御层
+- Ponytail 模式过于激进
+- 缺少对 Pydantic/icontract 的理解
+
+**应对**:
+- 明确 `ponytail:keep` 标记语义
+- Ponytail review skill 中列出"安全区"
+- CI 添加防御层完整性检查
+- 保留必要的类型注解和测试
+
+**检测**:
+```bash
+# 检查类型注解是否被删除
+git diff HEAD~1 -- "*.py" | grep -E "^-.*: [A-Z]" | head -20
+```
+
+---
+
+## 12. Ponytail vs 三层防御冲突
+
+**症状**: Agent 认为 Pydantic model "过度工程化"，尝试用 dict 替代。
+
+**严重度**: S2（违反 AGENTS.md §1.4）
+
+**原因**:
+- Ponytail 规则优先于 AGENTS.md
+- 没有明确优先级
+
+**应对**:
+- AGENTS.md 三层防御 > Ponytail 极简主义
+- Pydantic/icontract/mypy 规则不可绕过
+- Ponytail 只删除"真正的"冗余代码
+
+**检测**:
+```bash
+# 检查是否删除了 Pydantic models
+grep -r "class.*BaseModel" --include="*.py" | wc -l  # 对比前后
+```
+
+---
+
+## 13. 代码膨胀伪装
+
+**症状**: Agent 添加代码后立即删除部分代码，制造"净减少"假象。
+
+**严重度**: S2
+
+**原因**:
+- 过度优化 KPI（代码行数减少）
+- 绕过 Ponytail 的行数检查
+
+**应对**:
+- 检查 `git diff --stat`，不只是行数
+- 关注功能变更，不只是代码量
+- 人工 review 关键 PR
+
+**检测**:
+```bash
+# 检查是否有大量删除+添加
+git diff --stat | awk '{if ($1 ~ /[0-9]+/) print}' | sort -rn | head -5
+```

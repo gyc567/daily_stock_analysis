@@ -42,7 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+          if gh label list -R "${{ github.repository }}" 2>/dev/null | grep -q "loop-pause-all"; then
             echo "KILL_SWITCH=active" >> $GITHUB_OUTPUT
           else
             echo "KILL_SWITCH=clear" >> $GITHUB_OUTPUT
@@ -121,7 +121,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+          if gh label list -R "${{ github.repository }}" 2>/dev/null | grep -q "loop-pause-all"; then
             echo "KILL_SWITCH=active" >> $GITHUB_OUTPUT
           else
             echo "KILL_SWITCH=clear" >> $GITHUB_OUTPUT

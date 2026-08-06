@@ -29,7 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+          if gh label list -R "${{ github.repository }}" 2>/dev/null | grep -q "loop-pause-all"; then
             echo "KILL_SWITCH=active" >> $GITHUB_OUTPUT
           else
             echo "KILL_SWITCH=clear" >> $GITHUB_OUTPUT
@@ -103,8 +103,37 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+          if gh label list -R "${{ github.repository }}" 2>/dev/null | grep -q "loop-pause-all"; then
             echo "KILL_SWITCH=active" >> $GITHUB_OUTPUT
           else
             echo "KILL_SWITCH=clear" >> $GITHUB_OUTPUT
+          fi
+
+  ponytail-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Run Ponytail Review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.workflow_run.pull_requests[0].number || '' }}
+        run: |
+          echo "## Ponytail Review"
+          echo ""
+          if [[ -f "./scripts/ponytail-check.sh" ]]; then
+            ./scripts/ponytail-check.sh review
+          else
+            echo "⚠️ ponytail-check.sh not found"
+          fi
+          
+          echo ""
+          echo "### Review for PR #$PR_NUMBER"
+          if [[ -n "$PR_NUMBER" ]]; then
+            # Get diff for PR
+            gh pr diff $PR_NUMBER --stat 2>/dev/null || echo "No diff available"
           fi

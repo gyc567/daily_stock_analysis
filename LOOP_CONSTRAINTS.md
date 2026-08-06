@@ -24,9 +24,9 @@
 auth/**
 bot/**
 data_provider/**
-src/config/
-src/services/notification/
-src/services/bot/
+src/config/**
+src/services/notification/**
+src/services/bot/**
 ```
 
 以下路径 **需要人类审核**：
@@ -76,3 +76,28 @@ main.py
 ---
 
 *违反约束将触发 gate 检查失败，禁止继续执行*
+
+## 极简主义约束（Ponytail）
+
+- ❌ **禁止添加冗余工具函数库**（`utils.py`, `helpers.py` 等）
+- ❌ **禁止添加无用的抽象层**（只有 1 个实现者的抽象类/接口）
+- ❌ **禁止包装标准库**（如 `import json; def my_json_loads(...)`）
+- ✅ **必须删除未使用的导入**
+- ✅ **必须删除死代码**（未调用的函数、未使用的变量）
+- ✅ **必须删除调试代码**（print、console.log、注释掉的代码）
+- ❌ **不可删除三层防御代码**：
+  - Pydantic models（`class X(BaseModel):`）
+  - 类型注解（`def f() -> X:`）
+  - icontract 装饰器（`@require(...)`）
+  - 测试代码（`tests/`）
+- ❌ **不可删除 Loop 安全相关文件**：
+  - `gate.yaml`
+  - `LOOP_*.md`
+  - `.claude/skills/loop-*/`
+
+### 快速检查
+
+```bash
+# 提交前自检
+./scripts/ponytail-check.sh review
+```

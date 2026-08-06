@@ -43,7 +43,7 @@ jobs:
           echo "reason=normal" >> $GITHUB_OUTPUT
 
       - name: Run Context Check
-        if: needs.context.outputs.reason == 'normal'
+        if: needs.context_job.outputs.reason.reason == 'normal'
         run: |
           echo "## Context Check"
           echo "- Kill Switch: CLEAR"
@@ -51,7 +51,7 @@ jobs:
           echo "- Prerequisites: MET"
 
       - name: Get Open Issues
-        if: needs.context.outputs.reason == 'normal'
+        if: needs.context_job.outputs.reason.reason == 'normal'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -63,7 +63,7 @@ jobs:
             --jq '.[] | "- #\(.number): \(.title) \(.labels | map(.name) | if length > 0 then "(" + join(", ") + ")" else "" end)"'
 
       - name: Get Open PRs
-        if: needs.context.outputs.reason == 'normal'
+        if: needs.context_job.outputs.reason.reason == 'normal'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -75,13 +75,13 @@ jobs:
             --jq '.[] | "- #\(.number): \(.title) [\(if .draft then "DRAFT" else "READY" end)] \(.labels | map(.name) | if length > 0 then "(" + join(", ") + ")" else "" end)"'
 
       - name: Get Recent Commits
-        if: needs.context.outputs.reason == 'normal'
+        if: needs.context_job.outputs.reason.reason == 'normal'
         run: |
           echo "## Recent Commits (7 days)"
           git log --oneline --since="7 days ago" --all | head -20
 
       - name: Update STATE.md
-        if: needs.context.outputs.reason == 'normal' && github.event.inputs.dry_run != 'true'
+        if: needs.context_job.outputs.reason.reason == 'normal' && github.event.inputs.dry_run != 'true'
         run: |
           echo "## Updating STATE.md"
           
@@ -101,7 +101,7 @@ jobs:
           fi
 
       - name: Generate Triage Report
-        if: needs.context.outputs.reason == 'normal'
+        if: needs.context_job.outputs.reason.reason == 'normal'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -119,7 +119,7 @@ jobs:
             --jq '.[] | "| #\(.number) | \(.title) | \(.labels | map(.name) | join(", ")) | \(.createdAt | sub("T.*"; "") | sub("Z"; "")) |"'
 
       - name: Log Run
-        if: needs.context.outputs.reason == 'normal'
+        if: needs.context_job.outputs.reason.reason == 'normal'
         run: |
           echo "### $(date -u +"%Y-%m-%d %H:%M:%S")" >> loop-run-log.md
           echo "| 字段 | 值 |" >> loop-run-log.md
@@ -132,7 +132,7 @@ jobs:
           echo "| Trigger | scheduled |" >> loop-run-log.md
 
       - name: Commit Log Update
-        if: needs.context.outputs.reason == 'normal' && github.event.inputs.dry_run != 'true'
+        if: needs.context_job.outputs.reason.reason == 'normal' && github.event.inputs.dry_run != 'true'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore: update loop-run-log.md"
@@ -141,7 +141,7 @@ jobs:
           skip_fetch: true
           push_options: '--force'
 
-  context:
+  context_job:
     runs-on: ubuntu-latest
     outputs:
       reason: ${{ steps.kill_switch.outputs.reason }}
@@ -151,8 +151,34 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh label list 2>/dev/null | grep -q "loop-pause-all"; then
+          if gh label list -R "${{ github.repository }}" 2>/dev/null | grep -q "loop-pause-all"; then
             echo "reason=kill_switch_active" >> $GITHUB_OUTPUT
           else
             echo "reason=normal" >> $GITHUB_OUTPUT
           fi
+
+  ponytail-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run Ponytail Audit
+        run: |
+          echo "## Ponytail Audit"
+          echo ""
+          if [[ -f "./scripts/ponytail-check.sh" ]]; then
+            ./scripts/ponytail-check.sh audit
+          else
+            echo "⚠️ ponytail-check.sh not found, skipping"
+          fi
+
+      - name: Check for ponytail-debt Issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## Existing ponytail-debt Issues"
+          gh issue list --label ponytail-debt --state open --limit 5 \
+            --json number,title \
+            --jq '.[] | "- #\(.number): \(.title)"'
