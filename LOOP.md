@@ -1,54 +1,39 @@
-# LOOP.md — Daily Stock Analysis Loop Engineering
+# Loop Configuration — Minimal Triage
 
-> 本文件是 Loop Engineering 的入口文档，描述本仓库的活跃 Loops 和运营状态。
-> 参考 [docs/loop-engineering-integration.md](./docs/loop-engineering-integration.md)
+## Active Loops
 
-## 活跃 Loops
+| Pattern | Cadence | Status | Command |
+|---------|---------|--------|---------|
+| Daily Triage | 1d | L1 report-only | See README |
 
-| Loop | Level | 频率 | Skill | 状态 |
-|------|-------|------|-------|------|
-| Daily Triage | L1 | 工作日 8:00 UTC | `loop-triage` | 🚀 已完成 |
-| CI Sweeper | L2 | 按需 | `loop-verify` | 🚀 已完成 |
-| Dependency Sweeper | L2 | 每周 | `loop-verify` | 🚀 已完成 |
+## Human Gates
 
-## Loop Ready Score
+- No auto-fix until L2 checklist complete
+- All high-risk paths: human review required
 
-当前分数: **80** / 110
+## Budget
 
-详见 `scripts/loop/loop-audit.sh`
+- Max sub-agent spawns per run: 0 (L1) / 2 (L2)
+- Max tokens/day: 100k (see `loop-budget.md`)
+- Append each run to `loop-run-log.md`; use `loop-budget` skill at start/end
+- Kill switch: `loop-pause-all` — pause schedulers and notify human
+- Estimate: `npx @cobusgreyling/loop-cost --pattern daily-triage`
 
-## 安全机制
+## MCP Usage
 
-| 机制 | 文件 | 说明 |
-|------|------|------|
-| Kill Switch | `loop-pause-all` label | 立即停止所有 Loop |
-| 门禁 | `gate.yaml` | 路径保护与自动合并限制 |
-| 约束 | `LOOP_CONSTRAINTS.md` | Agent 必须遵守的规则 |
-| 预算 | `LOOP_BUDGET.md` | Token 消耗控制 |
+MCP not required for this pattern. This loop uses native Claude Code tools only.
 
-## 本地开发
+## Worktree Isolation
 
-```bash
-# 审计 Loop Ready
-./scripts/loop/loop-audit.sh .
+For high-risk fixes (P0/P1), the loop should:
+1. Create isolated worktree: `git worktree add .worktrees/<branch> <branch>`
+2. Implement and verify fix in isolation
+3. Merge via PR after human review
+4. Remove worktree after merge
 
-# 检查门禁
-./scripts/loop/loop-gate.sh check --action auto-merge --paths "src/a.py"
+This prevents main branch pollution from experimental fixes.
 
-# 检查预算
-./scripts/loop/loop-budget.sh status
-```
+## Links
 
-## 贡献 Loop
-
-新增 Loop 需要：
-1. 在 `STATE.md` 添加条目
-2. 创建对应的 Skill
-3. 创建对应的 Workflow
-4. 更新本文档
-5. 更新 `docs/INDEX.md` 的参考与开发部分
-
-## 相关文件
-
-- [Loop Engineering 集成方案](./docs/loop-engineering-integration.md)
-- [Loop Engineering 失败模式](./docs/loop-failure-modes.md)
+- Pattern: [daily-triage](../../patterns/daily-triage.md)
+- Checklist: [loop-design-checklist](../../docs/loop-design-checklist.md)
