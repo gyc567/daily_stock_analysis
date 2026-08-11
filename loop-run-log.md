@@ -117,3 +117,17 @@
 | Friction | ocr LLM API key 过期（本机），无法实际跑 AI 审查；GitHub Actions CI 中不受影响（CI 用自己 runner 环境）。 |
 | Finding 1 | `pr-review.yml` — `github.base_ref` 空字符串导致 `--from origin/` 变成空分支名 |
 | Finding 2 | `loop-triage.yml` — `grep -vE` 排除规则缺 `loop-budget.md`/`loop-run-log.md` 变体 |
+| Finding 3 | `pr-review.yml` — `${{ env.BASE_REF }}` 在 `run:` 块中仍是 Actions 模板展开，非真正环境变量，应改为 shell 变量 `$BASE_REF` + 引号 |
+### 2026-08-11 19:00 ocr review 实际运行 + 发现 env 展开问题
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — OCR Audit |
+| Level | L2 |
+| Duration | ~3 min |
+| Tokens | ocr ~74k input / ~5k output |
+| Result | success |
+| Trigger | manual (user updated API key) |
+| Sub-agents | 0 |
+| 备注 | API key 更新后首次跑 `ocr review --commit 24e7ec4`，ocr AI 审查成功执行。发现 2 个新问题（Findings 3）：`pr-review.yml` 中 `${{ env.BASE_REF }}` 在 `run:` 块中仍是 Actions 模板展开，非真正环境变量。ocr 给出修复 diff：`git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"` + `"origin/$BASE_REF"`。已修复并 push。 |
+| Friction | `env.BASE_REF` 在 run: 块的语义易混淆：GitHub Actions 的 `env:` 设置的是环境变量，但 `${{ env.VAR }}` 在 run: 脚本中是模板展开，两者不等价。|
