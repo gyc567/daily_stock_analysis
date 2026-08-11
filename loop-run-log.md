@@ -102,3 +102,18 @@
 | Friction | 1. `ocr` 二进制名是 `ocr`，不是 `open-code-review`，通过 `npm root -g` + `package.json bin` 探明。2. `pr-review.yml` 原 `ai-review` job 依赖主分支 sparse checkout `.github/scripts`，ocr 无需此步骤，job 大幅简化。3. `ocr review` 输出到 `gh pr comment --body-file -` 需要 `2>&1 | tee ai_review_result.txt` 保证 artifact 上传和 comment 都拿到输出。 |
 
 | Adjustment | (1) 写新组件时严格走「先看既有 dashboard 组件的 class token 表」+ 「先建一个空组件 + 测试 + lint 再加 prop」可减少自造 class 名；(2) `useCallback` 引用链跨 useMemo 时优先用 store action 叶子，不要再多包一层；(3) 任何 ORM 模型加列后必须同步 `scripts/migrate_*.py`，并在 PR 描述里写明「需先跑迁移再启后端」。 |
+### 2026-08-11 18:30 ocr 集成审计 + 修复
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Audit + Fix |
+| Level | L2 |
+| Duration | ~8 min |
+| Tokens | 估算 ~20k |
+| Result | success |
+| Trigger | manual (user instruction) |
+| Sub-agents | 0 |
+| 备注 | 用 `ocr delegate preview --commit c53ca46` 对当日提交 c53ca46 做审计（`ocr review` 因 API key 过期无法执行）。发现 2 个 🟡 中等问题：(1) `pr-review.yml` `github.base_ref` 空字符串处理不严，改用 `env.BASE_REF` 变量；(2) `loop-triage.yml` 排除规则缺 `loop-budget.md`，补全正则。修复后 `git commit` + `git push`。API key 问题：`~/.opencodereview/config.json` 中 `anthropic` provider 的 URL 被误配置为 `https://api.kimi.com/coding/`，`kimi` provider 的 URL 也指向同一地址；实际应为 `https://api.moonshot.cn/v1`，且 key 已过期。ocr 集成的 CI 部分（GitHub Actions）不受影响，因为 CI 中 `npm install -g` 安装最新 ocr + 使用 CI 环境变量中的 key。 |
+| Friction | ocr LLM API key 过期（本机），无法实际跑 AI 审查；GitHub Actions CI 中不受影响（CI 用自己 runner 环境）。 |
+| Finding 1 | `pr-review.yml` — `github.base_ref` 空字符串导致 `--from origin/` 变成空分支名 |
+| Finding 2 | `loop-triage.yml` — `grep -vE` 排除规则缺 `loop-budget.md`/`loop-run-log.md` 变体 |
