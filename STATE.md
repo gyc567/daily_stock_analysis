@@ -11,25 +11,6 @@ Last run: 2026-08-11 11:55 (Loop Manual — Merge: PR #32)
   - 本地 main 现在指向 `974be99`，fast-forward 自 `f9f8641`
   - squash 内容包含 3 个分支 commit：`f9f8641` (主功能 10 files) + `3839ecf` (chore: PR metadata) + `88b00f8` (chore: loop logs)
 
-## High Priority (loop is acting or waiting on human)
-
-- [open] Draft PR #32: https://github.com/gyc567/daily_stock_analysis/pull/32
-  - base=main, head=feat/watchlist-panel, isDraft=true, state=OPEN
-  - 分支上有 2 个 commit: `f9f8641` (主功能, 10 files) + `3839ecf` (chore: prepare draft PR metadata, 1 行 CHANGELOG)
-  - main 已 `git push` 同步到 `6ab1ea0..f9f8641` (commit f9f8641 同时存在于 main 与 feat/watchlist-panel)
-  - 等待 user review 后转 ready / squash / merge / close
-- [shipped in this run] 已 commit + push 的文件 (10 个, commit f9f8641):
-  - 仓库协作代码 (7): `WatchlistPanel.tsx` (new), `__tests__/WatchlistPanel.test.tsx` (new), `index.ts`, `HomePage.tsx`, `uiText.ts`, `migrate_analysis_history_20260811.py` (new), `docs/CHANGELOG.md`
-  - Loop 元数据 (3): `STATE.md` / `loop-run-log.md` / `loop-budget.md`
-  - 分支上额外 (1, commit 3839ecf): `docs/CHANGELOG.md` +1 行 PR metadata
-- [不上库] 已被 `.gitignore:89:.claude/*` 显式忽略:
-  - `.claude/reviews/issue-watchlist-not-shown.md` (issue draft)
-  - `.claude/reviews/post-run-2026-08-11-watchlist-and-3-bugfix.md` (post-mortem)
-- [不上库] 永久不入 git:
-  - `data/stock_analysis.db` (schema +5 cols, 本地运行时数据)
-  - `node_modules/` (npm 产物)
-  - `docs/herdr-guide.md` (user 本地创建, 不归本次工作)
-- [waiting on user] 是否在 GitHub issues 启用后把 `.claude/reviews/issue-watchlist-not-shown.md` 落到上游 issue tracker
 
 
 ## Watch List
@@ -56,4 +37,5 @@ Last run: 2026-08-11 11:55 (Loop Manual — Merge: PR #32)
   - 任何 ORM 加列必须同步迁移脚本
 
 ---
+Run log: loop-run-log.md（2026-08-11 10:12 / 10:55 / 11:50 / 11:55）
 Run log: loop-run-log.md（2026-08-11 10:12 / 10:55 / 11:50）
