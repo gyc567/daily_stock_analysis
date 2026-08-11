@@ -38,4 +38,3 @@ Last run: 2026-08-11 11:55 (Loop Manual — Merge: PR #32)
 
 ---
 Run log: loop-run-log.md（2026-08-11 10:12 / 10:55 / 11:50 / 11:55）
-Run log: loop-run-log.md（2026-08-11 10:12 / 10:55 / 11:50）
