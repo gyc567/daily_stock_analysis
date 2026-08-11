@@ -73,5 +73,18 @@
 | Sub-agents | 0 |
 | 备注 | (1) 用户明确确认后 `git add` 10 个文件（7 仓库 + 3 loop meta），`git commit` 产生 `f9f8641`，遵循 AGENTS.md 规则：英文 message / 0 个 `Co-Authored-By`。(2) `git push origin main` 成功，`6ab1ea0..f9f8641`。(3) `gh pr create --draft --base main --head main` 被 GitHub 拒绝（same-branch），改方案：从 `f9f8641` 切 `feat/watchlist-panel` 分支 → push → 在分支上追加一个非功能性 `chore: prepare draft PR metadata` 提交（仅追加 1 行 CHANGELOG.md，让分支有 diff）→ 重试 `gh pr create`，**成功 → PR #32**（https://github.com/gyc567/daily_stock_analysis/pull/32，draft，main ← feat/watchlist-panel）。(4) `gh pr view` 确认 state=OPEN, isDraft=true, head=feat/watchlist-panel, base=main。 |
 | Friction | `main → main` PR 不可用：仓库贡献流程默认 base ≠ head，需要 feature branch。本轮处理 = 从已 push 的 commit 切分支 + 在分支上追加 1 个无功能 commit 让 GraphQL 看到 diff。可改进：以后提交 → push 之前先确认是否需要 PR；如需要，先在 feature branch 上 commit → push → PR，最后 fast-forward merge main。 |
+### 2026-08-11 11:55 PR #32 merge
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Merge |
+| Level | L1 |
+| Duration | ~1 min |
+| Tokens | 估算 ~3k |
+| Result | success |
+| Trigger | manual (user instruction "合 PR") |
+| Sub-agents | 0 |
+| 备注 | `gh pr ready 32` → `gh pr merge 32 --squash --delete-branch`。Squash merge 把 3 个分支 commit (`f9f8641` / `3839ecf` / `88b00f8`) 压成 `974be99`，message 复用 PR title 并加 `(#32)`。`--delete-branch` 已删本地与远端 `feat/watchlist-panel`。本地 `main` fast-forward 到 `974be99`。PR #32 终态：state=MERGED, mergedAt=2026-08-11T06:50:35Z, mergeCommit=974be99ce0547ab7933f0bdd351df19b390c4ef9。 |
+
 
 | Adjustment | (1) 写新组件时严格走「先看既有 dashboard 组件的 class token 表」+ 「先建一个空组件 + 测试 + lint 再加 prop」可减少自造 class 名；(2) `useCallback` 引用链跨 useMemo 时优先用 store action 叶子，不要再多包一层；(3) 任何 ORM 模型加列后必须同步 `scripts/migrate_*.py`，并在 PR 描述里写明「需先跑迁移再启后端」。 |
