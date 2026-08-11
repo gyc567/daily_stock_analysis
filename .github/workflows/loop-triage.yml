@@ -206,7 +206,7 @@ jobs:
           echo ""
 
           # Get files changed in last 7 days
-          CHANGED_FILES=$(git diff --name-only --since="7 days ago" --all | grep -vE "^(node_modules|\.git|loop-run-log|loop-budget|STATE\.md)$" | head -20)
+          CHANGED_FILES=$(git diff --name-only --since="7 days ago" --all | grep -vE "^(node_modules|\.git|loop-run-log|loop-run-log\.md|loop-budget|loop-budget\.md|STATE\.md)$" | head -20)
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No recent changes to review"
             exit 0

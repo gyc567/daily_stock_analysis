@@ -205,15 +205,18 @@ jobs:
 
       - name: 🔄 获取 base 分支
         working-directory: pr-code
-        run: git fetch origin ${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: git fetch origin ${{ env.BASE_REF }}:refs/remotes/origin/${{ env.BASE_REF }}
 
       - name: 🤖 OCR AI 审查
         working-directory: pr-code
         env:
           OCR_NO_UPDATE: 1
+          BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
           ocr review \
-            --from origin/${{ github.base_ref || 'main' }} \
+            --from origin/${{ env.BASE_REF }} \
             --to HEAD \
             --repo . \
             --format text \
