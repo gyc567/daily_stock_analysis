@@ -194,55 +194,34 @@ jobs:
       needs.auto-check.result == 'success' &&
       needs.auto-check.outputs.has_reviewable_changes == 'true' &&
       vars.ENABLE_AI_REVIEW != 'false'
-    
+
     steps:
-      # 先检出主分支（获取最新的 .github/scripts）
-      - name: 📥 检出主分支脚本
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          sparse-checkout: |
-            .github/scripts
-          sparse-checkout-cone-mode: false
-          path: main-scripts
-      
-      # 再检出 PR 代码（用于 diff 分析）
       - name: 📥 检出 PR 代码
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           path: pr-code
-      
+
       - name: 🔄 获取 base 分支
         working-directory: pr-code
         run: git fetch origin ${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}
-      
-      - name: 🐍 设置 Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-      
-      - name: 📦 安装依赖
-        run: pip install google-genai openai httpx
-      
-      - name: 🤖 AI 审查代码变更
+
+      - name: 🤖 OCR AI 审查
         working-directory: pr-code
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_BASE_REF: ${{ github.base_ref || 'main' }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
-          GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || 'gemini-2.5-flash' }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
-          AI_REVIEW_STRICT: ${{ vars.AI_REVIEW_STRICT || 'false' }}
-          CI_SYNTAX_OK: ${{ needs.auto-check.outputs.syntax_ok || '' }}
-          CI_HAS_PY_CHANGES: ${{ needs.auto-check.outputs.has_py_changes || 'false' }}
-          CI_AUTO_CHECK_RESULT: ${{ needs.auto-check.result || '' }}
-        run: python ../main-scripts/.github/scripts/ai_review.py
-      
+          OCR_NO_UPDATE: 1
+        run: |
+          ocr review \
+            --from origin/${{ github.base_ref || 'main' }} \
+            --to HEAD \
+            --repo . \
+            --format text \
+            --audience human \
+            --concurrency 4 \
+            --max-tokens-budget 8000 \
+            2>&1 | tee ai_review_result.txt
+
       - name: 📤 上传审查结果
         uses: actions/upload-artifact@v6
         if: always()

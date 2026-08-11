@@ -72,6 +72,7 @@ Loop Engineering 的核心是**用系统替代人工提示**，让开发者专�
 | ponytail-audit | ✅ 新增 | 仓库技术债务审计 |
 | analyze-pr | ✅ 已有 | PR 审查 |
 | fix-issue | ✅ 已有 | Issue 修复 |
+| ocr-review | ✅ 新增 | open-code-review 本地 skill：ocr review/scan/delegate 封装 |
 
 ### 3.2 已有 Workflows
 
@@ -79,9 +80,11 @@ Loop Engineering 的核心是**用系统替代人工提示**，让开发者专�
 |----------|------|------|
 | 00-daily-analysis.yml | ✅ | 每日股票分析 |
 | ci.yml | ✅ | CI 门禁 |
-| pr-review.yml | ✅ | PR 审查 |
+| pr-review.yml | ✅ | PR 审查（ai-review 已替换为 ocr review） |
 | auto-tag.yml | ✅ | 自动版本标签 |
 | type-safety.yml | ✅ | 类型安全 |
+| loop-triage.yml | ✅ | 每日 Issue/PR 分流（含 ocr-review job） |
+| loop-ci-sweeper.yml | ✅ | CI 失败分析（含 ocr-scan job） |
 
 ### 3.3 Loop Ready Score 预估
 

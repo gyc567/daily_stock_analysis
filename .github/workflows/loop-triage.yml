@@ -182,3 +182,46 @@ jobs:
           gh issue list --label ponytail-debt --state open --limit 5 \
             --json number,title \
             --jq '.[] | "- #\(.number): \(.title)"'
+
+  ocr-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install OCR
+        env:
+          OCR_NO_UPDATE: 1
+        run: npm install -g @alibaba-group/open-code-review
+
+      - name: Run OCR review on recent changes
+        env:
+          OCR_NO_UPDATE: 1
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "## OCR Review — Recent Changes (7 days)"
+          echo ""
+
+          # Get files changed in last 7 days
+          CHANGED_FILES=$(git diff --name-only --since="7 days ago" --all | grep -vE "^(node_modules|\.git|loop-run-log|loop-budget|STATE\.md)$" | head -20)
+          if [[ -z "$CHANGED_FILES" ]]; then
+            echo "No recent changes to review"
+            exit 0
+          fi
+
+          echo "Files changed in last 7 days:"
+          echo "$CHANGED_FILES" | tr '\n' ' '
+          echo ""
+          echo ""
+
+          # Run OCR scan on changed files
+          CHANGED_LIST=$(echo "$CHANGED_FILES" | tr '\n' ',')
+          ocr scan \
+            --path "$CHANGED_LIST" \
+            --format text \
+            --audience human \
+            --concurrency 4 \
+            2>&1 || true
