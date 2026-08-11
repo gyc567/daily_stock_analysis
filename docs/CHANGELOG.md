@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 首页新增 `WatchlistPanel` 渲染 `STOCK_LIST` 自选股列表：侧边栏顶部新增面板，把后端 `GET /api/v1/stocks/watchlist` 返回的股票代码以 chip 形式展示，点击 chip 复用现有 `handleSubmitAnalysis` 触发单股分析；超过 `maxVisible`（默认 24）折叠为「还有 N 只」徽标。文件：`apps/dsa-web/src/components/dashboard/WatchlistPanel.tsx`（新）+ `__tests__/WatchlistPanel.test.tsx`（新，5 用例）+ `HomePage.tsx` 接入 + i18n zh/en 新增 5 个 `home.watchlist*` 文案键。`useWatchlist` 现有 `isInWatchlist/toggleWatchlist` 行为保持不变。GitHub issue 已在 `.claude/reviews/issue-watchlist-not-shown.md` 落档（仓库 issues 当前禁用）。
 - [文档] Loop Engineering Phase 2 完成：新增 `.github/workflows/loop-triage.yml`（每日 Issue/PR 分流）和 `.github/workflows/loop-ci-sweeper.yml`（CI 失败分析）。
 - [文档] Loop Engineering Phase 3 完成：新增 `.github/workflows/loop-dep-sweeper.yml`（依赖检查工作流）；更新 `scripts/check_ai_assets.py` 添加 Loop Skills 检查。
 - [文档] Loop Engineering Phase 4 完成：新增 `docs/loop-failure-modes.md`（10 种失败模式与应对策略）、`docs/loop-operating.md`（日常运营手册）和 `docs/loop-design-guide.md`（新 Loop 设计指南与检查清单）。Loop Ready Score 达到 80/110 (L2)。

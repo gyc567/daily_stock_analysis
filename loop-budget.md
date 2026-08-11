@@ -24,3 +24,12 @@
 ```bash
 npx @cobusgreyling/loop-cost --pattern daily-triage
 ```
+## 2026-08-11 actual spend
+
+| Iteration | Loop | Sub-agents | Tokens (est) | Trigger |
+|-----------|------|------------|--------------|---------|
+| Dev bootstrap | Manual L1 | 0 | ~25k | manual |
+| Watchlist + 3-bug fix | Manual L2 | 0 | ~75k | manual (user report) |
+| **Day total** | — | **0** | **~100k** | within cap |
+
+Notes: 全程 in-process，未 spawn 任何 sub-agent。下次起手前 `loop-budget` skill 复算。

@@ -8,7 +8,7 @@ import { historyApi } from '../api/history';
 import { agentApi, type SkillInfo } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
 import { ApiErrorAlert, Button, Drawer, EmptyState, InlineAlert } from '../components/common';
-import { DashboardStateBlock } from '../components/dashboard';
+import { DashboardStateBlock, WatchlistPanel } from '../components/dashboard';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { StockHistoryTrendDrawer, StockBar } from '../components/history';
 import { ReportMarkdownDrawer } from '../components/report/ReportMarkdownDrawer';
@@ -338,6 +338,23 @@ const HomePage: React.FC = () => {
   });
 
   const watchlistState = useWatchlist();
+  const handleWatchlistSelect = useCallback(
+    (stockCode: string) => {
+      // Click on a watchlist chip triggers the single-stock analysis flow
+      // via the same `submitAnalysis` store action as the search box. We
+      // call the store action directly (instead of reusing
+      // `handleSubmitAnalysis`) because the watchlist panel is rendered
+      // inside a `useMemo` factory that runs before `handleSubmitAnalysis`
+      // is declared further down this component body.
+      void submitAnalysis({
+        stockCode: stockCode.trim(),
+        originalQuery: stockCode.trim(),
+        selectionSource: 'manual',
+        skills: selectedAnalysisSkills,
+      });
+    },
+    [submitAnalysis, selectedAnalysisSkills],
+  );
 
   const clearMarketReviewState = useCallback(() => {
     stopMarketReviewPolling();
@@ -627,6 +644,12 @@ const HomePage: React.FC = () => {
   const sidebarContent = useMemo(
     () => (
       <div className="flex min-h-0 h-full flex-col gap-3 overflow-hidden">
+        <WatchlistPanel
+          codes={watchlistState.watchlistCodes}
+          isLoading={watchlistState.isLoading}
+          onSelect={handleWatchlistSelect}
+          className="shrink-0"
+        />
         <TaskPanel
           tasks={activeTasks}
           onOpenRunFlow={openTaskRunFlow}
@@ -644,17 +667,20 @@ const HomePage: React.FC = () => {
         />
       </div>
     ),
-    [
-      activeTasks,
-      mergedStockBarItems,
-      isLoadingStockBar,
-      handleHistoryItemClick,
-      handleDeleteStock,
-      isDeletingStock,
-      openTaskRunFlow,
-      selectedReport?.meta.stockCode,
-      selectedReport?.meta.id,
-    ],
+     [
+       activeTasks,
+       mergedStockBarItems,
+       isLoadingStockBar,
+       handleHistoryItemClick,
+       handleDeleteStock,
+       isDeletingStock,
+       openTaskRunFlow,
+       selectedReport?.meta.stockCode,
+       selectedReport?.meta.id,
+      watchlistState.watchlistCodes,
+      watchlistState.isLoading,
+      handleWatchlistSelect,
+     ],
   );
 
   return (
