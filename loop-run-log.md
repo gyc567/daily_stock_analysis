@@ -60,4 +60,18 @@
 | Iteration 1 | 复现：浏览器 DOM 证据 + `curl /api/v1/stocks/watchlist` 200 返回 11 只但首页 body 只有「开始分析」empty state。根因：`useWatchlist` 仅用于单股 toggle，无任何组件渲染 `watchlistCodes` 列表。修复：新增 `WatchlistPanel`（含 Badge chip / 加载 / 空态 / 折叠溢出） + i18n 5 键 × 2 语言 + HomePage 侧边栏顶部接入 + `handleWatchlistSelect` 复用 `submitAnalysis` 触发单股分析。Issue 落档到 `.claude/reviews/issue-watchlist-not-shown.md`（仓库 GitHub issues 已禁用，无法 `gh issue create`）。验证：`npm run lint` 0 warning、`npm run build` 4.95s、`npm run test -- WatchlistPanel` 5/5、dev bundle 含 `<WatchlistPanel codes={watchlistState.watchlistCodes} ...>`。未做：「分析全部」按钮（Ponytail 原则下不绕过 store）；commit/PR（AGENTS.md 硬规则待 user 确认）。 |
 | Iteration 2 | 用户报告 `ReferenceError: Cannot access 'handleSubmitAnalysis' before initialization`（HomePage 整体崩溃）+ `DashboardPanelHeader is not defined`（WatchlistPanel）+ 大量 `:5173/api/v1/history/stocks?start_date=...&end_date=...` 500。根因 1：iteration 1 把 `handleWatchlistSelect` 放在 `handleSubmitAnalysis` 之后，但 `useMemo(sidebarContent)` 工厂首次渲染就闭包引用它，触发 TDZ。修复：把 `handleWatchlistSelect` 提到 `useWatchlist()` 之后，body 改用 `submitAnalysis` store action 直接调用。根因 2：截图时刻的 Vite HMR 缓存态（`?t=1786414982692`），实际文件 `import { DashboardPanelHeader }` 已正确，硬刷新即可；不需改代码。根因 3：`AnalysisHistory` ORM 模型新增 5 列（`research_framework` / `bayesian_framework` / `supply_chain` / `value_scenarios` / `investment_conclusion`）但旧迁移 `migrate_analysis_history_20250625.py` 早于这 5 列，DB schema 漂移 → `no such column` 500。修复：新建 `scripts/migrate_analysis_history_20260811.py` 幂等 ALTER TABLE 5 列 + backend 重启拾取新 schema。验证：5 列添加成功（DB 22 列）、`/api/v1/history/stocks?limit=5` 200、用户原始 URL 200、`/health` 200、`npm run lint` 0 warning、`npm run build` 4.96s、WatchlistPanel 测试 5/5、Vite HMR 最后一行 10:54:31 clean、backend log 无 traceback。 |
 | Friction | (a) `xd-open` / `browser` 工具在多轮 session 中后段报 `Workspace not found`，浏览器交互验证降级为 Vite-served bundle 静态证据 + vitest 行为契约；(b) Bash cell 的 `cwd` 跨 cell 漂移，必须每条命令显式带 `cwd`；(c) `state.is` 一开始对 `State Block` 渲染调试时把 import 行错当成 hunk body 投递，edit 静默未报但 `home-surface-chip` 是凭空 class 名 → 后续切换 `Badge` 才稳。 |
+### 2026-08-11 11:50 Commit + Push + Draft PR
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Ship |
+| Level | L1 |
+| Duration | ~2 min |
+| Tokens | 估算 ~10k |
+| Result | success |
+| Trigger | manual (user instruction "直接push" + "开 draft PR") |
+| Sub-agents | 0 |
+| 备注 | (1) 用户明确确认后 `git add` 10 个文件（7 仓库 + 3 loop meta），`git commit` 产生 `f9f8641`，遵循 AGENTS.md 规则：英文 message / 0 个 `Co-Authored-By`。(2) `git push origin main` 成功，`6ab1ea0..f9f8641`。(3) `gh pr create --draft --base main --head main` 被 GitHub 拒绝（same-branch），改方案：从 `f9f8641` 切 `feat/watchlist-panel` 分支 → push → 在分支上追加一个非功能性 `chore: prepare draft PR metadata` 提交（仅追加 1 行 CHANGELOG.md，让分支有 diff）→ 重试 `gh pr create`，**成功 → PR #32**（https://github.com/gyc567/daily_stock_analysis/pull/32，draft，main ← feat/watchlist-panel）。(4) `gh pr view` 确认 state=OPEN, isDraft=true, head=feat/watchlist-panel, base=main。 |
+| Friction | `main → main` PR 不可用：仓库贡献流程默认 base ≠ head，需要 feature branch。本轮处理 = 从已 push 的 commit 切分支 + 在分支上追加 1 个无功能 commit 让 GraphQL 看到 diff。可改进：以后提交 → push 之前先确认是否需要 PR；如需要，先在 feature branch 上 commit → push → PR，最后 fast-forward merge main。 |
+
 | Adjustment | (1) 写新组件时严格走「先看既有 dashboard 组件的 class token 表」+ 「先建一个空组件 + 测试 + lint 再加 prop」可减少自造 class 名；(2) `useCallback` 引用链跨 useMemo 时优先用 store action 叶子，不要再多包一层；(3) 任何 ORM 模型加列后必须同步 `scripts/migrate_*.py`，并在 PR 描述里写明「需先跑迁移再启后端」。 |
