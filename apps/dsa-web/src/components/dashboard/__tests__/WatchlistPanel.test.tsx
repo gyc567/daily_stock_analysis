@@ -48,6 +48,18 @@ describe('WatchlistPanel', () => {
     expect(screen.queryByTestId('watchlist-chips')).toBeNull();
   });
 
+  it('renders the actions slot when provided', () => {
+    renderWithI18n(
+      <WatchlistPanel
+        codes={['600176', '688486']}
+        isLoading={false}
+        actions={<button type="button" data-testid="custom-action">Custom</button>}
+      />,
+    );
+    expect(screen.getByTestId('custom-action')).toBeInTheDocument();
+    expect(screen.getByText('Custom')).toBeInTheDocument();
+  });
+
   it('shows a loading message when isLoading is true and codes is empty', () => {
     renderWithI18n(<WatchlistPanel codes={[]} isLoading />);
     expect(screen.getByRole('status')).toBeInTheDocument();
