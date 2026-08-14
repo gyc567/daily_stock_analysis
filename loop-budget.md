@@ -33,5 +33,8 @@ npx @cobusgreyling/loop-cost --pattern daily-triage
 | Commit + push + draft PR | Manual L1 | 0 | ~10k | manual (user instruction) |
 | Merge PR #32 | Manual L1 | 0 | ~3k | manual (user instruction) |
 | **Day total** | — | **0** | **~113k** | within cap |
+| (2026-08-11 ocr integration, prior session) | Manual L2 | 0 | ~40k | manual |
+| (2026-08-14) analyze-all + PR #33 | Manual L2 | 0 | ~35k | manual ("继续完成工作") |
+| **Cross-day total** | — | **0** | **~188k** | within cap |
 
 Notes: 全程 in-process，未 spawn 任何 sub-agent。下次起手前 `loop-budget` skill 复算。

@@ -101,6 +101,21 @@
 | 备注 | 用户安装 `ocr v1.9.1` (`npm install -g @alibaba-group/open-code-review`)，随后要求整合到 Loop Engineering。实施：(1) 新建 `.claude/skills/ocr-review/SKILL.md` — 封装 `ocr review/scan/delegate/check-config` 四个命令；(2) 新建 `.claude/skills/ocr/SKILL.md` — ocr 自动安装 skill，检测未安装时自动触发 `npm install -g`；(3) 编写 `docs/ocr-guide.md` 完整教程（7 章节：安装配置、核心命令、本地流程、CI 集成、Loop 集成、配置参考、FAQ）；(4) 修改 `.github/workflows/pr-review.yml` 的 `ai-review` job — 替换 Python/Google-GenAI 依赖为 `ocr review` + `gh pr comment`，`OCR_NO_UPDATE=1` 防 CI 延迟；(5) 修改 `.github/workflows/loop-ci-sweeper.yml` — 新增 `ocr-scan` job，CI 失败时对 PR 变更文件定向审计；(6) 修改 `.github/workflows/loop-triage.yml` — 新增 `ocr-review` job，对近 7 天变更文件做日常 review；(7) 更新 `docs/loop-engineering-integration.md` skill/workflow 表格；(8) 更新 `docs/CHANGELOG.md` Unreleased 条目。 |
 | Friction | 1. `ocr` 二进制名是 `ocr`，不是 `open-code-review`，通过 `npm root -g` + `package.json bin` 探明。2. `pr-review.yml` 原 `ai-review` job 依赖主分支 sparse checkout `.github/scripts`，ocr 无需此步骤，job 大幅简化。3. `ocr review` 输出到 `gh pr comment --body-file -` 需要 `2>&1 | tee ai_review_result.txt` 保证 artifact 上传和 comment 都拿到输出。 |
 
+### 2026-08-14 16:30 feat: WatchlistPanel 「分析全部」+ Draft PR #33
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Continue Work |
+| Level | L2 |
+| Duration | ~12 min |
+| Tokens | 估算 ~35k |
+| Result | success |
+| Trigger | manual (user "继续完成工作") |
+| Sub-agents | 0 |
+| 备注 | (1) `git fetch --prune` 清除 PR #32 merge 后残留的 `origin/feat/watchlist-panel` ref。(2) 扩 `stockPoolStore.submitAnalysis` 接受 `stockCodes: string[]`，新增 `submitAnalysisBatch` top-level helper 顺序循环调 `analysisApi.analyzeAsync`；`analyzeBatchSeq` 计数器保证新调用能中断在途批次；复用现有 dedup + `DuplicateTaskError` 错误面，无 server 改动。(3) `WatchlistPanel` 利用已有 `actions` prop slot 接入 Button，无组件 API 改动。(4) i18n 加 2 键 × 2 语言（`home.watchlistAnalyzeAll` / `home.watchlistAnalyzing`），后者预留未来批量进度展示。(5) 测试 5→6 例 actions 渲染。(6) 切 `feat/watchlist-analyze-all` 分支，commit `5c7dd77`（5 files, +132/-3），push，开 **draft PR #33**：https://github.com/gyc567/daily_stock_analysis/pull/33（base=main, head=feat/watchlist-analyze-all, isDraft=true）。(7) 后续 `38b29ae chore(loop): record analyze-all + draft PR #33 in session logs` 把 log meta push 到分支。 |
+| Friction | (a) edit 工具对 stale file hash 报「Path does not exist」时其实编辑已应用或被自动修复，导致初次 CHANGELOG entry 漏入 commit —— 已用 `git commit --amend` 修正；(b) 第一次 `submitAnalysisBatch` 错插在 store 对象内部（`PUT >744:` 加在 `deleteSelectedMarketReviewHistory: ... },` 之后但还在 store 内），`tsc` 报 26 个 TS1005 —— 立刻 cut + 移至 `export const useStockPoolStore` 之前变成 top-level 函数解决；(c) edit 工具在跨 commit 之间的 stale hash 警告比「实际编辑是否成功」更激进，看到警告后必须 `git diff` 一次确认。 |
+| Adjustment | (1) 写 store helper 函数永远放在 `create((set, get) => ({...}))` **外**面（与 `fetchHistory` 等既有 helper 一致的位置），用 `PUT <line:` 而不是 `PUT >line:` 锚定到 `create` 之前；(2) edit 工具「stale hash」警告后必须 `git diff` 一次确认改动落到了 staged 或 working tree，不要凭「工具说没改」就以为没改；(3) PR → merge 后 `git fetch --prune` 是 hard rule，否则远端 dead ref 一直留。 |
+
 | Adjustment | (1) 写新组件时严格走「先看既有 dashboard 组件的 class token 表」+ 「先建一个空组件 + 测试 + lint 再加 prop」可减少自造 class 名；(2) `useCallback` 引用链跨 useMemo 时优先用 store action 叶子，不要再多包一层；(3) 任何 ORM 模型加列后必须同步 `scripts/migrate_*.py`，并在 PR 描述里写明「需先跑迁移再启后端」。 |
 ### 2026-08-11 18:30 ocr 集成审计 + 修复
 
