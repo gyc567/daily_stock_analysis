@@ -29,6 +29,7 @@ type SubmitAnalysisOptions = {
   forceRefresh?: boolean;
   skills?: string[];
   reportLanguage?: ReportLanguage;
+  stockCodes?: string[];
 };
 
 let reportRequestSeq = 0;
@@ -37,6 +38,7 @@ let historyRequestSeq = 0;
 let marketReviewHistoryRequestSeq = 0;
 let stockHistoryRequestSeq = 0;
 let activeTaskRequestSeq = 0;
+let analyzeBatchSeq = 0;
 let activeTaskLocalRevision = 0;
 const dismissedTaskIds = new Set<string>();
 
@@ -488,6 +490,73 @@ async function fetchMarketReviewHistory(
   }
 }
 
+/**
+ * Loop the per-stock async submission for each code in `stockCodes`.
+ * Sequential, not parallel: the backend already queues analysis tasks
+ * and concurrent submits just cause duplicate-task 409s. Aborts if a new
+ * submitAnalysis call starts mid-batch (analyzeBatchSeq bumped).
+ */
+async function submitAnalysisBatch(
+  get: () => StockPoolState,
+  set: (partial: Partial<StockPoolState>) => void,
+  options: SubmitAnalysisOptions,
+): Promise<void> {
+  const codes = (options.stockCodes ?? [])
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
+  if (codes.length === 0) {
+    return;
+  }
+
+  const batchId = ++analyzeBatchSeq;
+  set({
+    inputError: undefined,
+    duplicateError: null,
+    error: null,
+    isAnalyzing: true,
+  });
+
+  for (const code of codes) {
+    if (batchId !== analyzeBatchSeq) {
+      return;
+    }
+    const stockName = options.stockName;
+    const selectionSource = options.selectionSource ?? get().selectionSource;
+    const originalQuery = (options.originalQuery ?? code).trim();
+    const notify = options.notify ?? get().notify;
+    const forceRefresh = options.forceRefresh ?? false;
+    const skills = options.skills;
+
+    try {
+      await analysisApi.analyzeAsync({
+        stockCode: code,
+        reportType: 'detailed',
+        stockName,
+        originalQuery: originalQuery || code,
+        selectionSource,
+        notify,
+        forceRefresh,
+        skills,
+        ...(options.reportLanguage !== undefined && { reportLanguage: options.reportLanguage }),
+      });
+    } catch (error) {
+      if (batchId !== analyzeBatchSeq) {
+        return;
+      }
+      if (error instanceof DuplicateTaskError) {
+        set({ duplicateError: `股票 ${error.stockCode} 正在分析中，请等待完成` });
+        return;
+      }
+      set({ error: getParsedApiError(error) });
+      return;
+    }
+  }
+
+  if (batchId === analyzeBatchSeq) {
+    set({ isAnalyzing: false, query: '', selectionSource: 'manual' });
+  }
+}
+
 export const useStockPoolStore = create<StockPoolState>((set, get) => ({
   ...initialState,
 
@@ -742,12 +811,22 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     }
   },
 
+
   submitAnalysis: async (options) => {
-    const state = get();
-    const rawStockCode = options?.stockCode ?? state.query;
-    const stockCodeInput = rawStockCode.trim();
+    // Batch path: when stockCodes is provided (and no single stockCode),
+    // loop the same per-stock async submission sequentially. This
+    // re-uses the existing single-stock code path (analyzeAsync + dedup
+    // + error surfaces) instead of inventing a new server batch route.
+    if (options?.stockCodes && options.stockCodes.length > 0 && !options.stockCode) {
+      await submitAnalysisBatch(get, set, options);
+      return;
+    }
+
+     const state = get();
     const stockName = options?.stockName;
     const selectionSource = options?.selectionSource ?? state.selectionSource;
+     const rawStockCode = options?.stockCode ?? state.query;
+     const stockCodeInput = rawStockCode.trim();
     const originalQuery = (options?.originalQuery ?? state.query).trim();
     const notify = options?.notify ?? state.notify;
     const forceRefresh = options?.forceRefresh ?? false;

@@ -355,6 +355,21 @@ const HomePage: React.FC = () => {
     },
     [submitAnalysis, selectedAnalysisSkills],
   );
+  const handleWatchlistAnalyzeAll = useCallback(() => {
+    const codes = watchlistState.watchlistCodes;
+    if (codes.length === 0) {
+      return;
+    }
+    // Re-uses submitAnalysis's batch path (SubmitAnalysisOptions.stockCodes)
+    // which loops the per-stock async submission sequentially. Avoids
+    // parallel submits that would 409 as duplicate tasks.
+    void submitAnalysis({
+      stockCodes: codes,
+      originalQuery: 'STOCK_LIST',
+      selectionSource: 'manual',
+      skills: selectedAnalysisSkills,
+    });
+  }, [submitAnalysis, selectedAnalysisSkills, watchlistState.watchlistCodes]);
 
   const clearMarketReviewState = useCallback(() => {
     stopMarketReviewPolling();
@@ -648,6 +663,21 @@ const HomePage: React.FC = () => {
           codes={watchlistState.watchlistCodes}
           isLoading={watchlistState.isLoading}
           onSelect={handleWatchlistSelect}
+          actions={
+            watchlistState.watchlistCodes.length > 1 ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="home-action-ai"
+                isLoading={watchlistState.isActioning}
+                disabled={watchlistState.isLoading}
+                onClick={handleWatchlistAnalyzeAll}
+                data-testid="watchlist-analyze-all"
+              >
+                {t('home.watchlistAnalyzeAll')}
+              </Button>
+            ) : null
+          }
           className="shrink-0"
         />
         <TaskPanel
@@ -679,7 +709,10 @@ const HomePage: React.FC = () => {
        selectedReport?.meta.id,
       watchlistState.watchlistCodes,
       watchlistState.isLoading,
+      watchlistState.isActioning,
       handleWatchlistSelect,
+      handleWatchlistAnalyzeAll,
+      t,
      ],
   );
 

@@ -199,6 +199,8 @@ const zh = {
   'home.watchlistEmpty': '尚未配置自选股，请在 .env 中设置 STOCK_LIST。',
   'home.watchlistAnalyze': '分析',
   'home.watchlistOverflow': '还有 {count} 只',
+  'home.watchlistAnalyzeAll': '分析全部',
+  'home.watchlistAnalyzing': '分析中 ({done}/{total})',
 
   'decisionSignals.action': '动作',
   'decisionSignals.active': '有效',
@@ -834,6 +836,8 @@ const en: Record<UiTextKey, string> = {
   'home.watchlistEmpty': 'No stocks configured. Set STOCK_LIST in .env to populate the watchlist.',
   'home.watchlistAnalyze': 'Analyze',
   'home.watchlistOverflow': '+{count} more',
+  'home.watchlistAnalyzeAll': 'Analyze all',
+  'home.watchlistAnalyzing': 'Analyzing ({done}/{total})',
 
   'decisionSignals.action': 'Action',
   'decisionSignals.active': 'Active',
