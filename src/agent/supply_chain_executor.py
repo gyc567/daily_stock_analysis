@@ -310,20 +310,22 @@ def _extract_ticker_company(message: str) -> tuple[str, str]:
     """从用户 message 中提取 ticker 和 company。
 
     支持格式：
-    - "新莱应材 300260 SZ 供应链分析"
-    - "分析主题：\n新莱应材 300260 SZ..."
+    - "分析主题：\n新莱应材 300260 SZ 供应链分析"
     - "【新莱应材】300260 SZ..."
+    - "新莱应材 300260 SZ..."
     """
     import re
 
     ticker = ""
     company = ""
-    # 优先从消息中提取股票代码
+    # 提取股票代码（6 位数字）
     m = re.search(r"\b(\d{6})\b", message)
     if m:
         ticker = m.group(1)
-    # 提取公司名（第一个中文词组）
-    m2 = re.search(r"[一-鿿]{2,8}", message)
+    # 提取公司名（第一行第一个 2-6 个中文字）
+    lines = message.split("\n")
+    first_text_line = next((l.strip() for l in lines if l.strip() and not l.strip()[0].isdigit()), "")
+    m2 = re.search(r"[一-鿿]{2,6}", first_text_line)
     if m2:
         company = m2.group(0)
     return ticker, company
@@ -424,29 +426,49 @@ def _call_v3_tools_directly(
     }
 
     for tool_name, kwargs in v3_tool_map.items():
+        import sys as _sys
         try:
             result = tool_registry.execute(tool_name, **kwargs)
             result_str = _json.dumps(result) if isinstance(result, dict) else str(result)
             result_dict: dict[str, Any] = (
                 _json.loads(result_str) if isinstance(result_str, str) else {}
             )
+            print(
+                f"[DEBUG] v3 tool {tool_name}: success result_len={len(result_str)} "
+                f"keys={list(result_dict.keys())}",
+                file=_sys.stderr, flush=True,
+            )
         except Exception as exc:
+            print(
+                f"[DEBUG] v3 tool {tool_name}: EXCEPTION {exc}",
+                file=_sys.stderr, flush=True,
+            )
             logger.debug(
                 "[SupplyChainExecutor] v3 tool %s 直接调用失败: %s", tool_name, exc
             )
             continue
 
-        # 解析结果
+        # 解析结果 - 注意工具返回的 key 可能与 SupplyChainDeepDiveV3 字段名不同
         if "product_matrix" in result_dict and isinstance(
             result_dict.get("product_matrix"), list
         ):
             data["product_matrix"] = result_dict["product_matrix"]
             if "product_matrix" not in sections_executed:
                 sections_executed.append("product_matrix")
+        elif "products" in result_dict and isinstance(result_dict.get("products"), list):
+            # analyze_product_matrix 返回 {"products": [...]} 而不是 "product_matrix"
+            data["product_matrix"] = result_dict["products"]
+            if "product_matrix" not in sections_executed:
+                sections_executed.append("product_matrix")
         elif "market_position" in result_dict and isinstance(
             result_dict.get("market_position"), list
         ):
             data["market_position"] = result_dict["market_position"]
+            if "market_position" not in sections_executed:
+                sections_executed.append("market_position")
+        elif "positions" in result_dict and isinstance(result_dict.get("positions"), list):
+            # analyze_market_position 返回 {"positions": [...]} 而不是 "market_position"
+            data["market_position"] = result_dict["positions"]
             if "market_position" not in sections_executed:
                 sections_executed.append("market_position")
         elif "key_customers" in result_dict or "key_suppliers" in result_dict:
@@ -456,10 +478,23 @@ def _call_v3_tools_directly(
                 data["key_suppliers"] = result_dict["key_suppliers"]
             if "key_partners" not in sections_executed:
                 sections_executed.append("key_partners")
+        elif "customers" in result_dict or "suppliers" in result_dict:
+            # extract_key_partners 返回 {"customers": [...], "suppliers": [...]}
+            if "customers" in result_dict:
+                data["key_customers"] = result_dict["customers"]
+            if "suppliers" in result_dict:
+                data["key_suppliers"] = result_dict["suppliers"]
+            if "key_partners" not in sections_executed:
+                sections_executed.append("key_partners")
         elif "industry_outlook" in result_dict and isinstance(
             result_dict.get("industry_outlook"), list
         ):
             data["industry_outlook"] = result_dict["industry_outlook"]
+            if "industry_outlook" not in sections_executed:
+                sections_executed.append("industry_outlook")
+        elif "outlooks" in result_dict and isinstance(result_dict.get("outlooks"), list):
+            # analyze_industry_outlook 返回 {"outlooks": [...]} 而不是 "industry_outlook"
+            data["industry_outlook"] = result_dict["outlooks"]
             if "industry_outlook" not in sections_executed:
                 sections_executed.append("industry_outlook")
         elif "reports" in result_dict and isinstance(result_dict.get("reports"), list):
@@ -567,16 +602,26 @@ class SupplyChainExecutor:
             deep_dive_obj = _collect_v3_deep_dive_from_log(
                 loop_result.tool_calls_log, ticker, company
             )
+            import sys
+            print(
+                f"[DEBUG] after _collect: deep_dive_obj={deep_dive_obj is not None} "
+                f"sections={deep_dive_obj.get('sections_executed') if deep_dive_obj else None} "
+                f"tool_calls={len(loop_result.tool_calls_log)}",
+                file=sys.stderr, flush=True,
+            )
             # [v3 post-processing] If LLM skipped v3 tools, call them directly
             if not deep_dive_obj or not deep_dive_obj.get("sections_executed"):
-                logger.info(
-                    "[SupplyChainExecutor] LLM skipped v3 tools, calling directly: "
-                    "ticker=%r company=%r",
-                    ticker,
-                    company,
+                print(
+                    f"[DEBUG] LLM skipped v3 tools, calling directly for {ticker} {company}",
+                    file=sys.stderr, flush=True,
                 )
                 deep_dive_obj = _call_v3_tools_directly(
                     self.tool_registry, ticker, company, loop_result.tool_calls_log
+                )
+                print(
+                    f"[DEBUG] after direct call: deep_dive_obj={deep_dive_obj is not None} "
+                    f"sections={deep_dive_obj.get('sections_executed') if deep_dive_obj else None}",
+                    file=sys.stderr, flush=True,
                 )
             logger.info(
                 "[SupplyChainExecutor] deep_dive_obj: ticker=%r company=%r sections=%s",
