@@ -76,6 +76,8 @@ class RunLoopResult:
     error: Optional[str] = None
     # Raw messages list at the end of the loop (callers may want to persist)
     messages: List[Dict[str, Any]] = field(default_factory=list)
+    # [v3] Structured deep dive data from v3 tool calls (populated at loop end)
+    deep_dive_obj: Optional[Dict[str, Any]] = None
 
     @property
     def model(self) -> str:
@@ -415,6 +417,86 @@ def _build_budget_guard_result(
         ),
         messages=messages,
     )
+
+
+# ============================================================
+# [v3] Deep dive collection helpers
+# ============================================================
+
+
+def _collect_v3_deep_dive_from_log(
+    tool_calls_log: List[Dict[str, Any]], ticker: str, company: str
+) -> Optional[Dict[str, Any]]:
+    """Extract v3 structured deep dive data from tool_calls_log.
+
+    Scans sequential tool results for the five v3 tool return shapes
+    (product_matrix / market_position / key_partners / industry_outlook /
+    financial_quality / capacity_outlook) and assembles a
+    SupplyChainDeepDiveV3-compatible dict.  Returns None if no v3 data found.
+    """
+    import json as _json
+
+    sections_executed: List[str] = []
+    data: Dict[str, Any] = {"ticker": ticker, "company": company}
+
+    for entry in tool_calls_log:
+        if not entry.get("success"):
+            continue
+        raw = entry.get("result", "")
+        if not raw:
+            continue
+        try:
+            result_dict: Dict[str, Any] = _json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+
+        # §6 product_matrix
+        if "product_matrix" in result_dict and isinstance(
+            result_dict["product_matrix"], list
+        ):
+            data["product_matrix"] = result_dict["product_matrix"]
+            sections_executed.append("product_matrix")
+
+        # §7 market_position
+        elif "market_position" in result_dict and isinstance(
+            result_dict["market_position"], list
+        ):
+            data["market_position"] = result_dict["market_position"]
+            sections_executed.append("market_position")
+
+        # §8 key_partners (customers + suppliers)
+        elif "key_customers" in result_dict or "key_suppliers" in result_dict:
+            if "key_customers" in result_dict:
+                data["key_customers"] = result_dict["key_customers"]
+            if "key_suppliers" in result_dict:
+                data["key_suppliers"] = result_dict["key_suppliers"]
+            if "key_partners" not in sections_executed:
+                sections_executed.append("key_partners")
+
+        # §9 industry_outlook
+        elif "industry_outlook" in result_dict and isinstance(
+            result_dict["industry_outlook"], list
+        ):
+            data["industry_outlook"] = result_dict["industry_outlook"]
+            sections_executed.append("industry_outlook")
+
+        # §10 financial_quality
+        elif "reports" in result_dict and isinstance(result_dict["reports"], list):
+            data["financial_quality"] = result_dict["reports"]
+            sections_executed.append("financial_quality")
+
+        # §10.b capacity_outlook
+        elif "capacity_outlook" in result_dict:
+            outlook = result_dict.get("capacity_outlook")
+            if isinstance(outlook, dict):
+                data["capacity_outlook"] = outlook
+                sections_executed.append("capacity_outlook")
+
+    if not sections_executed:
+        return None
+
+    data["sections_executed"] = sections_executed
+    return data
 
 
 # ============================================================

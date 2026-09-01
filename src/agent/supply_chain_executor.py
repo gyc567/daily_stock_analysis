@@ -341,7 +341,7 @@ class SupplyChainExecutor:
         from src.agent.chat_context import build_agent_chat_context_bundle
         from src.agent.conversation import conversation_manager
         from src.agent.executor import AgentResult
-        from src.agent.runner import run_agent_loop
+        from src.agent.runner import _collect_v3_deep_dive_from_log, run_agent_loop
 
         system_prompt = build_supply_chain_system_prompt()
 
@@ -378,9 +378,33 @@ class SupplyChainExecutor:
                 f"[分析失败] {loop_result.error or '未知错误'}",
             )
 
+        # [v3] Extract v3 structured deep dive data from tool call results
+        deep_dive_obj = None
+        try:
+            # Try to extract ticker/company from the user message
+            # Format: "分析主题：\n<topic>" or with hint lines
+            ticker = ""
+            company = ""
+            first_line = (message or "").split("\n")[0]
+            # Look for 6-digit stock code pattern
+            import re
+            m = re.search(r"\b(\d{6})\b", first_line)
+            if m:
+                ticker = m.group(1)
+            # Look for Chinese company name in angle brackets
+            m2 = re.search(r"【([^】]+)】", message)
+            if m2:
+                company = m2.group(1)
+            deep_dive_obj = _collect_v3_deep_dive_from_log(
+                loop_result.tool_calls_log, ticker, company
+            )
+        except Exception as exc:
+            logger.debug("[SupplyChainExecutor] v3 deep_dive 解析失败: %s", exc)
+
         return AgentResult(
             success=loop_result.success,
             content=loop_result.content,
+            deep_dive_obj=deep_dive_obj,
             tool_calls_log=loop_result.tool_calls_log,
             total_steps=loop_result.total_steps,
             total_tokens=loop_result.total_tokens,
