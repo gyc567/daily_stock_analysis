@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""[v3 PR-B] 6 个深度小节工具的单测。
+"""[v3 PR-B] 5 个深度小节工具的单测。
 
 覆盖：
 1. 工具元数据：name / category / parameters / handler signature
 2. handler fail-open：KB 不可用 / LLM 不可用 / JSON 解析失败
 3. handler 正常路径：mock KB + mock LLM，返回结构化 dict（经 Pydantic 校验）
 4. handler 契约校验：LLM 输出字段错 → 整条记录被跳过，不拖垮整批
-5. 工具注册：11 个工具全部在 ALL_SUPPLY_CHAIN_TOOLS（v2 5个 + v3 6个）
+5. 工具注册：10 个工具全部在 ALL_SUPPLY_CHAIN_TOOLS
 """
 
 from __future__ import annotations
@@ -20,14 +20,12 @@ from src.agent.tools.registry import ToolDefinition
 from src.agent.tools.supply_chain_tools import (
     ALL_SUPPLY_CHAIN_TOOLS,
     _format_v3_kb_hits,
-    _handle_analyze_capacity_outlook,
     _handle_analyze_financial_quality,
     _handle_analyze_industry_outlook,
     _handle_analyze_market_position,
     _handle_analyze_product_matrix,
     _handle_extract_key_partners,
     _parse_v3_json,
-    analyze_capacity_outlook_tool,
     analyze_financial_quality_tool,
     analyze_industry_outlook_tool,
     analyze_market_position_tool,
@@ -42,7 +40,6 @@ V3_TOOL_NAMES = {
     "extract_key_partners",
     "analyze_industry_outlook",
     "analyze_financial_quality",
-    "analyze_capacity_outlook",
 }
 
 
@@ -76,9 +73,9 @@ def _no_real_data_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestV3ToolRegistration:
-    def test_all_tools_registered(self) -> None:
-        """v2 5 个 + v3 6 个 = 11 个工具。"""
-        assert len(ALL_SUPPLY_CHAIN_TOOLS) == 11
+    def test_all_10_tools_registered(self) -> None:
+        """v2 5 个 + v3 5 个 = 10 个工具。"""
+        assert len(ALL_SUPPLY_CHAIN_TOOLS) == 10
         names = {t.name for t in ALL_SUPPLY_CHAIN_TOOLS}
         assert V3_TOOL_NAMES <= names
 
@@ -555,94 +552,6 @@ class TestAnalyzeFinancialQuality:
 
 
 # ============================================================
-# §10.b analyze_capacity_outlook handler
-# ============================================================
-
-
-class TestAnalyzeCapacityOutlook:
-    def test_no_llm(self) -> None:
-        """LLM 不可用时返回 insufficient_data 兜底。"""
-        with patch(
-            "src.agent.tools.supply_chain_tools._get_v3_chat_llm",
-            return_value=None,
-        ):
-            out = _handle_analyze_capacity_outlook(
-                ticker="600519",
-                company="贵州茅台",
-                industry_hint="白酒",
-            )
-        assert out["capacity_outlook"]["trend"] == "insufficient_data"
-        assert out["capacity_outlook"]["confidence"] == "low"
-
-    def test_valid_forecast(self) -> None:
-        """正常 LLM 输出 → 返回结构化 forecast。"""
-        llm = MagicMock()
-        llm.call_text.return_value = _fake_llm_response(
-            '{"ticker": "600519", '
-            '"company": "贵州茅台", '
-            '"industry_unit_hint": "万千升/年", '
-            '"historical_summary": "近3期均值为 85.3%", '
-            '"historical_data_quality": "partial", '
-            '"forecasts": [{'
-            '"time_window": "near_term_3_6m", '
-            '"period_label": "2026-10", '
-            '"predicted_utilization_pct": 88.5, '
-            '"predicted_output_volume": 5.2, '
-            '"predicted_output_unit": "万千升", '
-            '"inference_basis": "下游订单饱满+中秋旺季", '
-            '"demand_signals": ["下游订单饱满", "季节性旺季"], '
-            '"capacity_change_factors": [], '
-            '"confidence": "high", '
-            '"evidence_strength": "analysis"}], '
-            '"trend": "rising", '
-            '"trend_rationale": "需求旺盛+产能逐步释放", '
-            '"capacity_bottleneck_risk": "medium", '
-            '"demand_supply_balance": "tight", '
-            '"expansion_plans": [{'
-            '"project_name": "茅台酱香产能扩建", '
-            '"expected_completion": "2026Q3", '
-            '"expected_capacity_addition": "1.5万千升/年", '
-            '"progress_status": "ramping", '
-            '"source": "年报披露", '
-            '"evidence_strength": "primary"}], '
-            '"data_source_notes": "年报披露+行业数据", '
-            '"confidence": "high"}'
-        )
-        with patch(
-            "src.agent.tools.supply_chain_tools._get_v3_chat_llm",
-            return_value=llm,
-        ):
-            out = _handle_analyze_capacity_outlook(
-                ticker="600519",
-                company="贵州茅台",
-                industry_hint="白酒",
-                historical_capacity="2025Q2: 92.5%, 2025Q1: 88.3%, 2024Q4: 85.0%",
-                demand_drivers="高端白酒需求旺盛, 茅台系列酒放量",
-                expansion_projects="茅台酱香产能扩建，预计2026Q3投产",
-                capacity_unit_hint="万千升/年",
-                benchmark_utilization=75.0,
-                seasonal_pattern="Q4>Q2>Q3>Q1",
-            )
-        assert out["capacity_outlook"]["ticker"] == "600519"
-        assert len(out["capacity_outlook"]["forecasts"]) == 1
-        assert out["capacity_outlook"]["trend"] == "rising"
-
-    def test_insufficient_data_fallback(self) -> None:
-        """LLM 输出无效 → 返回 insufficient_data 兜底。"""
-        llm = MagicMock()
-        llm.call_text.return_value = _fake_llm_response("invalid json")
-        with patch(
-            "src.agent.tools.supply_chain_tools._get_v3_chat_llm",
-            return_value=llm,
-        ):
-            out = _handle_analyze_capacity_outlook(
-                ticker="600519",
-                company="贵州茅台",
-            )
-        assert out["capacity_outlook"]["trend"] == "insufficient_data"
-
-
-# ============================================================
 # 工具定义 + 参数
 # ============================================================
 
@@ -672,12 +581,6 @@ class TestV3ToolDefinitions:
             analyze_financial_quality_tool.handler == _handle_analyze_financial_quality
         )
 
-    def test_analyze_capacity_outlook_tool(self) -> None:
-        assert analyze_capacity_outlook_tool.name == "analyze_capacity_outlook"
-        assert (
-            analyze_capacity_outlook_tool.handler == _handle_analyze_capacity_outlook
-        )
-
 
 # ============================================================
 # 工厂自动注册（不破坏问股工具集）
@@ -685,10 +588,10 @@ class TestV3ToolDefinitions:
 
 
 class TestV3FactoryWiring:
-    """SupplyChainExecutor 应通过 factory 自动获得 6 个新工具。"""
+    """SupplyChainExecutor 应通过 factory 自动获得 5 个新工具。"""
 
     def test_supply_chain_tools_list_includes_v3(self) -> None:
-        """ALL_SUPPLY_CHAIN_TOOLS 是 factory 直接消费的列表——验证 6 个 v3 工具全在。"""
+        """ALL_SUPPLY_CHAIN_TOOLS 是 factory 直接消费的列表——验证 5 个 v3 工具全在。"""
         names = {t.name for t in ALL_SUPPLY_CHAIN_TOOLS}
         assert V3_TOOL_NAMES <= names
         # 同时 v2 旧工具不退化

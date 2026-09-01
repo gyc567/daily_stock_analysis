@@ -14,7 +14,6 @@ SupplyChainDataService.fetch_all 默认返回 SupplyChainV2，legacy=True 走旧
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional
 
 import icontract
@@ -587,30 +586,6 @@ TimeWindow = Literal[
 SubsegmentStatus = Literal["growing", "stable", "declining", "transforming"]
 
 
-# ============================================================
-# §10.b 产能展望 Literal 类型
-# ============================================================
-
-DemandSignal = Literal[
-    "下游订单饱满",
-    "行业出货量增长",
-    "在手订单充裕",
-    "季节性旺季",
-    "扩产产能释放",
-    "需求回落",
-    "限产检修",
-]
-
-CapacityChangeFactor = Literal[
-    "新建产能释放",
-    "爬坡良率提升",
-    "季节性检修",
-    "限产政策",
-    "设备升级改造",
-    "外协加工",
-]
-
-
 class IndustryOutlookV3(BaseModel):
     """[v3 §9] 行业前景与需求驱动画像。
 
@@ -707,16 +682,6 @@ class FinancialQualityV3(BaseModel):
     evidence_strength: EvidenceStrength = Field(default="primary")
     source_url: Optional[str] = Field(default=None, max_length=2048)
 
-    # §10.b 扩产进度（用于产能展望预测参考）
-    expansion_projects: List["ExpansionProjectV3"] = Field(
-        default_factory=list,
-        description="已知扩产项目列表（用于 §10.b 产能展望预测）"
-    )
-    expansion_status_notes: Optional[str] = Field(
-        default=None, max_length=200,
-        description="扩产整体状态备注"
-    )
-
     @model_validator(mode="after")
     def _check_segment_consistency(self) -> "FinancialQualityV3":
         """契约：revenue_segments 占比合计与 100% 偏差不超过 5%。
@@ -739,166 +704,6 @@ class FinancialQualityV3(BaseModel):
 
 
 # ============================================================
-# §10.b 产能展望 Schema
-# ============================================================
-
-
-class ExpansionProjectV3(BaseModel):
-    """[v3 §10.b] 扩产项目跟踪。
-
-    用于记录公司在建/规划/完成的扩产项目，为产能预测提供输入。
-    """
-
-    model_config = ConfigDict(
-        strict=True, frozen=True, validate_assignment=True, extra="forbid"
-    )
-
-    project_name: str = Field(..., min_length=1, max_length=120)
-    expected_completion: Optional[str] = Field(
-        default=None, description="预计投产时间（YYYYQM格式，如'2026Q3'）"
-    )
-    expected_capacity_addition: Optional[str] = Field(
-        default=None, max_length=80,
-        description="新增产能（如'1.5万千升/年'、'2GW/年'）"
-    )
-    progress_status: Literal["planning", "construction", "ramping", "completed"] = Field(
-        default="planning"
-    )
-    source: str = Field(default="年报披露", description="信息来源")
-    evidence_strength: EvidenceStrength = Field(default="analysis")
-
-
-class CapacityForecastPeriodV3(BaseModel):
-    """[v3 §10.b] 单期产能预测（短期+中期统一Schema）。
-
-    使用 time_window 区分预测期限：
-    - near_term_3_6m: 未来1-6个月（短期）
-    - mid_term_6_12m: 未来6-12个月（中期）
-
-    所有数值字段使用 Decimal 类型（按三层防御要求）。
-    """
-
-    model_config = ConfigDict(
-        strict=True, frozen=True, validate_assignment=True, extra="forbid"
-    )
-
-    time_window: TimeWindow = Field(...)
-    period_label: str = Field(
-        ..., description="人类可读标签（如'2026-10'、'2026Q4'）"
-    )
-
-    predicted_utilization_pct: Optional[Decimal] = Field(
-        default=None, ge=Decimal("0"), le=Decimal("200"),
-        description="预测产能利用率（可>100%超产）"
-    )
-    predicted_output_volume: Optional[Decimal] = Field(
-        default=None, ge=Decimal("0"),
-        description="预测产量绝对值"
-    )
-    predicted_output_unit: Optional[str] = Field(
-        default=None, max_length=20,
-        description="产量单位（如'万台'、'万片'、'GWh'）"
-    )
-
-    inference_basis: str = Field(
-        ..., description="推断依据摘要"
-    )
-    demand_signals: List[DemandSignal] = Field(
-        default_factory=list, max_length=5
-    )
-    capacity_change_factors: List[CapacityChangeFactor] = Field(
-        default_factory=list, max_length=5
-    )
-
-    confidence: Literal["high", "medium", "low"] = Field(default="medium")
-    evidence_strength: EvidenceStrength = Field(default="analysis")
-
-    @model_validator(mode="after")
-    def _check_volume_unit_consistency(self) -> "CapacityForecastPeriodV3":
-        """契约：predicted_output_volume 非空时必须提供 predicted_output_unit。"""
-        if self.predicted_output_volume is not None and self.predicted_output_unit is None:
-            raise ValueError(
-                "CapacityForecastPeriodV3 契约违反：predicted_output_volume 非空时 "
-                "必须提供 predicted_output_unit"
-            )
-        return self
-
-
-# AggregateConfidence 在 CapacityOutlookV3 之前定义（避免 forward reference）
-AggregateConfidence = Literal["high", "medium", "low"]
-
-
-class CapacityOutlookV3(BaseModel):
-    """[v3 §10.b] 产能展望与预测。
-
-    定位：§10 财务质量与产能跟踪的扩展子节，
-    复用已有的 historical periods 数据，补充未来预测。
-
-    与 §10 FinancialQualityV3 的关系：
-    - §10 存储历史产能数据（capacity_utilization_pct 等）
-    - §10.b 存储预测数据（基于 §10 历史 + 需求信号推断）
-    """
-
-    model_config = ConfigDict(
-        strict=True, frozen=True, validate_assignment=True, extra="forbid"
-    )
-
-    ticker: str = Field(..., pattern=r"^[\w\.\-]{1,16}$")
-    company: str = Field(..., min_length=1, max_length=80)
-    fetched_at: Optional[datetime] = Field(default=None)
-
-    industry_unit_hint: Optional[str] = Field(
-        default=None, max_length=20,
-        description="行业推荐产量单位（来自行业模板，如'万片/月'、'GWh/年'）"
-    )
-
-    historical_summary: str = Field(
-        default="",
-        description="历史产能利用率摘要（如'近3期均值为 85.3%'）"
-    )
-    historical_data_quality: Literal["complete", "partial", "sparse", "none"] = Field(
-        default="none"
-    )
-
-    forecasts: List[CapacityForecastPeriodV3] = Field(
-        default_factory=list,
-        description="产能预测列表（含短期1-6月和中长期6-12月）"
-    )
-
-    trend: Literal["rising", "stable", "falling", "volatile", "insufficient_data"] = Field(
-        default="insufficient_data"
-    )
-    trend_rationale: str = Field(default="", description="趋势判断依据")
-
-    capacity_bottleneck_risk: Literal["high", "medium", "low", "unknown"] = Field(
-        default="unknown"
-    )
-    demand_supply_balance: Literal["tight", "balanced", "loose", "unknown"] = Field(
-        default="unknown"
-    )
-
-    expansion_plans: List[ExpansionProjectV3] = Field(
-        default_factory=list, max_length=5,
-        description="已知扩产项目"
-    )
-
-    data_source_notes: str = Field(
-        default="",
-        description="数据来源说明（如'年报披露+行业数据'、'行业均值填充，待核验'）"
-    )
-    confidence: AggregateConfidence = Field(default="low")
-
-    @model_validator(mode="after")
-    def _check_forecast_consistency(self) -> "CapacityOutlookV3":
-        """契约：当 forecasts 和 historical_summary 都为空时，trend 须为 insufficient_data。"""
-        if not self.forecasts and not self.historical_summary:
-            if self.trend != "insufficient_data":
-                # 强制覆盖为 insufficient_data（不改用户显式传入的值）
-                self.trend = "insufficient_data"
-        return self
-
-
-# ============================================================
 # 顶层容器 SupplyChainDeepDiveV3
 # ============================================================
 
@@ -909,8 +714,8 @@ DeepDiveSection = Literal[
     "key_partners",
     "industry_outlook",
     "financial_quality",
-    "capacity_outlook",
 ]
+AggregateConfidence = Literal["high", "medium", "low"]
 
 
 class SupplyChainDeepDiveV3(BaseModel):
@@ -935,9 +740,6 @@ class SupplyChainDeepDiveV3(BaseModel):
     industry_outlook: List[IndustryOutlookV3] = Field(default_factory=list)
     financial_quality: List[FinancialQualityV3] = Field(default_factory=list)
 
-    # §10.b 产能展望（作为 §10 的扩展子节）
-    capacity_outlook: Optional["CapacityOutlookV3"] = Field(default=None)
-
     sections_executed: List[DeepDiveSection] = Field(default_factory=list)
     sections_skipped: List[str] = Field(default_factory=list)
     aggregate_confidence: AggregateConfidence = Field(default="low")
@@ -950,7 +752,6 @@ class SupplyChainDeepDiveV3(BaseModel):
             "key_partners",
             "industry_outlook",
             "financial_quality",
-            "capacity_outlook",
         ]
         return {
             sec: ("executed" if sec in self.sections_executed else "skipped")
@@ -1004,8 +805,6 @@ class SupplyChainDeepDiveV3(BaseModel):
             items = self.industry_outlook
         elif section == "financial_quality":
             items = self.financial_quality
-        elif section == "capacity_outlook":
-            items = [self.capacity_outlook] if self.capacity_outlook else []
         else:
             return False
         return any(

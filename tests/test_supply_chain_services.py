@@ -180,8 +180,8 @@ class TestScoreTool:
 
 class TestToolMetadata:
     def test_supply_chain_tools(self):
-        # v3 增 6 个深度小节工具 → 共 11 个工具
-        assert len(ALL_SUPPLY_CHAIN_TOOLS) == 11
+        # v3 增 5 个深度小节工具 → 共 10 个工具
+        assert len(ALL_SUPPLY_CHAIN_TOOLS) == 10
         names = {t.name for t in ALL_SUPPLY_CHAIN_TOOLS}
         assert names == {
             "score_supply_chain_bottleneck",
@@ -195,11 +195,9 @@ class TestToolMetadata:
             "extract_key_partners",
             "analyze_industry_outlook",
             "analyze_financial_quality",
-            "analyze_capacity_outlook",
         }
-        # 验证 score 工具存在且类别为 analysis（使用 name-based 查找）
-        score_tool = next(t for t in ALL_SUPPLY_CHAIN_TOOLS if t.name == "score_supply_chain_bottleneck")
-        assert score_tool.category == "analysis"
+        assert ALL_SUPPLY_CHAIN_TOOLS[0].name == "score_supply_chain_bottleneck"
+        assert ALL_SUPPLY_CHAIN_TOOLS[0].category == "analysis"
 
     def test_eight_factors_eight_penalties(self):
         assert len(FACTOR_KEYS) == 8
@@ -208,6 +206,6 @@ class TestToolMetadata:
         assert not (set(FACTOR_KEYS) & set(PENALTY_KEYS))
 
     def test_tool_has_required_params(self):
-        tool = next(t for t in ALL_SUPPLY_CHAIN_TOOLS if t.name == "score_supply_chain_bottleneck")
+        tool = ALL_SUPPLY_CHAIN_TOOLS[0]
         param_names = {p.name for p in tool.parameters}
         assert {"ticker", "company", "factors"} <= param_names
