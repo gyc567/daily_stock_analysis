@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from src.schemas.supply_chain import (
+    CapacityOutlookV3,
     FinancialQualityV3,
     IndustryOutlookV3,
     KeyPartnerV3,
@@ -421,6 +422,151 @@ def render_financial_quality(reports: List[FinancialQualityV3]) -> str:
     return "\n".join(lines)
 
 
+def render_capacity_outlook(outlook: "CapacityOutlookV3") -> str:
+    """§10.b 产能展望与预测（作为 §10 的扩展子节）。
+
+    渲染格式：
+    ## 10.b 产能展望与预测
+    ### 10.b.1 历史产能跟踪
+    ### 10.b.2 短期预测（未来3个月）
+    ### 10.b.3 中期展望（6-12个月）
+    ### 10.b.4 供需格局与风险提示
+    """
+    if outlook is None:
+        return ""
+
+    lines: List[str] = ["", "## 10.b 产能展望与预测", ""]
+
+    # 数据质量标注
+    quality_map = {
+        "complete": "完整",
+        "partial": "部分缺失",
+        "sparse": "稀疏",
+        "none": "无历史数据",
+    }
+    quality_cn = quality_map.get(outlook.historical_data_quality, "未知")
+    lines.append(f"**数据质量**：{quality_cn}")
+
+    # 10.b.1 历史产能跟踪
+    if outlook.historical_summary:
+        lines.append("")
+        lines.append("### 10.b.1 历史产能跟踪")
+        lines.append(outlook.historical_summary)
+
+    # 10.b.2 短期预测（near_term_3_6m）
+    near_term = [f for f in outlook.forecasts if f.time_window == "near_term_3_6m"]
+    if near_term:
+        lines.append("")
+        lines.append("### 10.b.2 短期预测（未来3个月）")
+        lines.append(
+            "| 月份 | 预测利用率 | 预测产量 | 推断依据 | 置信度 |"
+        )
+        lines.append("|---|---:|---:|---|:---:|")
+        for f in near_term:
+            util = (
+                f"{f.predicted_utilization_pct:.1f}%"
+                if f.predicted_utilization_pct is not None
+                else "—"
+            )
+            vol = ""
+            if f.predicted_output_volume is not None and f.predicted_output_unit:
+                vol = f"{f.predicted_output_volume} {f.predicted_output_unit}"
+            elif f.predicted_output_unit:
+                vol = f"— {f.predicted_output_unit}"
+            basis = f.inference_basis[:40] + "..." if len(f.inference_basis) > 40 else f.inference_basis
+            conf_cn = {"high": "高", "medium": "中", "low": "低"}.get(f.confidence, "—")
+            lines.append(f"| {f.period_label} | {util} | {vol} | {basis} | {conf_cn} |")
+
+    # 10.b.3 中期展望（mid_term_6_12m）
+    mid_term = [f for f in outlook.forecasts if f.time_window == "mid_term_6_12m"]
+    if mid_term:
+        lines.append("")
+        lines.append("### 10.b.3 中期展望（6-12个月）")
+        lines.append(
+            "| 季度 | 预计利用率趋势 | 关键驱动因素 | 置信度 |"
+        )
+        lines.append("|---|:---|:---|:---:|")
+        # 中期趋势沿用整体的 outlook.trend
+        trend_cn_map = {"rising": "↗ 上升", "stable": "→ 平稳", "falling": "↘ 下降", "volatile": "↮ 波动"}
+        outlook_trend_cn = trend_cn_map.get(outlook.trend, "—")
+        for f in mid_term:
+            # per-period 的 utilization 变化不体现在此（schema 暂无 per-period trend），
+            # 直接复用父级 outlook.trend
+            drivers = "、".join(f.capacity_change_factors[:3]) if f.capacity_change_factors else "—"
+            conf_cn = {"high": "高", "medium": "中", "low": "低"}.get(f.confidence, "—")
+            lines.append(f"| {f.period_label} | {outlook_trend_cn} | {drivers} | {conf_cn} |")
+
+    # 10.b.x 长期展望（long_term_12_36m）
+    long_term = [f for f in outlook.forecasts if f.time_window == "long_term_12_36m"]
+    if long_term:
+        lines.append("")
+        lines.append("### 10.b.x 长期展望（1-3年）")
+        lines.append(
+            "| 周期 | 预计利用率趋势 | 关键驱动因素 | 置信度 |"
+        )
+        lines.append("|---|:---|:---|:---:|")
+        for f in long_term:
+            drivers = "、".join(f.capacity_change_factors[:3]) if f.capacity_change_factors else "—"
+            conf_cn = {"high": "高", "medium": "中", "low": "低"}.get(f.confidence, "—")
+            lines.append(f"| {f.period_label} | {outlook_trend_cn} | {drivers} | {conf_cn} |")
+
+    # 10.b.4 供需格局与风险提示
+    lines.append("")
+    lines.append("### 10.b.4 供需格局与风险提示")
+    balance_map = {
+        "tight": "🔴 偏紧",
+        "balanced": "🟡 平衡",
+        "loose": "🟢 宽松",
+        "unknown": "❓ 未知",
+    }
+    risk_map = {
+        "high": "🔴 高",
+        "medium": "🟡 中",
+        "low": "🟢 低",
+        "unknown": "❓ 未知",
+    }
+    lines.append(f"**供需格局**：{balance_map.get(outlook.demand_supply_balance, '❓ 未知')}")
+    lines.append(f"**产能瓶颈风险**：{risk_map.get(outlook.capacity_bottleneck_risk, '❓ 未知')}")
+
+    # 趋势判断
+    if outlook.trend and outlook.trend != "insufficient_data":
+        trend_map = {
+            "rising": "📈 上升",
+            "stable": "➡️ 平稳",
+            "falling": "📉 下降",
+            "volatile": "📊 波动",
+        }
+        lines.append(f"**整体趋势**：{trend_map.get(outlook.trend, outlook.trend)}")
+        if outlook.trend_rationale:
+            lines.append(f"**趋势依据**：{outlook.trend_rationale}")
+
+    # 扩产计划
+    if outlook.expansion_plans:
+        lines.append("")
+        lines.append("**扩产计划跟踪：**")
+        for p in outlook.expansion_plans:
+            status_map = {
+                "planning": "规划中",
+                "construction": "建设中",
+                "ramping": "爬坡中",
+                "completed": "已完成",
+            }
+            status_cn = status_map.get(p.progress_status, p.progress_status)
+            line = f"- {p.project_name}（{status_cn}）"
+            if p.expected_capacity_addition:
+                line += f"，新增产能：{p.expected_capacity_addition}"
+            if p.expected_completion:
+                line += f"，预计 {p.expected_completion} 投产"
+            lines.append(line)
+
+    # 数据来源说明
+    if outlook.data_source_notes:
+        lines.append("")
+        lines.append(f"**数据来源**：{outlook.data_source_notes}")
+
+    return "\n".join(lines)
+
+
 def render_section_status(deep_dive: SupplyChainDeepDiveV3) -> str:
     """数据完整性披露脚注。"""
     status = deep_dive.section_status()
@@ -430,6 +576,7 @@ def render_section_status(deep_dive: SupplyChainDeepDiveV3) -> str:
         ("key_partners", "§8 关键客户与供应商"),
         ("industry_outlook", "§9 行业前景与需求驱动"),
         ("financial_quality", "§10 财务质量与产能跟踪"),
+        ("capacity_outlook", "§10.b 产能展望与预测"),
     ]
     lines = [
         "## 数据完整性披露",
@@ -460,7 +607,7 @@ def render_section_status(deep_dive: SupplyChainDeepDiveV3) -> str:
 def _collect_deep_dive_sections(
     deep_dive: SupplyChainDeepDiveV3, llm_markdown: str
 ) -> List[str]:
-    """[拆分] 按顺序收集 §5/§6/§7/§8/§9/§10 各小节 Markdown（空节跳过）。"""
+    """[拆分] 按顺序收集 §5/§6/§7/§8/§9/§10/§10.b 各小节 Markdown（空节跳过）。"""
     sections: List[str] = []
     summary = render_market_position_summary(deep_dive, llm_markdown)
     if summary:
@@ -475,6 +622,9 @@ def _collect_deep_dive_sections(
         sections.append(render_industry_outlook(deep_dive.industry_outlook))
     if deep_dive.financial_quality:
         sections.append(render_financial_quality(deep_dive.financial_quality))
+    # §10.b 产能展望（依附于 §10 之后）
+    if deep_dive.capacity_outlook:
+        sections.append(render_capacity_outlook(deep_dive.capacity_outlook))
     return sections
 
 

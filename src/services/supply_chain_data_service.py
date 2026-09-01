@@ -43,6 +43,10 @@ _INDUSTRY_INFERENCE_TEMPLATES: Tuple[Tuple[Tuple[str, ...], Dict[str, Any]], ...
                 "dual_chain_impact": "显著",
             },
             "industry_drivers": ["国产替代加速", "AI算力需求", "汽车电动化"],
+            # §10.b 产能展望字段
+            "capacity_unit_hint": "万片/月",
+            "benchmark_utilization": 85.0,
+            "seasonal_pattern": "Q3>Q4>Q2>Q1",
         },
     ),
     (
@@ -60,6 +64,10 @@ _INDUSTRY_INFERENCE_TEMPLATES: Tuple[Tuple[Tuple[str, ...], Dict[str, Any]], ...
                 "dual_chain_impact": "极小",
             },
             "industry_drivers": ["消费升级", "品牌集中度提升", "文化建设"],
+            # §10.b 产能展望字段
+            "capacity_unit_hint": "万千升/年",
+            "benchmark_utilization": 75.0,
+            "seasonal_pattern": "Q4>Q2>Q3>Q1",
         },
     ),
     (
@@ -81,6 +89,10 @@ _INDUSTRY_INFERENCE_TEMPLATES: Tuple[Tuple[Tuple[str, ...], Dict[str, Any]], ...
                 "dual_chain_impact": "美国市场受限",
             },
             "industry_drivers": ["新能源汽车渗透率提升", "储能需求爆发", "原材料成本"],
+            # §10.b 产能展望字段
+            "capacity_unit_hint": "GWh/年",
+            "benchmark_utilization": 80.0,
+            "seasonal_pattern": "Q3>Q4>Q2>Q1",
         },
     ),
     (
@@ -102,6 +114,10 @@ _INDUSTRY_INFERENCE_TEMPLATES: Tuple[Tuple[Tuple[str, ...], Dict[str, Any]], ...
                 "dual_chain_impact": "较小",
             },
             "industry_drivers": ["老龄化", "创新药政策", "国产替代"],
+            # §10.b 产能展望字段
+            "capacity_unit_hint": "万盒/年",
+            "benchmark_utilization": 70.0,
+            "seasonal_pattern": "Q2>Q4>Q1>Q3",
         },
     ),
     (
@@ -123,6 +139,10 @@ _INDUSTRY_INFERENCE_TEMPLATES: Tuple[Tuple[Tuple[str, ...], Dict[str, Any]], ...
                 "dual_chain_impact": "美国限制中国光伏产品",
             },
             "industry_drivers": ["碳中和政策", "光伏经济性提升", "全球能源转型"],
+            # §10.b 产能展望字段
+            "capacity_unit_hint": "GW/年",
+            "benchmark_utilization": 70.0,
+            "seasonal_pattern": "Q3>Q4>Q1>Q2",
         },
     ),
     (
@@ -144,6 +164,10 @@ _INDUSTRY_INFERENCE_TEMPLATES: Tuple[Tuple[Tuple[str, ...], Dict[str, Any]], ...
                 "dual_chain_impact": "技术追赶中",
             },
             "industry_drivers": ["大尺寸化", "OLED渗透", "车载需求"],
+            # §10.b 产能展望字段
+            "capacity_unit_hint": "万平米/月",
+            "benchmark_utilization": 75.0,
+            "seasonal_pattern": "Q3>Q4>Q2>Q1",
         },
     ),
     (
@@ -726,6 +750,35 @@ class SupplyChainDataService:
             if any(kw in name_lower for kw in keywords):
                 return dict(template)
         return dict(_INDUSTRY_INFERENCE_FALLBACK)
+
+
+def get_industry_capacity_template(industry_hint: str) -> Dict[str, Any]:
+    """根据行业提示查询产能相关模板。
+
+    用于 §10.b 产能展望工具的降级推断。
+
+    Args:
+        industry_hint: 行业提示（如"白酒"、"半导体"、"新能源"）
+
+    Returns:
+        包含 capacity_unit_hint / benchmark_utilization / seasonal_pattern 的 dict
+    """
+    if not industry_hint:
+        return {
+            "capacity_unit_hint": "",
+            "benchmark_utilization": 75.0,
+            "seasonal_pattern": "",
+        }
+
+    name_lower = industry_hint.lower()
+    for keywords, template in _INDUSTRY_INFERENCE_TEMPLATES:
+        if any(kw in name_lower for kw in keywords):
+            return {
+                "capacity_unit_hint": template.get("capacity_unit_hint", ""),
+                "benchmark_utilization": template.get("benchmark_utilization", 75.0),
+                "seasonal_pattern": template.get("seasonal_pattern", ""),
+            }
+
 
     def _get_stock_knowledge_base(self) -> Dict[str, Dict[str, Any]]:
         """获取股票供应链知识库"""
