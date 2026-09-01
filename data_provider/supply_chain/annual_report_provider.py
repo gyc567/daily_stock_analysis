@@ -7,7 +7,7 @@ Fetches annual report text from cninfo (巨潮资讯网).
 
 import logging
 import re
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -124,15 +124,22 @@ class AnnualReportProvider:
             logger.warning(f"[AnnualReportProvider] Failed to extract content: {e}")
             return None
 
-    def _extract_pdf_text(self, content: bytes) -> str:
-        """Extract text from PDF bytes"""
+    def _extract_pdf_text(self, content: bytes, max_pages: int = 50) -> str:
+        """Extract text from PDF bytes.
+
+        Args:
+            content: PDF file bytes
+            max_pages: Maximum pages to scan (default 50, enough for 经营情况讨论与分析 section)
+        """
         try:
             import io
             from pypdf import PdfReader  # type: ignore[import-not-found]
 
             reader = PdfReader(io.BytesIO(content))
             text_parts = []
-            for page in reader.pages[:10]:
+            total_pages = len(reader.pages)
+            pages_to_scan = min(max_pages, total_pages)
+            for page in reader.pages[:pages_to_scan]:
                 text_parts.append(page.extract_text())
             return "\n".join(text_parts)
         except ImportError:
@@ -159,3 +166,44 @@ class AnnualReportProvider:
         if code.startswith("60") or code.startswith("688"):
             return f"{code}.SH"
         return f"{code}.SZ"
+
+
+def extract_capacity_disclosures(text: str) -> list[dict[str, Any]]:
+    """从年报正文中提取产能相关段落。
+
+    用于 §10.b 产能展望功能。
+
+    Args:
+        text: 年报正文文本
+
+    Returns:
+        产能披露段落列表，每项包含 keyword 和 content
+    """
+    if not text:
+        return []
+
+    # 产能相关关键词模式
+    capacity_patterns = [
+        r"产能利用率[：:][^\n]{10,200}",
+        r"设计产能[：:][^\n]{10,200}",
+        r"实际产量[：:][^\n]{10,200}",
+        r"扩产[^\n]{10,200}",
+        r"在建工程[^\n]{10,200}",
+        r"产销率[：:][^\n]{10,200}",
+        r"产能爬坡[^\n]{10,200}",
+        r"新增产能[^\n]{10,200}",
+    ]
+
+    disclosures = []
+    for pattern in capacity_patterns:
+        matches = re.findall(pattern, text)
+        for match in matches:
+            # 清理空白
+            cleaned = re.sub(r"\s+", " ", match).strip()
+            if len(cleaned) >= 10:
+                disclosures.append({
+                    "keyword": cleaned[:30],
+                    "content": cleaned[:500],  # 截断避免过长
+                })
+
+    return disclosures
