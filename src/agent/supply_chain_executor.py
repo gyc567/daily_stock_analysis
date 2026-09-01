@@ -398,8 +398,14 @@ class SupplyChainExecutor:
             deep_dive_obj = _collect_v3_deep_dive_from_log(
                 loop_result.tool_calls_log, ticker, company
             )
+            logger.info(
+                "[SupplyChainExecutor] deep_dive_obj: ticker=%r company=%r sections=%s",
+                ticker,
+                company,
+                deep_dive_obj.get("sections_executed") if deep_dive_obj else None,
+            )
         except Exception as exc:
-            logger.debug("[SupplyChainExecutor] v3 deep_dive 解析失败: %s", exc)
+            logger.warning("[SupplyChainExecutor] v3 deep_dive 解析失败: %s", exc)
 
         return AgentResult(
             success=loop_result.success,

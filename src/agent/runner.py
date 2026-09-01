@@ -928,6 +928,7 @@ def _execute_tools(
             "success": success,
             "duration": dur,
             "result_length": len(result_str),
+            "result": result_str,
             "cached": cached,
         }
         if tool_wait_timeout_seconds and tool_wait_timeout_seconds > 0 and not success:
@@ -989,6 +990,7 @@ def _execute_tools(
                     "success": success,
                     "duration": dur,
                     "result_length": len(result_str),
+                    "result": result_str,
                     "cached": cached,
                 }
                 if guard_result is not None:
@@ -1045,6 +1047,7 @@ def _execute_tools(
                             "success": False,
                             "duration": round(tool_wait_timeout_seconds or 0.0, 2),
                             "result_length": len(result_str),
+                            "result": result_str,
                             "cached": False,
                             "timeout": True,
                         }
