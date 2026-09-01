@@ -365,6 +365,8 @@ _INDUSTRY_INFERENCE_FALLBACK: Dict[str, Any] = {
 }
 
 
+
+
 class SupplyChainDataService:
     """
     供应链数据获取服务
@@ -750,35 +752,6 @@ class SupplyChainDataService:
             if any(kw in name_lower for kw in keywords):
                 return dict(template)
         return dict(_INDUSTRY_INFERENCE_FALLBACK)
-
-
-def get_industry_capacity_template(industry_hint: str) -> Dict[str, Any]:
-    """根据行业提示查询产能相关模板。
-
-    用于 §10.b 产能展望工具的降级推断。
-
-    Args:
-        industry_hint: 行业提示（如"白酒"、"半导体"、"新能源"）
-
-    Returns:
-        包含 capacity_unit_hint / benchmark_utilization / seasonal_pattern 的 dict
-    """
-    if not industry_hint:
-        return {
-            "capacity_unit_hint": "",
-            "benchmark_utilization": 75.0,
-            "seasonal_pattern": "",
-        }
-
-    name_lower = industry_hint.lower()
-    for keywords, template in _INDUSTRY_INFERENCE_TEMPLATES:
-        if any(kw in name_lower for kw in keywords):
-            return {
-                "capacity_unit_hint": template.get("capacity_unit_hint", ""),
-                "benchmark_utilization": template.get("benchmark_utilization", 75.0),
-                "seasonal_pattern": template.get("seasonal_pattern", ""),
-            }
-
 
     def _get_stock_knowledge_base(self) -> Dict[str, Dict[str, Any]]:
         """获取股票供应链知识库"""
@@ -1828,3 +1801,34 @@ def get_industry_capacity_template(industry_hint: str) -> Dict[str, Any]:
         # v2 字段优先；v1 兜底
         merged = {**v1_only, **v2_dict}
         return merged
+
+def get_industry_capacity_template(industry_hint: str) -> Dict[str, Any]:
+    """根据行业提示查询产能相关模板。
+
+    用于 §10.b 产能展望工具的降级推断。
+
+    Args:
+        industry_hint: 行业提示（如"白酒"、"半导体"、"新能源"）
+
+    Returns:
+        包含 capacity_unit_hint / benchmark_utilization / seasonal_pattern 的 dict
+    """
+    if not industry_hint:
+        return {
+            'capacity_unit_hint': '',
+            'benchmark_utilization': 75.0,
+            'seasonal_pattern': '',
+        }
+    name_lower = industry_hint.lower()
+    for keywords, template in _INDUSTRY_INFERENCE_TEMPLATES:
+        if any(kw in name_lower for kw in keywords):
+            return {
+                'capacity_unit_hint': template.get('capacity_unit_hint', ''),
+                'benchmark_utilization': template.get('benchmark_utilization', 75.0),
+                'seasonal_pattern': template.get('seasonal_pattern', ''),
+            }
+    return {
+        'capacity_unit_hint': '',
+        'benchmark_utilization': 75.0,
+        'seasonal_pattern': '',
+    }

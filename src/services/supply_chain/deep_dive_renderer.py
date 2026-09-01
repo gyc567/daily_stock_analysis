@@ -478,6 +478,8 @@ def render_capacity_outlook(outlook: "CapacityOutlookV3") -> str:
             lines.append(f"| {f.period_label} | {util} | {vol} | {basis} | {conf_cn} |")
 
     # 10.b.3 中期展望（mid_term_6_12m）
+    trend_cn_map = {"rising": "↗ 上升", "stable": "→ 平稳", "falling": "↘ 下降", "volatile": "↮ 波动"}
+    outlook_trend_cn = trend_cn_map.get(outlook.trend, "—")
     mid_term = [f for f in outlook.forecasts if f.time_window == "mid_term_6_12m"]
     if mid_term:
         lines.append("")
@@ -486,9 +488,6 @@ def render_capacity_outlook(outlook: "CapacityOutlookV3") -> str:
             "| 季度 | 预计利用率趋势 | 关键驱动因素 | 置信度 |"
         )
         lines.append("|---|:---|:---|:---:|")
-        # 中期趋势沿用整体的 outlook.trend
-        trend_cn_map = {"rising": "↗ 上升", "stable": "→ 平稳", "falling": "↘ 下降", "volatile": "↮ 波动"}
-        outlook_trend_cn = trend_cn_map.get(outlook.trend, "—")
         for f in mid_term:
             # per-period 的 utilization 变化不体现在此（schema 暂无 per-period trend），
             # 直接复用父级 outlook.trend
