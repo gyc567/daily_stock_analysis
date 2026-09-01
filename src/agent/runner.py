@@ -442,7 +442,8 @@ def _collect_v3_deep_dive_from_log(
     for entry in tool_calls_log:
         if not entry.get("success"):
             continue
-        raw = entry.get("result", "")
+        # [v3] Tool result stored under "result_str" key in tool_calls_log
+        raw = entry.get("result_str", "")
         if not raw:
             continue
         try:
