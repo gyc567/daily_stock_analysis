@@ -306,6 +306,177 @@ def _read_text(path: str, label: str) -> str:
         return f"（{label} 加载失败，请检查数据目录）"
 
 
+def _extract_ticker_company(message: str) -> tuple[str, str]:
+    """从用户 message 中提取 ticker 和 company。
+
+    支持格式：
+    - "新莱应材 300260 SZ 供应链分析"
+    - "分析主题：\n新莱应材 300260 SZ..."
+    - "【新莱应材】300260 SZ..."
+    """
+    import re
+
+    ticker = ""
+    company = ""
+    # 优先从消息中提取股票代码
+    m = re.search(r"\b(\d{6})\b", message)
+    if m:
+        ticker = m.group(1)
+    # 提取公司名（第一个中文词组）
+    m2 = re.search(r"[一-鿿]{2,8}", message)
+    if m2:
+        company = m2.group(0)
+    return ticker, company
+
+
+def _call_v3_tools_directly(
+    tool_registry: Any,
+    ticker: str,
+    company: str,
+    tool_calls_log: list[dict],
+) -> dict[str, Any]:
+    """[v3 post-processing] 直接调用 v3 工具，确保结构化数据被收集。
+
+    在 ReAct 循环结束后，如果 LLM 没有调用 v3 工具（LLM 直接生成了报告内容
+    而非调用工具），这里直接调用它们以确保 deep_dive_obj 被填充。
+    """
+    import json as _json
+
+    sections_executed: list[str] = []
+    data: dict[str, Any] = {"ticker": ticker, "company": company}
+
+    # 从 tool_calls_log 中提取历史数据，用于传给 capacity_outlook
+    historical_capacity = ""
+    demand_drivers = ""
+    expansion_projects = ""
+
+    for entry in tool_calls_log:
+        if not entry.get("success"):
+            continue
+        raw = entry.get("result_str", "") or entry.get("result", "")
+        if not raw:
+            continue
+        try:
+            result_dict: dict[str, Any] = _json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+
+        if "financial_quality" in result_dict and isinstance(
+            result_dict.get("financial_quality"), list
+        ):
+            # 提取 capacity_utilization / expansion_projects
+            for rep in result_dict.get("financial_quality", []):
+                cap_util = rep.get("capacity_utilization_pct")
+                if cap_util is not None:
+                    historical_capacity += f"产能利用率: {cap_util}%\n"
+                exp = rep.get("expansion_projects")
+                if exp:
+                    expansion_projects += f"{exp}\n"
+
+        if "industry_outlook" in result_dict and isinstance(
+            result_dict.get("industry_outlook"), list
+        ):
+            for ind in result_dict.get("industry_outlook", []):
+                demand = ind.get("demand_drivers", "")
+                if demand:
+                    demand_drivers += f"{demand}\n"
+
+    # 调用 6 个 v3 工具
+    v3_tool_map = {
+        "analyze_product_matrix": {
+            "ticker": ticker,
+            "company": company,
+            "market": "SZ" if ticker.startswith(("0", "3")) else "SH",
+            "industry_hint": "",
+        },
+        "analyze_market_position": {
+            "ticker": ticker,
+            "company": company,
+            "market": "SZ" if ticker.startswith(("0", "3")) else "SH",
+            "industry_hint": "",
+            "top_k": 5,
+        },
+        "extract_key_partners": {
+            "ticker": ticker,
+            "company": company,
+            "top_k": 5,
+        },
+        "analyze_industry_outlook": {
+            "ticker": ticker,
+            "company": company,
+            "top_k": 3,
+        },
+        "analyze_financial_quality": {
+            "ticker": ticker,
+            "company": company,
+            "market": "SZ" if ticker.startswith(("0", "3")) else "SH",
+            "industry_hint": "",
+            "top_k": 5,
+        },
+        "analyze_capacity_outlook": {
+            "ticker": ticker,
+            "company": company,
+            "industry_hint": "",
+            "historical_capacity": historical_capacity or "",
+            "demand_drivers": demand_drivers or "",
+            "expansion_projects": expansion_projects or "",
+        },
+    }
+
+    for tool_name, kwargs in v3_tool_map.items():
+        try:
+            result = tool_registry.execute(tool_name, **kwargs)
+            result_str = _json.dumps(result) if isinstance(result, dict) else str(result)
+            result_dict: dict[str, Any] = (
+                _json.loads(result_str) if isinstance(result_str, str) else {}
+            )
+        except Exception as exc:
+            logger.debug(
+                "[SupplyChainExecutor] v3 tool %s 直接调用失败: %s", tool_name, exc
+            )
+            continue
+
+        # 解析结果
+        if "product_matrix" in result_dict and isinstance(
+            result_dict.get("product_matrix"), list
+        ):
+            data["product_matrix"] = result_dict["product_matrix"]
+            if "product_matrix" not in sections_executed:
+                sections_executed.append("product_matrix")
+        elif "market_position" in result_dict and isinstance(
+            result_dict.get("market_position"), list
+        ):
+            data["market_position"] = result_dict["market_position"]
+            if "market_position" not in sections_executed:
+                sections_executed.append("market_position")
+        elif "key_customers" in result_dict or "key_suppliers" in result_dict:
+            if "key_customers" in result_dict:
+                data["key_customers"] = result_dict["key_customers"]
+            if "key_suppliers" in result_dict:
+                data["key_suppliers"] = result_dict["key_suppliers"]
+            if "key_partners" not in sections_executed:
+                sections_executed.append("key_partners")
+        elif "industry_outlook" in result_dict and isinstance(
+            result_dict.get("industry_outlook"), list
+        ):
+            data["industry_outlook"] = result_dict["industry_outlook"]
+            if "industry_outlook" not in sections_executed:
+                sections_executed.append("industry_outlook")
+        elif "reports" in result_dict and isinstance(result_dict.get("reports"), list):
+            data["financial_quality"] = result_dict["reports"]
+            if "financial_quality" not in sections_executed:
+                sections_executed.append("financial_quality")
+        elif "capacity_outlook" in result_dict:
+            outlook = result_dict.get("capacity_outlook")
+            if isinstance(outlook, dict):
+                data["capacity_outlook"] = outlook
+                if "capacity_outlook" not in sections_executed:
+                    sections_executed.append("capacity_outlook")
+
+    data["sections_executed"] = sections_executed
+    return data if sections_executed else None
+
+
 def build_supply_chain_system_prompt() -> str:
     """组装供应链 system prompt（注入 SKILL.md + 核心 5 个 references）。
 
@@ -392,23 +563,21 @@ class SupplyChainExecutor:
         # [v3] Extract v3 structured deep dive data from tool call results
         deep_dive_obj = None
         try:
-            # Try to extract ticker/company from the user message
-            # Format: "分析主题：\n<topic>" or with hint lines
-            ticker = ""
-            company = ""
-            first_line = (message or "").split("\n")[0]
-            # Look for 6-digit stock code pattern
-            import re
-            m = re.search(r"\b(\d{6})\b", first_line)
-            if m:
-                ticker = m.group(1)
-            # Look for Chinese company name in angle brackets
-            m2 = re.search(r"【([^】]+)】", message)
-            if m2:
-                company = m2.group(1)
+            ticker, company = _extract_ticker_company(message)
             deep_dive_obj = _collect_v3_deep_dive_from_log(
                 loop_result.tool_calls_log, ticker, company
             )
+            # [v3 post-processing] If LLM skipped v3 tools, call them directly
+            if not deep_dive_obj or not deep_dive_obj.get("sections_executed"):
+                logger.info(
+                    "[SupplyChainExecutor] LLM skipped v3 tools, calling directly: "
+                    "ticker=%r company=%r",
+                    ticker,
+                    company,
+                )
+                deep_dive_obj = _call_v3_tools_directly(
+                    self.tool_registry, ticker, company, loop_result.tool_calls_log
+                )
             logger.info(
                 "[SupplyChainExecutor] deep_dive_obj: ticker=%r company=%r sections=%s",
                 ticker,
