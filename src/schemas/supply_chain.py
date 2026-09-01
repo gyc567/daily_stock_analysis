@@ -890,11 +890,16 @@ class CapacityOutlookV3(BaseModel):
 
     @model_validator(mode="after")
     def _check_forecast_consistency(self) -> "CapacityOutlookV3":
-        """契约：当 forecasts 和 historical_summary 都为空时，trend 须为 insufficient_data。"""
+        """契约：当 forecasts 和 historical_summary 都为空时，trend 须为 insufficient_data。
+
+        frozen=True 模型不能修改字段，因此通过 raise ValueError 来强制约束。
+        """
         if not self.forecasts and not self.historical_summary:
             if self.trend != "insufficient_data":
-                # 强制覆盖为 insufficient_data（不改用户显式传入的值）
-                self.trend = "insufficient_data"
+                raise ValueError(
+                    "CapacityOutlookV3 契约违反：forecasts 和 historical_summary "
+                    "均为空时，trend 必须为 'insufficient_data'。"
+                )
         return self
 
 
