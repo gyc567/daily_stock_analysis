@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 供应链深度报告新增 §10.b 产能展望与预测：基于历史产能数据（来自 §10 FinancialQualityV3）+ 下游需求信号（来自 §9 IndustryOutlookV3）+ 扩产进度，由 LLM 推断未来1-12个月产能走势。短期预测（1-3个月）+ 中期展望（6-12个月），支持需求驱动推断 + 行业模板降级。新增 Schema：CapacityOutlookV3 / CapacityForecastPeriodV3 / ExpansionProjectV3；新增工具：analyze_capacity_outlook；新增渲染函数：render_capacity_outlook；扩展行业模板 _INDUSTRY_INFERENCE_TEMPLATES 增加 capacity_unit_hint / benchmark_utilization / seasonal_pattern 字段；扩展 annual_report_provider.py PDF 扫描至50页 + 新增 extract_capacity_disclosures helper。
+- [测试] 新增 `tests/test_supply_chain_capacity_outlook.py`（capacity outlook Schema + 渲染器 + 行业模板测试）；修复 `tests/test_supply_chain_v3_tools.py` 和 `tests/test_supply_chain_services.py` 工具计数断言（10 → 11） + name-based 替代 positional 查找。
+
 - [新功能] 首页新增 `WatchlistPanel` 渲染 `STOCK_LIST` 自选股列表：侧边栏顶部新增面板，把后端 `GET /api/v1/stocks/watchlist` 返回的股票代码以 chip 形式展示，点击 chip 复用现有 `handleSubmitAnalysis` 触发单股分析；超过 `maxVisible`（默认 24）折叠为「还有 N 只」徽标。文件：`apps/dsa-web/src/components/dashboard/WatchlistPanel.tsx`（新）+ `__tests__/WatchlistPanel.test.tsx`（新，5 用例）+ `HomePage.tsx` 接入 + i18n zh/en 新增 5 个 `home.watchlist*` 文案键。`useWatchlist` 现有 `isInWatchlist/toggleWatchlist` 行为保持不变。GitHub issue 已在 `.claude/reviews/issue-watchlist-not-shown.md` 落档（仓库 issues 当前禁用）。
 - [新功能] `WatchlistPanel` 新增「分析全部」按钮：自选股 ≥ 2 只时显示，点击复用 `submitAnalysis` store action 新增的 `stockCodes` 批量路径（`stockPoolStore.ts` 新增 `submitAnalysisBatch` 顺序循环助手，按 `analyzeBatchSeq` 中断安全），逐个调 `analysisApi.analyzeAsync` + 现有 dedup + DuplicateTaskError 错误面。HomePage 通过现有 `actions` prop slot 传按钮。WatchlistPanel 测试新增 1 例 actions 渲染。`docs/CHANGELOG.md` 入口同段，扁平格式。
 - [文档] Loop Engineering Phase 2 完成：新增 `.github/workflows/loop-triage.yml`（每日 Issue/PR 分流）和 `.github/workflows/loop-ci-sweeper.yml`（CI 失败分析）。
@@ -194,6 +197,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 - [修复] 发布说明生成查询 PR 作者失败时保留降级并输出包含 PR 编号和异常类型的 warning，便于排查 token、权限、网络或 GitHub API 异常。
 - [改进] DSA 数据源链路新增 Tencent 日 K 直连 fetcher、daily source health 短期熔断，并升级 AlphaSift 默认 pin/runtime bridge，默认启用 `DAILY_SOURCE=auto`、Sina snapshot 优先级和候选级 quote context。
+- [文档] 新增性能优化方案设计文档 `docs/performance-optimization-plan.md`，基于 2026-06-23 单股 dry-run `cProfile` 实测采样，覆盖真实热点（大盘分析占 89% 耗时）、修正后的 P0~P4 优先级清单、放弃项与待测场景规划。
 - [文档] 补充 AlphaSift 迁移与回退边界：明确 `ALPHASIFT_INSTALL_SPEC` 显式覆盖语义、`requirements.txt + DEFAULT_ALPHASIFT_INSTALL_SPEC` 与运行时兼容边界、以及回滚路径（关闭功能/完整 revert）说明，覆盖旧 pin 用户升级行为。
 
 - [新功能] 个股分析历史成功保存后会从最终报告 best-effort 提取 `DecisionSignal` 决策信号，复用现有信号去重、计划质量计算和脱敏契约。

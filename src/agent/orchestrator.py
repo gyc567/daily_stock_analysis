@@ -302,6 +302,7 @@ class AgentOrchestrator:
             provider=orch_result.provider,
             model=orch_result.model,
             error=orch_result.error,
+            deep_dive_obj=None,
         )
 
     def chat(
@@ -366,6 +367,7 @@ class AgentOrchestrator:
             provider=orch_result.provider,
             model=orch_result.model,
             error=orch_result.error,
+            deep_dive_obj=None,
         )
 
     # -----------------------------------------------------------------

@@ -240,14 +240,23 @@ class SupplyChainReportService:
         return None
 
     def _collect_deep_dive_json(self, markdown: str, result: Any) -> Optional[str]:
-        """[拆分] 合并 deep_dive 备份层 + 结构化层（schema 校验闭环）成 JSON 字符串。"""
+        """[拆分] 合并 deep_dive 备份层 + 结构化层（schema 校验闭环）成 JSON 字符串。
+
+        两层并行（结构化层不依赖备份层是否成功）：
+        - 备份层：始终尝试提取 §6-§10 原文
+        - 结构化层：直接对 result.deep_dive_obj 做 schema 校验（不依赖灰度开关）
+        """
+        # 备份层：提取 §6-§10 原文（灰度关闭时仍工作，保证渲染层有数据）
         deep_dive_data = self._extract_deep_dive_section(markdown)
+
+        # 结构化层：直接校验 result.deep_dive_obj（独立于灰度开关）
         deep_dive_obj = getattr(result, "deep_dive_obj", None)
         validated_obj = self._validate_deep_dive_payload(deep_dive_obj)
         if validated_obj is not None:
             if deep_dive_data is None:
                 deep_dive_data = {}
             deep_dive_data["deep_dive_obj"] = validated_obj
+
         if deep_dive_data is None:
             return None
         import json as _json

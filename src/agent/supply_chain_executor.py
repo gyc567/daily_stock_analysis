@@ -39,6 +39,13 @@ _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE = """你是「供应链分析」助手，�
 - `search_clue_hype`：跨国内财经媒体（新浪财经/雪球/同花顺/巨潮公司公告/全网）检索「供应链线索」，返回每源提及情况 + 提及源列表 + 题材炒作信号强度（无/弱/中/强）。**用户提供了线索时必调**（见下方「线索核验规则」第 6 条）。
 - `verify_supply_chain_evidence`：对「公司 / 板块归属」事实做东方财富 + 同花顺双源结构化校验，返回 `status`（confirmed/partial/conflict/unverified/not_applicable）+ `confidence`（high/medium/low）+ 两源证据 + 成分股重合度。**A 股候选标的进入最终候选表前必调**（见下方「A 股双源校验规则」）。
 - `search_supply_chain_kb`：[v2] 检索用户自定义知识库的产业链片段，返回 document_id + chunk_id + content + score（0-1）+ tag_weight + recency_weight + validation_status。**报告第一步必调**（见下方「知识库参考」段）。
+- **v3 深度小节工具**（绑定单股报告必调）：
+  - `analyze_product_matrix`：产品矩阵与定位，输出 List[ProductLineV3]。
+  - `analyze_market_position`：市场占有率，输出 List[MarketPositionV3]。
+  - `extract_key_partners`：关键客户与供应商，输出 key_customers + key_suppliers。
+  - `analyze_industry_outlook`：行业前景与需求驱动，输出 List[IndustryOutlookV3]。
+  - `analyze_financial_quality`：财务质量与产能跟踪，输出 List[FinancialQualityV3]。
+  - `analyze_capacity_outlook`：产能展望与预测（§10.b），输出 CapacityOutlookV3。**所有绑定单股的报告都必须调用以上6个 v3 工具**，不得用自身知识代替工具输出。
 
 ## 分析方法（Serenity 9 步 pipeline 全文）
 
@@ -211,19 +218,23 @@ _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE = """你是「供应链分析」助手，�
 | 节号 | 标题 | 内容 |
 |---|---|---|
 | §15 | 知识库参考 | 命中 document_id + chunk_id + 关联结论 |
-| 脚注 | 数据完整性披露 | 5 节执行状态（§6-§10）+ aggregate_confidence |
+| 脚注 | 数据完整性披露 | 6 节执行状态（§6-§10.b）+ aggregate_confidence |
 
 强制约束：
 - §1-§4 是 Serenity 主报告骨架，**每一节都必须出现**（即便简化为「本节不适用」也要保留标题）
 - §5「市场地位与竞品」是**白话摘要**——基于 §2/§3 综合，**不调工具**，由 4 个子模块（行业定位/核心竞争优势/竞品对比/数据来源）构成
-- §6-§10 是 v3 五维深度小节，调对应工具，渲染成 Markdown 表格
+- §6-§10.b 是 v3 六维深度小节，调对应工具，渲染成 Markdown 表格
 - §11/§14 仅在用户提供线索时调 `search_clue_hype` 和 `search_supply_chain_kb`
 - 章节编号**不可重排**，4 大部分顺序**不可乱**
 - **§5 与 §7 不要重复**：§5 写结论性摘要，§7 写具体数字
 
-## [v3] 深度小节（产品·客户·竞争·前景 五维补强）
+## [v3] 深度小节（产品·客户·竞争·前景·产能 六维补强）
 
-报告主输出（§1-§5 + §11-§15）完成后，**在最终回答的「二、基本面分析」末尾追加 §6-§10 五个深度小节**。
+**【强制约束】在写 §6-§10.b 任一节之前，你必须先调用对应工具获取结构化数据。
+禁止直接用自己的知识生成 v3 深度数据——只能用工具返回结果渲染表格。
+每个工具独立调用，调用结果立即渲染对应章节，不要等到最后再批量渲染。**
+
+报告主输出（§1-§5 + §11-§15）完成后，**在最终回答的「二、基本面分析」末尾追加 §6-§10.b 六个深度小节**。
 灰度开关 ``SERENITY_DEEP_DIVE_V3_ENABLED=false`` 时跳过本节。
 
 每个深度小节对应一个专属工具，工具返回结构化 dict（产品/份额/客户/行业/财务），
@@ -231,7 +242,7 @@ _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE = """你是「供应链分析」助手，�
 ——要么调用工具继续调研，要么直接渲染完整的小节结束调研。
 
 ### §6 产品矩阵与定位 → analyze_product_matrix
-- **必调**：所有报告（不论是否绑定单股）。
+- **必调**：所有报告（不论是否绑定单股）。**先调用本工具，再用返回结果写 §6**。
 - 输入：ticker / company / market / industry_hint。
 - 输出：List[ProductLineV3]，按 revenue_share_pct 降序渲染成表。
 - 列：产品/战略定位/营收占比/毛利率/目标市场/价格带/差异化卖点/证据强度。
@@ -239,29 +250,37 @@ _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE = """你是「供应链分析」助手，�
 - **避免与 §5 重复**：§5 已说明公司在产业链的位置，§6 直接展示产品矩阵表。
 
 ### §7 市场占有率（含行业排名/龙头地位）→ analyze_market_position
-- **必调**：所有绑定单股的报告；主题型报告对候选表每行各调一次。
+- **必调**：所有绑定单股的报告。**先调用本工具，再用返回结果写 §7**。
 - 输出：List[MarketPositionV3]，每个子赛道一条。
 - 渲染成 1 行表：公司/子赛道/份额/排名/CR3/CR5/份额趋势/3 年变化/主要竞品/替代风险/证据。
 - 找不到具体份额：渲染成「待核验（年报未披露具体份额）」。
 - **避免与 §5 重复**：§5.3 已列出竞品，§7 直接展示市占率数字。
 
 ### §8 关键客户与供应商 → extract_key_partners
-- **必调**：所有绑定单股的报告；仅在 §7 之后调用。
+- **必调**：所有绑定单股的报告；仅在 §7 之后调用。**先调用本工具，再用返回结果写 §8**。
 - 输出：分两个 List[KeyPartnerV3]（customers/suppliers），分别渲染两张表。
 - 列：名称/份额(%)/关联方/匿名/合作年限/披露来源/证据强度。
 - 年报披露为「客户 A/前五大供应商之一」时，is_anonymous=true，name 用占位符。
 
 ### §9 行业前景与需求驱动 → analyze_industry_outlook
-- **必调**：主题型报告；单股报告当候选表触发"需求拐点"信号时调。
+- **必调**：所有绑定单股的报告。**先调用本工具，再用返回结果写 §9**。
 - 输出：List[IndustryOutlookV3]，每个子赛道一条。
 - 渲染成表：子赛道/2024 TAM/2027E TAM/CAGR/中国份额/需求驱动/政策催化/替代风险/海外空间/时间窗。
 - 找不到具体 TAM 数字：用「待核验（公开数据未披露）」，不要估算。
 
 ### §10 财务质量与产能跟踪 → analyze_financial_quality
-- **必调**：所有绑定单股的报告。
+- **必调**：所有绑定单股的报告。**先调用本工具，再用返回结果写 §10**。
 - 输出：List[FinancialQualityV3]，最新一期季报/中报/年报一条。
 - 渲染成表：period/营收同比/毛利率/同比变化/经营现金流同比/应收/营收(%)/存货天数/合同负债同比/capex 强度/产能利用率/分业务收入占比/red_flags。
 - 财务字段来自 get_stock_info/行情工具直接返回，**禁止编造任何具体数字**。
+
+### §10.b 产能展望与预测 → analyze_capacity_outlook
+- **必调**：所有绑定单股的报告。**先调用本工具，再用返回结果写 §10.b**。
+- 输入：ticker / company / industry_hint + historical_capacity（来自 §10）+ demand_drivers（来自 §9）+ expansion_projects（来自 §10）+ 行业产能模板。
+- 输出：CapacityOutlookV3（含短期3个月和中长期6-12个月预测）。
+- 渲染成 Markdown：10.b.1 历史产能跟踪 / 10.b.2 短期预测（未来3个月）/ 10.b.3 中期展望（6-12个月）/ 10.b.4 供需格局与风险提示。
+- 数据不足时 trend="insufficient_data"，不阻断报告生成。
+- **与 §10 关系**：§10 存历史数据，§10.b 存预测数据，两者独立但关联。
 
 ### 数据完整性披露（脚注）
 报告末尾「## 数据完整性披露」小节按 SupplyChainDeepDiveV3.section_status() 渲染：
@@ -272,7 +291,7 @@ _SUPPLY_CHAIN_SYSTEM_PROMPT_TEMPLATE = """你是「供应链分析」助手，�
 1. 工具结果自行摘要（单次调研总步数 ≤ 40）。
 2. 证据严格分级（primary/media/analysis/social/rumor/kb_doc）。
 3. 禁止直接买卖指令 / 禁止炒作 / 禁止保证收益 / 禁止编造数字。
-4. §6-§10 单节失败不要让整篇报告崩溃——单节失败标「待核验」，其它节继续。
+4. §6-§10.b 单节失败不要让整篇报告崩溃——单节失败标「待核验」，其它节继续。
 5. **避免重复**：§5（白话摘要）与 §7（量化数据）分开写；§5.3 与 §7 不要重复列竞品。
 """
 
@@ -285,6 +304,240 @@ def _read_text(path: str, label: str) -> str:
     except OSError as exc:
         logger.warning("[SupplyChainExecutor] 读取 %s 失败 (%s): %s", label, path, exc)
         return f"（{label} 加载失败，请检查数据目录）"
+
+
+def _extract_ticker_company(message: str) -> tuple[str, str]:
+    """从用户 message 中提取 ticker 和 company。
+
+    支持格式：
+    - "分析主题：\n新莱应材 300260 SZ 供应链分析"
+    - "【新莱应材】300260 SZ..."
+    - "新莱应材 300260 SZ..."
+    """
+    import re
+
+    ticker = ""
+    company = ""
+    # 提取股票代码（6 位数字）
+    m = re.search(r"\b(\d{6})\b", message)
+    if m:
+        ticker = m.group(1)
+    # 提取公司名（第一行第一个 2-6 个中文字）
+    lines = message.split("\n")
+    first_text_line = next((l.strip() for l in lines if l.strip() and not l.strip()[0].isdigit()), "")
+    m2 = re.search(r"[一-鿿]{2,6}", first_text_line)
+    if m2:
+        company = m2.group(0)
+    return ticker, company
+
+
+def _call_v3_tools_directly(
+    tool_registry: Any,
+    ticker: str,
+    company: str,
+    tool_calls_log: list[dict],
+) -> dict[str, Any]:
+    """[v3 post-processing] 直接调用 v3 工具，确保结构化数据被收集。
+
+    在 ReAct 循环结束后，如果 LLM 没有调用 v3 工具（LLM 直接生成了报告内容
+    而非调用工具），这里直接调用它们以确保 deep_dive_obj 被填充。
+    """
+    import json as _json
+
+    sections_executed: list[str] = []
+    data: dict[str, Any] = {"ticker": ticker, "company": company}
+
+    # 从 tool_calls_log 中提取历史数据，用于传给 capacity_outlook
+    historical_capacity = ""
+    financial_context = ""  # 营收、毛利率、capex 等财务信号
+    demand_drivers = ""
+    expansion_projects = ""
+
+    for entry in tool_calls_log:
+        if not entry.get("success"):
+            continue
+        raw = entry.get("result_str", "") or entry.get("result", "")
+        if not raw:
+            continue
+        try:
+            result_dict: dict[str, Any] = _json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+
+        if "financial_quality" in result_dict and isinstance(
+            result_dict.get("financial_quality"), list
+        ):
+            # 提取 capacity_utilization / financial metrics / expansion_projects
+            for rep in result_dict.get("financial_quality", []):
+                cap_util = rep.get("capacity_utilization_pct")
+                if cap_util is not None:
+                    historical_capacity += f"产能利用率: {cap_util}%\n"
+                # 收集财务指标用于产能推断
+                period = rep.get("period", "?")
+                rev_yoy = rep.get("revenue_yoy_pct")
+                gm = rep.get("gross_margin_pct")
+                ocf_yoy = rep.get("operating_cash_flow_yoy_pct")
+                capex = rep.get("capex_intensity_pct")
+                inv_days = rep.get("inventory_days")
+                ar_rev = rep.get("ar_to_revenue_pct")
+                segments = rep.get("revenue_segments", {})
+                if any(v is not None for v in [rev_yoy, gm, ocf_yoy, capex]):
+                    seg_str = (
+                        ", ".join(f"{k}={v}%" for k, v in segments.items())
+                        if segments
+                        else ""
+                    )
+                    financial_context += (
+                        f"{period}: "
+                        + (f"营收同比={rev_yoy}%" if rev_yoy is not None else "")
+                        + (f", 毛利率={gm}%" if gm is not None else "")
+                        + (f", 经营现金流同比={ocf_yoy}%" if ocf_yoy is not None else "")
+                        + (f", capex强度={capex}%" if capex is not None else "")
+                        + (f", 存货天数={inv_days}天" if inv_days is not None else "")
+                        + (f", 应收占比={ar_rev}%" if ar_rev is not None else "")
+                        + (f", 业务构成={seg_str}" if seg_str else "")
+                        + "\n"
+                    )
+                exp = rep.get("expansion_projects")
+                if exp:
+                    expansion_projects += f"{exp}\n"
+
+        if "industry_outlook" in result_dict and isinstance(
+            result_dict.get("industry_outlook"), list
+        ):
+            for ind in result_dict.get("industry_outlook", []):
+                demand = ind.get("demand_drivers", "")
+                if demand:
+                    demand_drivers += f"{demand}\n"
+
+    # 调用 6 个 v3 工具
+    v3_tool_map = {
+        "analyze_product_matrix": {
+            "ticker": ticker,
+            "company": company,
+            "market": "SZ" if ticker.startswith(("0", "3")) else "SH",
+            "industry_hint": "",
+        },
+        "analyze_market_position": {
+            "ticker": ticker,
+            "company": company,
+            "market": "SZ" if ticker.startswith(("0", "3")) else "SH",
+            "industry_hint": "",
+            "top_k": 5,
+        },
+        "extract_key_partners": {
+            "ticker": ticker,
+            "company": company,
+            "top_k": 5,
+        },
+        "analyze_industry_outlook": {
+            "ticker": ticker,
+            "company": company,
+            "top_k": 3,
+        },
+        "analyze_financial_quality": {
+            "ticker": ticker,
+            "company": company,
+            "market": "SZ" if ticker.startswith(("0", "3")) else "SH",
+            "industry_hint": "",
+            "top_k": 5,
+        },
+        "analyze_capacity_outlook": {
+            "ticker": ticker,
+            "company": company,
+            "industry_hint": "",
+            "historical_capacity": historical_capacity or "",
+            "financial_context": financial_context or "",
+            "demand_drivers": demand_drivers or "",
+            "expansion_projects": expansion_projects or "",
+        },
+    }
+
+    for tool_name, kwargs in v3_tool_map.items():
+        import sys as _sys
+        try:
+            result = tool_registry.execute(tool_name, **kwargs)
+            result_str = _json.dumps(result) if isinstance(result, dict) else str(result)
+            result_dict: dict[str, Any] = (
+                _json.loads(result_str) if isinstance(result_str, str) else {}
+            )
+            print(
+                f"[DEBUG] v3 tool {tool_name}: success result_len={len(result_str)} "
+                f"keys={list(result_dict.keys())}",
+                file=_sys.stderr, flush=True,
+            )
+        except Exception as exc:
+            print(
+                f"[DEBUG] v3 tool {tool_name}: EXCEPTION {exc}",
+                file=_sys.stderr, flush=True,
+            )
+            logger.debug(
+                "[SupplyChainExecutor] v3 tool %s 直接调用失败: %s", tool_name, exc
+            )
+            continue
+
+        # 解析结果 - 注意工具返回的 key 可能与 SupplyChainDeepDiveV3 字段名不同
+        if "product_matrix" in result_dict and isinstance(
+            result_dict.get("product_matrix"), list
+        ):
+            data["product_matrix"] = result_dict["product_matrix"]
+            if "product_matrix" not in sections_executed:
+                sections_executed.append("product_matrix")
+        elif "products" in result_dict and isinstance(result_dict.get("products"), list):
+            # analyze_product_matrix 返回 {"products": [...]} 而不是 "product_matrix"
+            data["product_matrix"] = result_dict["products"]
+            if "product_matrix" not in sections_executed:
+                sections_executed.append("product_matrix")
+        elif "market_position" in result_dict and isinstance(
+            result_dict.get("market_position"), list
+        ):
+            data["market_position"] = result_dict["market_position"]
+            if "market_position" not in sections_executed:
+                sections_executed.append("market_position")
+        elif "positions" in result_dict and isinstance(result_dict.get("positions"), list):
+            # analyze_market_position 返回 {"positions": [...]} 而不是 "market_position"
+            data["market_position"] = result_dict["positions"]
+            if "market_position" not in sections_executed:
+                sections_executed.append("market_position")
+        elif "key_customers" in result_dict or "key_suppliers" in result_dict:
+            if "key_customers" in result_dict:
+                data["key_customers"] = result_dict["key_customers"]
+            if "key_suppliers" in result_dict:
+                data["key_suppliers"] = result_dict["key_suppliers"]
+            if "key_partners" not in sections_executed:
+                sections_executed.append("key_partners")
+        elif "customers" in result_dict or "suppliers" in result_dict:
+            # extract_key_partners 返回 {"customers": [...], "suppliers": [...]}
+            if "customers" in result_dict:
+                data["key_customers"] = result_dict["customers"]
+            if "suppliers" in result_dict:
+                data["key_suppliers"] = result_dict["suppliers"]
+            if "key_partners" not in sections_executed:
+                sections_executed.append("key_partners")
+        elif "industry_outlook" in result_dict and isinstance(
+            result_dict.get("industry_outlook"), list
+        ):
+            data["industry_outlook"] = result_dict["industry_outlook"]
+            if "industry_outlook" not in sections_executed:
+                sections_executed.append("industry_outlook")
+        elif "outlooks" in result_dict and isinstance(result_dict.get("outlooks"), list):
+            # analyze_industry_outlook 返回 {"outlooks": [...]} 而不是 "industry_outlook"
+            data["industry_outlook"] = result_dict["outlooks"]
+            if "industry_outlook" not in sections_executed:
+                sections_executed.append("industry_outlook")
+        elif "reports" in result_dict and isinstance(result_dict.get("reports"), list):
+            data["financial_quality"] = result_dict["reports"]
+            if "financial_quality" not in sections_executed:
+                sections_executed.append("financial_quality")
+        elif "capacity_outlook" in result_dict:
+            outlook = result_dict.get("capacity_outlook")
+            if isinstance(outlook, dict):
+                data["capacity_outlook"] = outlook
+                if "capacity_outlook" not in sections_executed:
+                    sections_executed.append("capacity_outlook")
+
+    data["sections_executed"] = sections_executed
+    return data if sections_executed else None
 
 
 def build_supply_chain_system_prompt() -> str:
@@ -333,7 +586,7 @@ class SupplyChainExecutor:
         from src.agent.chat_context import build_agent_chat_context_bundle
         from src.agent.conversation import conversation_manager
         from src.agent.executor import AgentResult
-        from src.agent.runner import run_agent_loop
+        from src.agent.runner import _collect_v3_deep_dive_from_log, run_agent_loop
 
         system_prompt = build_supply_chain_system_prompt()
 
@@ -370,9 +623,47 @@ class SupplyChainExecutor:
                 f"[分析失败] {loop_result.error or '未知错误'}",
             )
 
+        # [v3] Extract v3 structured deep dive data from tool call results
+        deep_dive_obj = None
+        try:
+            ticker, company = _extract_ticker_company(message)
+            deep_dive_obj = _collect_v3_deep_dive_from_log(
+                loop_result.tool_calls_log, ticker, company
+            )
+            import sys
+            print(
+                f"[DEBUG] after _collect: deep_dive_obj={deep_dive_obj is not None} "
+                f"sections={deep_dive_obj.get('sections_executed') if deep_dive_obj else None} "
+                f"tool_calls={len(loop_result.tool_calls_log)}",
+                file=sys.stderr, flush=True,
+            )
+            # [v3 post-processing] If LLM skipped v3 tools, call them directly
+            if not deep_dive_obj or not deep_dive_obj.get("sections_executed"):
+                print(
+                    f"[DEBUG] LLM skipped v3 tools, calling directly for {ticker} {company}",
+                    file=sys.stderr, flush=True,
+                )
+                deep_dive_obj = _call_v3_tools_directly(
+                    self.tool_registry, ticker, company, loop_result.tool_calls_log
+                )
+                print(
+                    f"[DEBUG] after direct call: deep_dive_obj={deep_dive_obj is not None} "
+                    f"sections={deep_dive_obj.get('sections_executed') if deep_dive_obj else None}",
+                    file=sys.stderr, flush=True,
+                )
+            logger.info(
+                "[SupplyChainExecutor] deep_dive_obj: ticker=%r company=%r sections=%s",
+                ticker,
+                company,
+                deep_dive_obj.get("sections_executed") if deep_dive_obj else None,
+            )
+        except Exception as exc:
+            logger.warning("[SupplyChainExecutor] v3 deep_dive 解析失败: %s", exc)
+
         return AgentResult(
             success=loop_result.success,
             content=loop_result.content,
+            deep_dive_obj=deep_dive_obj,
             tool_calls_log=loop_result.tool_calls_log,
             total_steps=loop_result.total_steps,
             total_tokens=loop_result.total_tokens,

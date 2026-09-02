@@ -31,9 +31,17 @@ def markdown_to_plain_text(markdown_text: str) -> str:
     return text
 
 
-def chunk_content_by_max_bytes(content: str, max_bytes: int = 4096) -> List[str]:
-    """Split content into chunks by max bytes"""
-    chunks = []
+def chunk_content_by_max_bytes(
+    content: str, max_bytes: int = 4096, add_page_marker: bool = False
+) -> List[str]:
+    """Split content into chunks by max bytes.
+
+    Args:
+        content: Text to split.
+        max_bytes: Maximum bytes per chunk.
+        add_page_marker: If True, add a page separator marker between chunks.
+    """
+    chunks: List[str] = []
     current = ""
     for line in content.split('\n'):
         test = current + '\n' + line if current else line
@@ -45,6 +53,10 @@ def chunk_content_by_max_bytes(content: str, max_bytes: int = 4096) -> List[str]
             current = line
     if current:
         chunks.append(current)
+
+    if add_page_marker and len(chunks) > 1:
+        marker = '\n\n[page separator]\n\n'
+        return [chunks[0]] + [marker + c for c in chunks[1:]]
     return chunks
 
 

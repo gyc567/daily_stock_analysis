@@ -2512,6 +2512,338 @@ analyze_financial_quality_tool = ToolDefinition(
 
 
 # ============================================================
+# §10.b analyze_capacity_outlook
+# ============================================================
+
+
+_CAPACITY_OUTLOOK_PROMPT = """你是"产能展望分析师"助手。
+
+任务：基于以下信息，推断 **{company}（{ticker}）** 未来1-12个月的产能走势。
+严格输出 JSON（不要其他文字，不要 markdown 围栏，不要解释）：
+
+{{
+  "ticker": "{ticker}",
+  "company": "{company}",
+  "industry_unit_hint": "行业推荐单位（如'万片/月'、'GWh/年'）",
+  "historical_summary": "历史产能利用率摘要（如'近3期均值为 85.3%'）",
+  "historical_data_quality": "complete|partial|sparse|none",
+  "forecasts": [
+    {{
+      "time_window": "near_term_3_6m|mid_term_6_12m",
+      "period_label": "人类可读标签（如'2026-10'、'2026Q4'）",
+      "predicted_utilization_pct": 数值或 null（如 92.5）,
+      "predicted_output_volume": 数值或 null,
+      "predicted_output_unit": "单位（如'万台'、'GWh'）或 null",
+      "inference_basis": "推断依据摘要",
+      "demand_signals": ["下游订单饱满", "季节性旺季"],
+      "capacity_change_factors": ["新建产能释放", "爬坡良率提升"],
+      "confidence": "high|medium|low",
+      "evidence_strength": "primary|media|analysis|kb_doc"
+    }}
+  ],
+  "trend": "rising|stable|falling|volatile|insufficient_data",
+  "trend_rationale": "趋势判断依据",
+  "capacity_bottleneck_risk": "high|medium|low|unknown",
+  "demand_supply_balance": "tight|balanced|loose|unknown",
+  "expansion_plans": [
+    {{
+      "project_name": "项目名称",
+      "expected_completion": "预计投产时间（如'2026Q3'）或 null",
+      "expected_capacity_addition": "新增产能（如'1.5万千升/年'）或 null",
+      "progress_status": "planning|construction|ramping|completed",
+      "source": "信息来源",
+      "evidence_strength": "primary|media|analysis|kb_doc"
+    }}
+  ],
+  "data_source_notes": "数据来源说明",
+  "confidence": "high|medium|low"
+}}
+
+强制规则（务必遵守）：
+1. forecasts 数组至少返回 1 条，最多 7 条（短期3条+中期4条）
+2. near_term_3_6m 优先返回 3 条月度预测，mid_term_6_12m 返回季度预测
+3. 历史数据不足时，historical_data_quality 设为 "partial" 或 "sparse"，使用行业均值填充并标注
+4. 所有数值字段找不到就 null，不要编造数字
+5. demand_signals / capacity_change_factors 从给定的需求信号和扩产进度中提取
+6. trend 须与 forecasts 数据一致
+7. 严禁返回空 forecasts 数组（即使数据不足也返回 trend: "insufficient_data"）
+
+【公司信息】ticker={ticker}  company={company}  industry_hint={industry_hint}
+【历史产能数据】（来自 §10 FinancialQualityV3）
+{historical_capacity}
+
+【财务上下文】（来自 §10 FinancialQualityV3 真实数据：营收、毛利、现金流、capex强度等）
+{financial_context}
+
+【需求信号】（来自 §9 IndustryOutlookV3.demand_drivers）
+{demand_drivers}
+
+【扩产进度】（来自 FinancialQualityV3.expansion_projects）
+{expansion_projects}
+
+【行业产能模板】（用于数据缺失时降级推断）
+industry_unit_hint: {capacity_unit_hint}
+benchmark_utilization: {benchmark_utilization}%
+seasonal_pattern: {seasonal_pattern}
+"""
+
+
+def _handle_analyze_capacity_outlook(
+    ticker: str,
+    company: str,
+    industry_hint: str = "",
+    historical_capacity: str = "",
+    financial_context: str = "",
+    demand_drivers: str = "",
+    expansion_projects: str = "",
+    capacity_unit_hint: str = "",
+    benchmark_utilization: float = 75.0,
+    seasonal_pattern: str = "",
+) -> Dict[str, Any]:
+    """§10.b 产能展望与预测。
+
+    失败返回 ``{"error": "...", "capacity_outlook": null}``。
+    基于历史产能数据 + 财务上下文 + 下游需求信号 + 扩产进度，由 LLM 推断未来走势。
+    """
+    # 如果 capacity_unit_hint 等为空，从行业模板查询
+    if not capacity_unit_hint or not seasonal_pattern:
+        from src.services.supply_chain_data_service import get_industry_capacity_template
+        tmpl = get_industry_capacity_template(industry_hint)
+        capacity_unit_hint = capacity_unit_hint or tmpl.get("capacity_unit_hint", "")
+        benchmark_utilization = tmpl.get("benchmark_utilization", 75.0)
+        seasonal_pattern = seasonal_pattern or tmpl.get("seasonal_pattern", "")
+
+    try:
+        llm = _get_v3_chat_llm()
+
+        if llm is not None:
+            prompt = _CAPACITY_OUTLOOK_PROMPT.format(
+                ticker=ticker,
+                company=company,
+                industry_hint=industry_hint,
+                historical_capacity=historical_capacity or "无历史数据",
+                financial_context=financial_context or "无财务上下文数据",
+                demand_drivers=demand_drivers or "无需求信号数据",
+                expansion_projects=expansion_projects or "无扩产项目数据",
+                capacity_unit_hint=capacity_unit_hint or "未知",
+                benchmark_utilization=benchmark_utilization,
+                seasonal_pattern=seasonal_pattern or "未知",
+            )
+            try:
+                response = llm.call_text(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    max_tokens=3000,
+                )
+                raw = _parse_v3_json(response.content)
+                if raw and raw.get("ticker"):
+                    return _finalize_capacity_outlook(raw, ticker, company)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] capacity_outlook LLM 失败: %s", exc)
+
+        # LLM 失败时返回 insufficient_data 兜底
+        return _build_fallback_capacity_outlook(ticker, company, industry_hint)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[SupplyChain v3] capacity_outlook 失败 (%s): %s", ticker, exc
+        )
+        return {"error": str(exc), "ticker": ticker, "capacity_outlook": None}
+
+
+def _finalize_capacity_outlook(
+    raw: Dict[str, Any], ticker: str, company: str
+) -> Dict[str, Any]:
+    """校验并最终化 LLM 输出的产能展望。"""
+    from src.schemas.supply_chain import (
+        CapacityOutlookV3,
+        CapacityForecastPeriodV3,
+        CapacityChangeFactor,
+        DemandSignal,
+        ExpansionProjectV3,
+    )
+    from decimal import Decimal
+
+    # 合法的 Literal 取值（用于过滤 LLM 返回的未知同义词）
+    VALID_DEMAND_SIGNALS: set[str] = {
+        "下游订单饱满", "行业出货量增长", "在手订单充裕",
+        "季节性旺季", "扩产产能释放", "需求回落", "限产检修",
+    }
+    VALID_CAPACITY_CHANGE_FACTORS: set[str] = {
+        "新建产能释放", "爬坡良率提升", "季节性检修",
+        "限产政策", "设备升级改造", "外协加工",
+    }
+
+    try:
+        # 构建 forecasts
+        forecasts = []
+        for f in raw.get("forecasts", []):
+            try:
+                # 过滤 demand_signals：只保留合法 Literal 值
+                demand_signals = [
+                    s for s in f.get("demand_signals", [])
+                    if s in VALID_DEMAND_SIGNALS
+                ]
+                # 过滤 capacity_change_factors：只保留合法 Literal 值
+                capacity_change_factors = [
+                    s for s in f.get("capacity_change_factors", [])
+                    if s in VALID_CAPACITY_CHANGE_FACTORS
+                ]
+                forecast = CapacityForecastPeriodV3(
+                    time_window=f.get("time_window", "near_term_3_6m"),
+                    period_label=f.get("period_label", ""),
+                    predicted_utilization_pct=(
+                        Decimal(str(f["predicted_utilization_pct"]))
+                        if f.get("predicted_utilization_pct") is not None
+                        else None
+                    ),
+                    predicted_output_volume=(
+                        Decimal(str(f["predicted_output_volume"]))
+                        if f.get("predicted_output_volume") is not None
+                        else None
+                    ),
+                    predicted_output_unit=f.get("predicted_output_unit"),
+                    inference_basis=f.get("inference_basis", ""),
+                    demand_signals=demand_signals,
+                    capacity_change_factors=capacity_change_factors,
+                    confidence=f.get("confidence", "medium"),
+                    evidence_strength=f.get("evidence_strength", "analysis"),
+                )
+                forecasts.append(forecast)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] forecast validate 失败: %s", exc)
+                continue
+
+        # 构建 expansion_plans
+        expansion_plans = []
+        for p in raw.get("expansion_plans", []):
+            try:
+                project = ExpansionProjectV3(
+                    project_name=p.get("project_name", ""),
+                    expected_completion=p.get("expected_completion"),
+                    expected_capacity_addition=p.get("expected_capacity_addition"),
+                    progress_status=p.get("progress_status", "planning"),
+                    source=p.get("source", "年报披露"),
+                    evidence_strength=p.get("evidence_strength", "analysis"),
+                )
+                expansion_plans.append(project)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[SupplyChain v3] expansion project validate 失败: %s", exc)
+                continue
+
+        outlook = CapacityOutlookV3(
+            ticker=ticker,
+            company=company,
+            fetched_at=None,
+            industry_unit_hint=raw.get("industry_unit_hint"),
+            historical_summary=raw.get("historical_summary", ""),
+            historical_data_quality=raw.get("historical_data_quality", "none"),
+            forecasts=forecasts,
+            trend=raw.get("trend", "insufficient_data"),
+            trend_rationale=raw.get("trend_rationale", ""),
+            capacity_bottleneck_risk=raw.get("capacity_bottleneck_risk", "unknown"),
+            demand_supply_balance=raw.get("demand_supply_balance", "unknown"),
+            expansion_plans=expansion_plans,
+            data_source_notes=raw.get("data_source_notes", ""),
+            confidence=raw.get("confidence", "low"),
+        )
+        return {"ticker": ticker, "capacity_outlook": outlook.model_dump()}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[SupplyChain v3] capacity_outlook finalize 失败: %s", exc)
+        return _build_fallback_capacity_outlook(ticker, company, "")
+
+
+def _build_fallback_capacity_outlook(
+    ticker: str, company: str, industry_hint: str
+) -> Dict[str, Any]:
+    """LLM 输出无效时返回 insufficient_data 兜底。"""
+    from src.schemas.supply_chain import CapacityOutlookV3
+
+    outlook = CapacityOutlookV3(
+        ticker=ticker,
+        company=company,
+        historical_summary="",
+        historical_data_quality="none",
+        forecasts=[],
+        trend="insufficient_data",
+        trend_rationale="数据不足，无法进行产能展望预测",
+        capacity_bottleneck_risk="unknown",
+        demand_supply_balance="unknown",
+        expansion_plans=[],
+        data_source_notes="产能数据不可用（LLM 分析失败）",
+        confidence="low",
+    )
+    return {"ticker": ticker, "capacity_outlook": outlook.model_dump()}
+
+
+analyze_capacity_outlook_tool = ToolDefinition(
+    name="analyze_capacity_outlook",
+    description=(
+        "[v3 §10.b] 产能展望与预测。给定股票代码/公司名/历史产能数据/需求信号/扩产进度，"
+        "返回 CapacityOutlookV3（含短期3个月和中长期6-12个月预测）。"
+        "基于需求驱动推断，结合行业模板降级。数据不足时返回 insufficient_data。失败返回 {error}。"
+    ),
+    parameters=[
+        ToolParameter("ticker", "string", "股票代码", required=True),
+        ToolParameter("company", "string", "公司名称", required=True),
+        ToolParameter(
+            "industry_hint", "string", "行业提示", required=False, default=""
+        ),
+        ToolParameter(
+            "historical_capacity",
+            "string",
+            "历史产能数据摘要（来自 §10 FinancialQualityV3）",
+            required=False,
+            default="",
+        ),
+        ToolParameter(
+            "financial_context",
+            "string",
+            "财务上下文（营收/毛利/capex/现金流等来自 §10 FinancialQualityV3 真实数据）",
+            required=False,
+            default="",
+        ),
+        ToolParameter(
+            "demand_drivers",
+            "string",
+            "需求信号（来自 §9 IndustryOutlookV3.demand_drivers）",
+            required=False,
+            default="",
+        ),
+        ToolParameter(
+            "expansion_projects",
+            "string",
+            "扩产进度（来自 FinancialQualityV3.expansion_projects）",
+            required=False,
+            default="",
+        ),
+        ToolParameter(
+            "capacity_unit_hint",
+            "string",
+            "行业推荐产量单位",
+            required=False,
+            default="",
+        ),
+        ToolParameter(
+            "benchmark_utilization",
+            "float",
+            "行业产能利用率均值（%）",
+            required=False,
+            default=75.0,
+        ),
+        ToolParameter(
+            "seasonal_pattern",
+            "string",
+            "行业季节性模式（如'Q4>Q2>Q3>Q1'）",
+            required=False,
+            default="",
+        ),
+    ],
+    handler=_handle_analyze_capacity_outlook,
+    category="analysis",
+)
+
+
+# ============================================================
 # v3 工具注册
 # ============================================================
 
@@ -2522,10 +2854,12 @@ ALL_SUPPLY_CHAIN_TOOLS = [
     search_clue_hype_tool,
     verify_supply_chain_evidence_tool,
     search_supply_chain_kb_tool,
-    # [v3] 深度小节工具（产品·客户·竞争·前景 五维补强）
+    # [v3] 深度小节工具（产品·客户·竞争·前景 产能 五维补强）
     analyze_product_matrix_tool,
     analyze_market_position_tool,
     extract_key_partners_tool,
     analyze_industry_outlook_tool,
     analyze_financial_quality_tool,
+    # [v3 §10.b] 产能展望与预测
+    analyze_capacity_outlook_tool,
 ]

@@ -141,4 +141,5 @@ class ChanlunExecutor:
             model=loop_result.model,
             error=loop_result.error,
             messages=loop_result.messages,
+            deep_dive_obj=getattr(loop_result, "deep_dive_obj", None),
         )

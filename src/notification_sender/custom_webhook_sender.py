@@ -404,7 +404,7 @@ class CustomWebhookSender:
             body_bytes = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
             if body_bytes > max_bytes:
                 hard_budget = max(200, budget - (body_bytes - max_bytes) - 200)
-                payload["markdown"]["text"], _ = slice_at_max_bytes(
+                payload["markdown"]["text"] = slice_at_max_bytes(
                     cast(str, payload["markdown"]["text"]), hard_budget
                 )
 

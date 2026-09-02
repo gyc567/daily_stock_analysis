@@ -53,6 +53,7 @@ class AgentResult:
     model: str = ""                            # comma-separated models used (supports fallback)
     error: Optional[str] = None
     messages: List[Dict[str, Any]] = field(default_factory=list)
+    deep_dive_obj: Optional[Dict[str, Any]] = None  # [v3] supply-chain deep dive data
 
 
 # ============================================================
@@ -774,6 +775,7 @@ class AgentExecutor:
                 model=model_str,
                 error=None if dashboard else "Failed to parse dashboard JSON from agent response",
                 messages=loop_result.messages,
+                deep_dive_obj=getattr(loop_result, "deep_dive_obj", None),
             )
 
         return AgentResult(
@@ -787,6 +789,7 @@ class AgentExecutor:
             model=model_str,
             error=loop_result.error,
             messages=loop_result.messages,
+            deep_dive_obj=getattr(loop_result, "deep_dive_obj", None),
         )
 
     def _build_user_message(self, task: str, context: Optional[Dict[str, Any]] = None) -> str:
