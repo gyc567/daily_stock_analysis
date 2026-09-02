@@ -349,6 +349,7 @@ def _call_v3_tools_directly(
 
     # 从 tool_calls_log 中提取历史数据，用于传给 capacity_outlook
     historical_capacity = ""
+    financial_context = ""  # 营收、毛利率、capex 等财务信号
     demand_drivers = ""
     expansion_projects = ""
 
@@ -366,11 +367,37 @@ def _call_v3_tools_directly(
         if "financial_quality" in result_dict and isinstance(
             result_dict.get("financial_quality"), list
         ):
-            # 提取 capacity_utilization / expansion_projects
+            # 提取 capacity_utilization / financial metrics / expansion_projects
             for rep in result_dict.get("financial_quality", []):
                 cap_util = rep.get("capacity_utilization_pct")
                 if cap_util is not None:
                     historical_capacity += f"产能利用率: {cap_util}%\n"
+                # 收集财务指标用于产能推断
+                period = rep.get("period", "?")
+                rev_yoy = rep.get("revenue_yoy_pct")
+                gm = rep.get("gross_margin_pct")
+                ocf_yoy = rep.get("operating_cash_flow_yoy_pct")
+                capex = rep.get("capex_intensity_pct")
+                inv_days = rep.get("inventory_days")
+                ar_rev = rep.get("ar_to_revenue_pct")
+                segments = rep.get("revenue_segments", {})
+                if any(v is not None for v in [rev_yoy, gm, ocf_yoy, capex]):
+                    seg_str = (
+                        ", ".join(f"{k}={v}%" for k, v in segments.items())
+                        if segments
+                        else ""
+                    )
+                    financial_context += (
+                        f"{period}: "
+                        + (f"营收同比={rev_yoy}%" if rev_yoy is not None else "")
+                        + (f", 毛利率={gm}%" if gm is not None else "")
+                        + (f", 经营现金流同比={ocf_yoy}%" if ocf_yoy is not None else "")
+                        + (f", capex强度={capex}%" if capex is not None else "")
+                        + (f", 存货天数={inv_days}天" if inv_days is not None else "")
+                        + (f", 应收占比={ar_rev}%" if ar_rev is not None else "")
+                        + (f", 业务构成={seg_str}" if seg_str else "")
+                        + "\n"
+                    )
                 exp = rep.get("expansion_projects")
                 if exp:
                     expansion_projects += f"{exp}\n"
@@ -420,6 +447,7 @@ def _call_v3_tools_directly(
             "company": company,
             "industry_hint": "",
             "historical_capacity": historical_capacity or "",
+            "financial_context": financial_context or "",
             "demand_drivers": demand_drivers or "",
             "expansion_projects": expansion_projects or "",
         },

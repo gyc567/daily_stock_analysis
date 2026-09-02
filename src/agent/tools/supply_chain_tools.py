@@ -2572,6 +2572,9 @@ _CAPACITY_OUTLOOK_PROMPT = """你是"产能展望分析师"助手。
 【历史产能数据】（来自 §10 FinancialQualityV3）
 {historical_capacity}
 
+【财务上下文】（来自 §10 FinancialQualityV3 真实数据：营收、毛利、现金流、capex强度等）
+{financial_context}
+
 【需求信号】（来自 §9 IndustryOutlookV3.demand_drivers）
 {demand_drivers}
 
@@ -2590,6 +2593,7 @@ def _handle_analyze_capacity_outlook(
     company: str,
     industry_hint: str = "",
     historical_capacity: str = "",
+    financial_context: str = "",
     demand_drivers: str = "",
     expansion_projects: str = "",
     capacity_unit_hint: str = "",
@@ -2599,7 +2603,7 @@ def _handle_analyze_capacity_outlook(
     """§10.b 产能展望与预测。
 
     失败返回 ``{"error": "...", "capacity_outlook": null}``。
-    基于历史产能数据 + 下游需求信号 + 扩产进度，由 LLM 推断未来走势。
+    基于历史产能数据 + 财务上下文 + 下游需求信号 + 扩产进度，由 LLM 推断未来走势。
     """
     # 如果 capacity_unit_hint 等为空，从行业模板查询
     if not capacity_unit_hint or not seasonal_pattern:
@@ -2618,6 +2622,7 @@ def _handle_analyze_capacity_outlook(
                 company=company,
                 industry_hint=industry_hint,
                 historical_capacity=historical_capacity or "无历史数据",
+                financial_context=financial_context or "无财务上下文数据",
                 demand_drivers=demand_drivers or "无需求信号数据",
                 expansion_projects=expansion_projects or "无扩产项目数据",
                 capacity_unit_hint=capacity_unit_hint or "未知",
@@ -2787,6 +2792,13 @@ analyze_capacity_outlook_tool = ToolDefinition(
             "historical_capacity",
             "string",
             "历史产能数据摘要（来自 §10 FinancialQualityV3）",
+            required=False,
+            default="",
+        ),
+        ToolParameter(
+            "financial_context",
+            "string",
+            "财务上下文（营收/毛利/capex/现金流等来自 §10 FinancialQualityV3 真实数据）",
             required=False,
             default="",
         ),
