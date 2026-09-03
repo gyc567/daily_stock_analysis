@@ -170,14 +170,15 @@ jobs:
           if [ -z "$PY_FILES" ]; then
             echo "No Python files to check" >> $GITHUB_STEP_SUMMARY
           else
-            RESULT=$(flake8 $PY_FILES --select=E9,F63,F7,F82 --format='%(path)s:%(row)d: %(code)s %(text)s' 2>/dev/null || true)
-            if [ -n "$RESULT" ]; then
-              echo "WARNING: Found issues:" >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              echo "$RESULT" >> $GITHUB_STEP_SUMMARY
+            set -o pipefail
+            flake8 $PY_FILES --select=E9,F63,F7,F82 --format='%(path)s:%(row)d: %(code)s %(text)s' > /tmp/flake8_result.txt 2>&1
+            FLAKE8_EXIT=$?
+            if [ $FLAKE8_EXIT -ne 0 ] && [ -s /tmp/flake8_result.txt ]; then
+              echo "WARNING: Found issues (exit $FLAKE8_EXIT):" >> $GITHUB_STEP_SUMMARY
+              cat /tmp/flake8_result.txt >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
               exit 1
-            else
+            elif [ $FLAKE8_EXIT -eq 0 ]; then
               echo "No serious code issues found" >> $GITHUB_STEP_SUMMARY
             fi
           fi
