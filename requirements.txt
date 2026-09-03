@@ -55,6 +55,7 @@ markdown2>=2.4.0            # Markdown to HTML
 imgkit>=1.2.0              # Markdown to image; requires wkhtmltopdf
 weasyprint>=60.0           # Markdown to PDF (deep research reports); HTML/CSS via Pango/Cairo, correct CJK/list/code-block/emoji rendering; needs system libs (pango/cairo/glib), see docker/Dockerfile
 fake-useragent>=1.4.0       # Random User-Agent support
+agent-reach @ git+https://github.com/Panniantong/Agent-Reach.git  # Social/rumor evidence: xueqiu (雪球) hot posts + Jina web reader; channels/xueqiu.py needs login Cookie
 httpx[socks]                # HTTP client with SOCKS proxy support; optional OpenAI dependency
 dingtalk-stream >= 0.24.3    # DingTalk Stream SDK
 # Database
