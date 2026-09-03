@@ -349,7 +349,7 @@ def _call_v3_tools_directly(
 
     # 从 tool_calls_log 中提取历史数据，用于传给 capacity_outlook
     historical_capacity = ""
-    financial_context = ""  # 营收、毛利率、capex 等财务信号
+    financial_context_lines: list[str] = []  # 营收、毛利率、capex 等财务信号
     demand_drivers = ""
     expansion_projects = ""
 
@@ -387,7 +387,7 @@ def _call_v3_tools_directly(
                         if segments
                         else ""
                     )
-                    financial_context += (
+                    financial_context_lines.append(
                         f"{period}: "
                         + (f"营收同比={rev_yoy}%" if rev_yoy is not None else "")
                         + (f", 毛利率={gm}%" if gm is not None else "")
@@ -396,7 +396,6 @@ def _call_v3_tools_directly(
                         + (f", 存货天数={inv_days}天" if inv_days is not None else "")
                         + (f", 应收占比={ar_rev}%" if ar_rev is not None else "")
                         + (f", 业务构成={seg_str}" if seg_str else "")
-                        + "\n"
                     )
                 exp = rep.get("expansion_projects")
                 if exp:
@@ -409,6 +408,30 @@ def _call_v3_tools_directly(
                 demand = ind.get("demand_drivers", "")
                 if demand:
                     demand_drivers += f"{demand}\n"
+
+    # 补充 Baostock 真实季频财务数据（作为 financial_context 的底仓）
+    try:
+        import pandas as _pd
+        from data_provider.baostock_fetcher import BaostockFetcher
+        bs_df = BaostockFetcher().get_financial_data(ticker, start_year="2022")
+        if bs_df is not None and not bs_df.empty:
+            for _, row in bs_df.tail(4).iterrows():
+                parts = [f"Baostock 季频数据 (报告期 {row.name})"]
+                for col, label in [
+                    ("revenue_yoy_pct", "营收同比"),
+                    ("gross_margin_pct", "毛利率"),
+                    ("roe_pct", "ROE"),
+                    ("debt_to_asset_pct", "资产负债率"),
+                    ("inventory_turnover_days", "存货周转天数"),
+                    ("operating_cf_to_revenue", "经营现金流/营收"),
+                ]:
+                    val = row.get(col)
+                    if col in row and val is not None and not _pd.isna(val):
+                        parts.append(f"{label}={val:.2f}")
+                if len(parts) > 1:
+                    financial_context_lines.append(", ".join(parts))
+    except Exception:
+        pass  # Baostock 失败不影响主流程
 
     # 调用 6 个 v3 工具
     v3_tool_map = {
@@ -447,7 +470,7 @@ def _call_v3_tools_directly(
             "company": company,
             "industry_hint": "",
             "historical_capacity": historical_capacity or "",
-            "financial_context": financial_context or "",
+            "financial_context": "\n".join(financial_context_lines) or "",
             "demand_drivers": demand_drivers or "",
             "expansion_projects": expansion_projects or "",
         },
