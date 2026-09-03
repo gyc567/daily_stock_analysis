@@ -40,48 +40,48 @@ permissions:
 jobs:
   # ==================== 安全检查（检测敏感文件修改）====================
   security-check:
-    name: Security check
+    name: 🔒 安全检查
     runs-on: ubuntu-latest
     outputs:
       safe_to_run: ${{ steps.check_sensitive.outputs.safe_to_run }}
       sensitive_files_changed: ${{ steps.check_sensitive.outputs.sensitive_files_changed }}
-
+    
     steps:
-      - name: Checkout
+      - name: 📥 检出代码
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      - name: Fetch base branch
+      
+      - name: 🔄 获取 base 分支
         run: git fetch origin ${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}
-
-      - name: Check sensitive files
+      
+      - name: 🔒 检查敏感文件修改
         id: check_sensitive
         run: |
           BASE_REF="${{ github.base_ref || 'main' }}"
           SENSITIVE_FILES=$(git diff --name-only origin/$BASE_REF...HEAD | grep -E '^(\.github/workflows/.*\.yml|\.github/scripts/.*\.py)$' || echo "")
           
           if [ -n "$SENSITIVE_FILES" ]; then
-            echo "WARNING: Sensitive files modified, manual review required" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **检测到敏感文件修改，需要人工审核！**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Modified sensitive files:" >> $GITHUB_STEP_SUMMARY
+            echo "修改的敏感文件：" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             echo "$SENSITIVE_FILES" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Marked as sensitive change; manual review recommended." >> $GITHUB_STEP_SUMMARY
+            echo "已标记为敏感变更，请重点人工复核；自动流程继续执行。" >> $GITHUB_STEP_SUMMARY
             echo "sensitive_files_changed=true" >> $GITHUB_OUTPUT
             echo "safe_to_run=true" >> $GITHUB_OUTPUT
           else
-            echo "No sensitive files modified" >> $GITHUB_STEP_SUMMARY
+            echo "✅ 未检测到敏感文件修改" >> $GITHUB_STEP_SUMMARY
             echo "sensitive_files_changed=false" >> $GITHUB_OUTPUT
             echo "safe_to_run=true" >> $GITHUB_OUTPUT
           fi
 
   # ==================== 静态检查（先于 AI 审查）====================
   auto-check:
-    name: Static check
+    name: 🔍 静态检查
     runs-on: ubuntu-latest
     needs: [security-check]
     if: needs.security-check.outputs.safe_to_run == 'true'
@@ -91,30 +91,31 @@ jobs:
       has_reviewable_changes: ${{ steps.check_files.outputs.has_reviewable_changes }}
     
     steps:
-      - name: Checkout
+      - name: 📥 检出代码
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      - name: Fetch base branch
+      
+      - name: 🔄 获取 base 分支
         run: git fetch origin ${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}
-
-      - name: Setup Python
+      
+      - name: 🐍 设置 Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install --upgrade pip flake8
-
-      - name: 检查变更文件
+      
+      - name: 📦 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install flake8
+      
+      - name: 📋 检查变更文件
         id: check_files
         run: |
           BASE_REF="${{ github.base_ref || 'main' }}"
-          # git diff --name-only 过滤 + grep 二次保险，确保只有 Python 文件进 flake8
-          CHANGED_FILES=$(git diff --name-only origin/$BASE_REF...HEAD -- '*.py' 2>/dev/null | grep '\.py$' | tr '\n' ' ' || echo "")
+          CHANGED_FILES=$(git diff --name-only origin/$BASE_REF...HEAD -- '*.py' 2>/dev/null || echo "")
           REVIEWABLE_FILES=$(git diff --name-only origin/$BASE_REF...HEAD -- '*.py' '*.md' 'docs/**' 'README.md' 'AGENTS.md' 'requirements.txt' '.github/requirements-ci.txt' 'pyproject.toml' 'setup.cfg' '.github/PULL_REQUEST_TEMPLATE.md' '.github/workflows/**' '.github/scripts/**' 2>/dev/null || echo "")
 
           if [ -z "$REVIEWABLE_FILES" ]; then
@@ -133,7 +134,7 @@ jobs:
             echo "EOF" >> $GITHUB_ENV
           fi
       
-      - name: Python syntax check
+      - name: 🐍 Python 语法检查
         id: syntax
         if: steps.check_files.outputs.has_py_changes == 'true'
         run: |
@@ -163,29 +164,35 @@ jobs:
       - name: Flake8 critical check
         if: steps.check_files.outputs.has_py_changes == 'true'
         run: |
-          echo "## 🔎 代码质量检查" >> $GITHUB_STEP_SUMMARY
-          RESULT=$(flake8 $CHANGED_FILES --select=E9,F63,F7,F82 --format='%(path)s:%(row)d: %(code)s %(text)s' 2>/dev/null || true)
-          if [ -n "$RESULT" ]; then
-            echo "⚠️ 发现以下问题：" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "$RESULT" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit 1
+          echo "## Flake8 quality check" >> $GITHUB_STEP_SUMMARY
+          # Double-filter: ensure only .py files reach flake8
+          PY_FILES=$(echo "$CHANGED_FILES" | grep '\.py$' | tr '\n' ' ')
+          if [ -z "$PY_FILES" ]; then
+            echo "No Python files to check" >> $GITHUB_STEP_SUMMARY
           else
-            echo "✅ 未发现严重代码问题" >> $GITHUB_STEP_SUMMARY
+            RESULT=$(flake8 $PY_FILES --select=E9,F63,F7,F82 --format='%(path)s:%(row)d: %(code)s %(text)s' 2>/dev/null || true)
+            if [ -n "$RESULT" ]; then
+              echo "WARNING: Found issues:" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "$RESULT" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              exit 1
+            else
+              echo "No serious code issues found" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
       
-      - name: Change stats
+      - name: 📊 变更统计
         run: |
           BASE_REF="${{ github.base_ref || 'main' }}"
-          echo "## Change statistics" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 变更统计" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           STATS=$(git diff --stat origin/$BASE_REF...HEAD 2>/dev/null | tail -1)
           echo "$STATS" >> $GITHUB_STEP_SUMMARY
 
   # ==================== AI 代码审查（依赖静态检查通过）====================
   ai-review:
-    name: AI review
+    name: 🤖 AI 代码审查
     runs-on: ubuntu-latest
     needs: [security-check, auto-check]
     if: |
@@ -195,20 +202,20 @@ jobs:
       vars.ENABLE_AI_REVIEW != 'false'
 
     steps:
-      - name: Checkout PR code
+      - name: 📥 检出 PR 代码
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           path: pr-code
 
-      - name: Fetch base branch
+      - name: 🔄 获取 base 分支
         working-directory: pr-code
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
         run: git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
 
-      - name: OCR AI review
+      - name: 🤖 OCR AI 审查
         working-directory: pr-code
         env:
           OCR_NO_UPDATE: 1
@@ -224,7 +231,7 @@ jobs:
             --max-tokens-budget 8000 \
             2>&1 | tee ai_review_result.txt
 
-      - name: Upload review result
+      - name: 📤 上传审查结果
         uses: actions/upload-artifact@v6
         if: always()
         with:
