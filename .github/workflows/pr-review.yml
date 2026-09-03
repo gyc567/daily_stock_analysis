@@ -40,48 +40,48 @@ permissions:
 jobs:
   # ==================== 安全检查（检测敏感文件修改）====================
   security-check:
-    name: 🔒 安全检查
+    name: Security check
     runs-on: ubuntu-latest
     outputs:
       safe_to_run: ${{ steps.check_sensitive.outputs.safe_to_run }}
       sensitive_files_changed: ${{ steps.check_sensitive.outputs.sensitive_files_changed }}
-    
+
     steps:
-      - name: 📥 检出代码
+      - name: Checkout
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      
-      - name: 🔄 获取 base 分支
+
+      - name: Fetch base branch
         run: git fetch origin ${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}
-      
-      - name: 🔒 检查敏感文件修改
+
+      - name: Check sensitive files
         id: check_sensitive
         run: |
           BASE_REF="${{ github.base_ref || 'main' }}"
           SENSITIVE_FILES=$(git diff --name-only origin/$BASE_REF...HEAD | grep -E '^(\.github/workflows/.*\.yml|\.github/scripts/.*\.py)$' || echo "")
           
           if [ -n "$SENSITIVE_FILES" ]; then
-            echo "⚠️ **检测到敏感文件修改，需要人工审核！**" >> $GITHUB_STEP_SUMMARY
+            echo "WARNING: Sensitive files modified, manual review required" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "修改的敏感文件：" >> $GITHUB_STEP_SUMMARY
+            echo "Modified sensitive files:" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             echo "$SENSITIVE_FILES" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "已标记为敏感变更，请重点人工复核；自动流程继续执行。" >> $GITHUB_STEP_SUMMARY
+            echo "Marked as sensitive change; manual review recommended." >> $GITHUB_STEP_SUMMARY
             echo "sensitive_files_changed=true" >> $GITHUB_OUTPUT
             echo "safe_to_run=true" >> $GITHUB_OUTPUT
           else
-            echo "✅ 未检测到敏感文件修改" >> $GITHUB_STEP_SUMMARY
+            echo "No sensitive files modified" >> $GITHUB_STEP_SUMMARY
             echo "sensitive_files_changed=false" >> $GITHUB_OUTPUT
             echo "safe_to_run=true" >> $GITHUB_OUTPUT
           fi
 
   # ==================== 静态检查（先于 AI 审查）====================
   auto-check:
-    name: 🔍 静态检查
+    name: Static check
     runs-on: ubuntu-latest
     needs: [security-check]
     if: needs.security-check.outputs.safe_to_run == 'true'
@@ -91,31 +91,30 @@ jobs:
       has_reviewable_changes: ${{ steps.check_files.outputs.has_reviewable_changes }}
     
     steps:
-      - name: 📥 检出代码
+      - name: Checkout
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      
-      - name: 🔄 获取 base 分支
+
+      - name: Fetch base branch
         run: git fetch origin ${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}
-      
-      - name: 🐍 设置 Python
+
+      - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
-      
-      - name: 📦 安装依赖
-        run: |
-          pip install --upgrade pip
-          pip install flake8
-      
-      - name: 📋 检查变更文件
+
+      - name: Install dependencies
+        run: pip install --upgrade pip flake8
+
+      - name: 检查变更文件
         id: check_files
         run: |
           BASE_REF="${{ github.base_ref || 'main' }}"
-          CHANGED_FILES=$(git diff --name-only origin/$BASE_REF...HEAD -- '*.py' 2>/dev/null || echo "")
+          # git diff --name-only 过滤 + grep 二次保险，确保只有 Python 文件进 flake8
+          CHANGED_FILES=$(git diff --name-only origin/$BASE_REF...HEAD -- '*.py' 2>/dev/null | grep '\.py$' | tr '\n' ' ' || echo "")
           REVIEWABLE_FILES=$(git diff --name-only origin/$BASE_REF...HEAD -- '*.py' '*.md' 'docs/**' 'README.md' 'AGENTS.md' 'requirements.txt' '.github/requirements-ci.txt' 'pyproject.toml' 'setup.cfg' '.github/PULL_REQUEST_TEMPLATE.md' '.github/workflows/**' '.github/scripts/**' 2>/dev/null || echo "")
 
           if [ -z "$REVIEWABLE_FILES" ]; then
@@ -134,7 +133,7 @@ jobs:
             echo "EOF" >> $GITHUB_ENV
           fi
       
-      - name: 🐍 Python 语法检查
+      - name: Python syntax check
         id: syntax
         if: steps.check_files.outputs.has_py_changes == 'true'
         run: |
@@ -161,7 +160,7 @@ jobs:
             echo "✅ 所有文件语法正确" >> $GITHUB_STEP_SUMMARY
           fi
       
-      - name: 🔎 Flake8 检查（严重错误）
+      - name: Flake8 critical check
         if: steps.check_files.outputs.has_py_changes == 'true'
         run: |
           echo "## 🔎 代码质量检查" >> $GITHUB_STEP_SUMMARY
@@ -176,17 +175,17 @@ jobs:
             echo "✅ 未发现严重代码问题" >> $GITHUB_STEP_SUMMARY
           fi
       
-      - name: 📊 变更统计
+      - name: Change stats
         run: |
           BASE_REF="${{ github.base_ref || 'main' }}"
-          echo "## 📊 变更统计" >> $GITHUB_STEP_SUMMARY
+          echo "## Change statistics" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           STATS=$(git diff --stat origin/$BASE_REF...HEAD 2>/dev/null | tail -1)
           echo "$STATS" >> $GITHUB_STEP_SUMMARY
 
   # ==================== AI 代码审查（依赖静态检查通过）====================
   ai-review:
-    name: 🤖 AI 代码审查
+    name: AI review
     runs-on: ubuntu-latest
     needs: [security-check, auto-check]
     if: |
@@ -196,20 +195,20 @@ jobs:
       vars.ENABLE_AI_REVIEW != 'false'
 
     steps:
-      - name: 📥 检出 PR 代码
+      - name: Checkout PR code
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           path: pr-code
 
-      - name: 🔄 获取 base 分支
+      - name: Fetch base branch
         working-directory: pr-code
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
         run: git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
 
-      - name: 🤖 OCR AI 审查
+      - name: OCR AI review
         working-directory: pr-code
         env:
           OCR_NO_UPDATE: 1
@@ -225,7 +224,7 @@ jobs:
             --max-tokens-budget 8000 \
             2>&1 | tee ai_review_result.txt
 
-      - name: 📤 上传审查结果
+      - name: Upload review result
         uses: actions/upload-artifact@v6
         if: always()
         with:
