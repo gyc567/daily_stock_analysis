@@ -171,9 +171,9 @@ jobs:
             echo "No Python files to check" >> $GITHUB_STEP_SUMMARY
           else
             RESULT=$(flake8 $PY_FILES --select=E9,F63,F7,F82 --format='%(path)s:%(row)d: %(code)s %(text)s' 2>&1 || true)
-            echo "DEBUG_RESULT<<EOF" >> $GITHUB_STEP_SUMMARY
-            echo "$RESULT" >> $GITHUB_STEP_SUMMARY
-            echo "EOF" >> $GITHUB_STEP_SUMMARY
+            echo "DEBUG_RESULT_START"
+            echo "$RESULT"
+            echo "DEBUG_RESULT_END"
             if [ -n "$RESULT" ]; then
               echo "WARNING: Found issues:" >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
