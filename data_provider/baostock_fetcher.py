@@ -490,7 +490,7 @@ class BaostockFetcher(BaseFetcher):
                 logger.warning(f"Baostock 财务数据为空: {stock_code}")
                 return None
 
-            merged = _map_financial_columns(merged)
+            merged = self._map_financial_columns(merged)
 
             logger.info(
                 f"Baostock 财务数据获取成功: {stock_code}, "
