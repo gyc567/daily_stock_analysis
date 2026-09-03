@@ -353,6 +353,156 @@ class BaostockFetcher(BaseFetcher):
 
         return None
 
+    def _map_financial_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """将 Baostock 原始列名映射到项目标准字段名"""
+        mapping = {
+            # 盈利能力 (profit)
+            "gpMargin":      "gross_margin_pct",
+            "npMargin":      "net_profit_margin_pct",
+            "roeAvg":        "roe_pct",
+            "MBRevenue":     "revenue",
+            "netProfit":     "net_profit",
+            "epsTTM":        "eps_ttm",
+            "totalShare":    "total_shares",
+            "liqaShare":     "float_shares",
+            # 营运能力 (operation)
+            "NRTurnDays":    "receivable_turnover_days",
+            "INVTurnDays":   "inventory_turnover_days",
+            "NRTurnRatio":   "receivable_turnover_ratio",
+            "INVTurnRatio":  "inventory_turnover_ratio",
+            "CATurnRatio":   "current_asset_turnover",
+            "AssetTurnRatio": "asset_turnover_ratio",
+            # 成长能力 (growth)
+            "YOYNI":         "revenue_yoy_pct",
+            "YOYEquity":     "equity_yoy_pct",
+            "YOYAsset":      "asset_yoy_pct",
+            "YOYEPSBasic":   "eps_yoy_pct",
+            "YOYPNI":        "net_profit_yoy_pct",
+            # 偿债能力 (balance)
+            "currentRatio":  "current_ratio",
+            "quickRatio":    "quick_ratio",
+            "cashRatio":     "cash_ratio",
+            "YOYLiability":  "liability_yoy_pct",
+            "liabilityToAsset": "debt_to_asset_pct",
+            "assetToEquity": "asset_to_equity",
+            # 现金流量 (cash_flow)
+            "CAToAsset":     "current_asset_to_total_asset",
+            "NCAToAsset":    "non_current_asset_to_total_asset",
+            "tangibleAssetToAsset": "tangible_asset_ratio",
+            "ebitToInterest": "ebit_to_interest",
+            "CFOToOR":       "operating_cf_to_revenue",
+            "CFOToNP":       "operating_cf_to_net_profit",
+            "CFOToGr":       "operating_cf_to_growth",
+            # 杜邦分析 (dupont)
+            "dupontROE":         "dupont_roe",
+            "dupontAssetStoEquity": "dupont_asset_to_equity",
+            "dupontAssetTurn":   "dupont_asset_turnover",
+            "dupontPnitoni":     "dupont_net_profit_margin",
+            "dupontNitogr":      "dupont_revenue_turnover",
+            "dupontTaxBurden":   "dupont_tax_burden",
+            "dupontIntburden":   "dupont_interest_burden",
+            "dupontEbittogr":    "dupont_ebit_to_revenue",
+        }
+        df = df.copy()
+        rename = {k: v for k, v in mapping.items() if k in df.columns}
+        df = df.rename(columns=rename)
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+
+    def get_financial_data(
+        self,
+        stock_code: str,
+        start_year: str = "2020",
+        end_year: Optional[str] = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取季频财务数据（6 个维度，合并为一个 DataFrame）
+
+        查询：盈利 / 营运 / 成长 / 偿债（balance）/ 现金流 / 杜邦
+        返回：index=statDate (YYYY-QN)，列=标准字段名
+
+        Args:
+            stock_code: 股票代码，如 '300260'
+            start_year: 起始年份，默认为 '2020'
+            end_year: 结束年份，默认为当前年份
+
+        Returns:
+            合并后的财务 DataFrame，失败返回 None
+        """
+        if end_year is None:
+            end_year = datetime.now().strftime("%Y")
+
+        try:
+            bs_code = self._convert_stock_code(stock_code)
+        except DataFetchError:
+            return None
+
+        # 6 个接口：(方法名)
+        # 注意：query_debtpaying_data 不存在，用 query_balance_data 代替
+        apis = [
+            "query_profit_data",
+            "query_operation_data",
+            "query_growth_data",
+            "query_balance_data",
+            "query_cash_flow_data",
+            "query_dupont_data",
+        ]
+
+        def _fetch_quarter(
+            bs: Any, api_name: str, code: str, year: str, quarter: str
+        ) -> Optional[pd.DataFrame]:
+            method = getattr(bs, api_name, None)
+            if method is None:
+                return None
+            rs = method(code, year, quarter)
+            if rs.error_code != "0" or not rs.fields:
+                return None
+            rows = []
+            while rs.next():
+                rows.append(rs.get_row_data())
+            if not rows:
+                return None
+            df = pd.DataFrame(rows, columns=rs.fields)
+            if df.empty or (len(df) == 1 and df.iloc[0].isna().all()):
+                return None
+            return df
+
+        merged: Optional[pd.DataFrame] = None
+
+        try:
+            with self._baostock_session() as bs:
+                for year_int in range(int(end_year), int(start_year) - 1, -1):
+                    for quarter in ("1", "2", "3", "4"):
+                        for api_name in apis:
+                            df = _fetch_quarter(bs, api_name, bs_code, str(year_int), quarter)
+                            if df is None or df.empty:
+                                continue
+                            date_col = "statDate" if "statDate" in df.columns else "pubDate"
+                            df = df.set_index(date_col)
+                            df.index.name = "report_date"
+                            if merged is None:
+                                merged = df
+                            else:
+                                merged = merged.combine_first(df)
+
+            if merged is None or merged.empty:
+                logger.warning(f"Baostock 财务数据为空: {stock_code}")
+                return None
+
+            merged = self._map_financial_columns(merged)
+
+            logger.info(
+                f"Baostock 财务数据获取成功: {stock_code}, "
+                f"期数={len(merged)}, 字段={list(merged.columns)}"
+            )
+            return merged
+
+        except Exception as e:
+            logger.warning(f"Baostock 财务数据获取失败 {stock_code}: {e}")
+            return None
+
+
     def get_stock_list(self) -> Optional[pd.DataFrame]:
         """
         获取股票列表
@@ -364,7 +514,6 @@ class BaostockFetcher(BaseFetcher):
         """
         try:
             with self._baostock_session() as bs:
-                # 查询所有股票基本信息
                 rs = bs.query_stock_basic()
 
                 if rs.error_code == "0":
@@ -374,14 +523,11 @@ class BaostockFetcher(BaseFetcher):
 
                     if data_list:
                         df = pd.DataFrame(data_list, columns=rs.fields)
-
-                        # 转换代码格式（去除 sh. 或 sz. 前缀）
                         df["code"] = df["code"].apply(
                             lambda x: x.split(".")[1] if "." in x else x
                         )
                         df = df.rename(columns={"code_name": "name"})
 
-                        # 更新缓存
                         if not hasattr(self, "_stock_name_cache"):
                             self._stock_name_cache = {}
                         for _, row in df.iterrows():
@@ -394,23 +540,3 @@ class BaostockFetcher(BaseFetcher):
             logger.warning(f"Baostock 获取股票列表失败: {e}")
 
         return None
-
-
-if __name__ == "__main__":
-    # 测试代码
-    logging.basicConfig(level=logging.DEBUG)
-
-    fetcher = BaostockFetcher()
-
-    try:
-        # 测试历史数据
-        df = fetcher.get_daily_data("600519")  # 茅台
-        print(f"获取成功，共 {len(df)} 条数据")
-        print(df.tail())
-
-        # 测试股票名称
-        name = fetcher.get_stock_name("600519")
-        print(f"股票名称: {name}")
-
-    except Exception as e:
-        print(f"获取失败: {e}")

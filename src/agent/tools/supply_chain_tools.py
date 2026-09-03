@@ -41,6 +41,19 @@ _STOCK_INFO_INFLIGHT: Dict[str, _threading.Event] = {}  # ticker → 事件
 _STOCK_INFO_PAYLOAD: Dict[str, Dict[str, Any]] = {}  # in-flight 期间共享结果
 
 
+def _json_safe(obj: Any) -> Any:
+    """将 dict/list 中的 Decimal 递归转换为 float（JSON 序列化友好）。"""
+    import json
+    from decimal import Decimal
+
+    def _decimal_default(x: Any) -> Any:
+        if isinstance(x, Decimal):
+            return float(x)
+        raise TypeError
+
+    return json.loads(json.dumps(obj, default=_decimal_default))
+
+
 # serenity_scorecard 的 8 个加权因子 + 8 个惩罚项（各 0-5 分）
 FACTOR_KEYS = (
     "demand_inflection",  # 需求拐点
@@ -2636,8 +2649,13 @@ def _handle_analyze_capacity_outlook(
                     max_tokens=3000,
                 )
                 raw = _parse_v3_json(response.content)
+                import sys as _sys
+                print(f"[DEBUG] capacity_outlook LLM raw len={len(response.content)} first200={response.content[:200]}", file=_sys.stderr, flush=True)
                 if raw and raw.get("ticker"):
+                    print(f"[DEBUG] capacity_outlook finalize OK forecasts={len(raw.get('forecasts',[]))}", file=_sys.stderr, flush=True)
                     return _finalize_capacity_outlook(raw, ticker, company)
+                else:
+                    print(f"[DEBUG] capacity_outlook raw invalid: {raw}", file=_sys.stderr, flush=True)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[SupplyChain v3] capacity_outlook LLM 失败: %s", exc)
 
@@ -2746,7 +2764,12 @@ def _finalize_capacity_outlook(
             data_source_notes=raw.get("data_source_notes", ""),
             confidence=raw.get("confidence", "low"),
         )
-        return {"ticker": ticker, "capacity_outlook": outlook.model_dump()}
+        # Decimal 无法 JSON 序列化，转换为 float
+        raw_outlook = outlook.model_dump()
+        return {
+            "ticker": ticker,
+            "capacity_outlook": _json_safe(raw_outlook),
+        }
     except Exception as exc:  # noqa: BLE001
         logger.debug("[SupplyChain v3] capacity_outlook finalize 失败: %s", exc)
         return _build_fallback_capacity_outlook(ticker, company, "")
@@ -2772,7 +2795,10 @@ def _build_fallback_capacity_outlook(
         data_source_notes="产能数据不可用（LLM 分析失败）",
         confidence="low",
     )
-    return {"ticker": ticker, "capacity_outlook": outlook.model_dump()}
+    return {
+        "ticker": ticker,
+        "capacity_outlook": _json_safe(outlook.model_dump()),
+    }
 
 
 analyze_capacity_outlook_tool = ToolDefinition(

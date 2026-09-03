@@ -1,18 +1,91 @@
 # 数据源与交叉验证
 
-> 本文档说明 A 股深度投研报告（`/deep-research`）的数据源架构、主源分流策略、关键锚点交叉验证机制，以及置信度语义。
+> 本文档说明项目所有数据源的架构、fallback 链设计、关键锚点交叉验证机制，以及置信度语义。
 >
 > 相关：[`deep-research.md`](./deep-research.md)（深度投研报告专题）、[`deep_research_executor.py`](../src/agent/deep_research_executor.py)（ReAct 编排）、[`system_prompt.md`](../data/deep_research/system_prompt.md)（五层穿透 prompt）。
 
-## 1. 背景：fail-open fallback vs cross-validation
+## 1. 两套报告体系与数据源分工
 
-项目原有 `DataFetcherManager`（`data_provider/base.py`）实现的是 **fail-open fallback**（失败降级）：同一数据点按优先级链取，第一个成功返回的源即采用，**永远只来自一个源**。这对「数据存在」是够用的，但无法保证「数据真实」——单点依赖（如 A 股基本面靠 AkShare/东财爬虫）在网络封锁、源数据错误时无任何校验。
+项目有两套独立报告体系，共享底层 `DataFetcherManager` 但有不同上层策略：
 
-深度投研报告面向机构级分析，要求**有效性、真实性、实时性**。因此新增一层 **cross-validation**（交叉验证）：对报告关键锚点（PE/PB/市值/营收/净利/ROE/主力净流入/融资余额等），用**两个独立来源**独立取数、容差比对、标注置信度，让每个关键数字可追溯、可纠错、冲突不掩盖。
+| 报告体系 | 入口 | 数据源策略 |
+|---------|------|-----------|
+| **每日供应链分析**（main.py / SupplyChainExecutor） | `DataFetcherManager.get_daily_data` / `get_realtime_quote` | fail-open fallback 链（Efinance → Akshare → Pytdx → Baostock） |
+| **深度投研报告**（deep-research） | MX Data API + iFinD MCP + `DataFetcherManager` | 主源（MX/iFinD）→ 验证层 → 兜底（AkShare） |
+
+---
+
+## 2. 每日分析数据源链（fail-open fallback）
+
+`DataFetcherManager` 按 `priority` 升序遍历已注册 fetcher，**第一个成功返回的源即采用，永远只来自一个源**。
+
+### 2.1 日线 K 线（A 股）
+
+| 优先级 | Fetcher | 说明 |
+|-------|---------|------|
+| P0 | EfinanceFetcher | 免费，无需 token，速度快 |
+| P1 | AkshareFetcher | 东财爬虫，字段全 |
+| P2 | PytdxFetcher | 通达信协议，离线可用 |
+| P3 | BaostockFetcher | 免费，无需登录，稳定 |
+| P4 | YfinanceFetcher | 仅美股，不适合 A 股 |
+
+### 2.2 实时行情
+
+| 优先级 | Fetcher | 说明 |
+|-------|---------|------|
+| P0 | EfinanceFetcher | 免费，速度快 |
+| P1 | AkshareFetcher | 东财爬虫 |
+| P2 | TencentFetcher | 腾讯财经，兜底稳定 |
+| P3 | BaostockFetcher | 免费但有 T+1 延迟 |
+
+### 2.3 财务数据（季频）—— Baostock 备份链
+
+财务数据原本只有 Tushare 可用（Quota 是瓶颈），现已建立备份链：
+
+| 优先级 | 数据源 | 数据内容 |
+|-------|--------|---------|
+| P0（主） | TushareFetcher | 营收、净利润、毛利率、ROE、存货周转等季频财务数据 |
+| P1（备份） | **BaostockFetcher** | 同上 6 个维度（见下表），免费稳定无需 token |
+| P2 | （空） | 无更多备份 |
+
+**Baostock 财务数据接口（6 个）**：
+
+| 接口 | 数据维度 | §10.b 用途 |
+|------|---------|-----------|
+| `query_profit_data()` | 盈利能力：营收、净利润、毛利率、ROE | 营收同比、毛利率 → 产能推断 |
+| `query_operation_data()` | 营运能力：存货周转、应收周转、资产周转 | 存货天数 → 产能状态 |
+| `query_growth_data()` | 成长能力：营收增速、利润增速、资产增速 | 需求趋势判断 |
+| `query_debtpaying_data()` | 偿债能力：资产负债率、流动比率、速动比率 | 扩产资金能力 |
+| `query_cash_flow_data()` | 现金流量：经营现金流、投资现金流、筹资现金流 | 现金流趋势 → capex 支撑力 |
+| `query_dupont_data()` | 杜邦分析：ROE 拆解（净利率/资产周转率/权益乘数） | 综合质量评估 |
+
+**集成点**：`SupplyChainExecutor._call_v3_tools_directly()` 之前调用 `BaostockFetcher.get_financial_data()` 获取季频真实数据，格式化后注入 `analyze_capacity_outlook` 的 `financial_context` 参数（替换或补充 LLM 推断）。数据粒度为季频，月度预测仍由 LLM 推断。
+
+**回滚**：Baostock 无需 token，免费稳定；失败则回退到 LLM 推断，不阻塞主流程。
+
+### 2.4 其他数据源
+
+| Fetcher | 市场 | 优先级 | 说明 |
+|---------|------|-------|------|
+| TushareFetcher | A 股 | P0（主） | 配额有限，用于日线/实时/财务 |
+| YfinanceFetcher | 美股 | P4 | 行情/财务 |
+| LongbridgeFetcher | 港股/美股 | P5 | 港股/美股兜底 |
+| FinnhubFetcher | 美股 | P6 | 备用 |
+| AlphaVantageFetcher | 美股 | P7 | 备用 |
+
+---
+
+## 3. 深度投研数据源（cross-validation）
+
+### 3.1 背景：fail-open fallback vs cross-validation
+
+项目原有 `DataFetcherManager`（`data_provider/base.py`）实现的是 **fail-open fallback**：同一数据点按优先级链取，第一个成功返回的源即采用，**永远只来自一个源**。这对「数据存在」是够用的，但无法保证「数据真实」——单点依赖在网络封锁、源数据错误时无任何校验。
+
+深度投研报告面向机构级分析，要求**有效性、真实性、实时性**。因此新增一层 **cross-validation**：对报告关键锚点（PE/PB/市值/营收/净利/ROE/主力净流入/融资余额等），用**两个独立来源**独立取数、容差比对、标注置信度，让每个关键数字可追溯、可纠错、冲突不掩盖。
 
 > **关键区别**：cross-validation 与 fail-open 是两层独立机制。fail-open 链保证「能取到数」，cross-validation 层保证「取到的数可被另一源佐证」。验证层是只读、fail-open、opt-in 的——任一源失败不阻塞主流程。
 
-## 2. 三源职责
+### 3.2 三源职责
 
 | 源 | 角色 | 类型 | 取数方式 | 失败行为 |
 |---|---|---|---|---|
@@ -23,7 +96,7 @@
 - **实时性**：盘中行情（当前价/涨跌幅）主源是 `get_realtime_quote`（已有 em→sina→tencent 实时 fallback），**不是** MX snapshot。MX snapshot 仅作验证。
 - **token 安全**：`MX_APIKEY` / `IFIND_MCP_TOKEN` 只从环境变量读取，不入库、不写日志、`.env.example` 仅占位符。
 
-## 3. 主源分流
+### 3.3 主源分流
 
 ```
 行情类锚点（当前价/涨跌幅）──── get_realtime_quote(主,盘中实时) ◄── MX/iFinD 验证
@@ -32,7 +105,7 @@
 资金/筹码类（主力净流入/融资余额）── MX(主) ◄── iFinD 双向验证 ◄── AkShare 兜底
 ```
 
-## 4. 关键锚点分级 · 容差 · 口径 · 报告期
+### 3.4 关键锚点分级 · 容差 · 口径 · 报告期
 
 定义见 `data_provider/cross_source_validator.py` 的 `ANCHOR_SPECS`。
 
@@ -50,7 +123,7 @@
 >
 > **口径对齐（防误判）**：PE/PB 的 TTM / 静态 / 动态口径不同会导致数值本就不同。口径不一致时判 `medium` + 标注，**不做数值比对**。
 
-## 5. 资金流锚点的特殊性（方向 + 量级，非严格数值）
+### 3.5 资金流锚点的特殊性（方向 + 量级，非严格数值）
 
 主力净流入的东财口径（MX/AkShare）与同花顺口径（iFinD）**算法不同**（单笔阈值、大单分类不同），数值本就不同——盲目数值比对会误报。验证策略：
 
@@ -63,7 +136,7 @@
 - **融资余额**：沪深交易所每日公布的**确定数据**，MX/iFinD 应严格一致（±0.5%），不一致即冲突。
 - **筹码集中度**：算法强依赖源（东财 `stock_cyq_em` vs 同花顺），差异大，仅作参考标注，不参与严格验证。
 
-## 6. 置信度语义
+### 3.6 置信度语义
 
 `AnchorVerification.confidence` 三档：
 
@@ -75,7 +148,7 @@
 
 LLM 按 [`system_prompt.md`](../data/deep_research/system_prompt.md) 原则 7「双源验证标注」据此在报告中标注关键数字，**冲突必须披露，不得掩盖**。
 
-## 7. 工具注入点
+### 3.7 工具注入点
 
 `src/agent/tools/data_tools.py` 在开关开启时向三个工具的返回注入 `cross_validation` 块：
 
@@ -97,7 +170,7 @@ LLM 按 [`system_prompt.md`](../data/deep_research/system_prompt.md) 原则 7「
 }
 ```
 
-## 8. 配置
+### 3.8 配置
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
@@ -110,7 +183,7 @@ LLM 按 [`system_prompt.md`](../data/deep_research/system_prompt.md) 原则 7「
 
 **回滚**：`DEEP_RESEARCH_CROSS_VALIDATE=false` 时，三个工具返回与改动前完全一致，零行为变化。
 
-## 9. Phase 0 可行性验证（已实测，2026-06-25）
+### 3.9 Phase 0 可行性验证（已实测，2026-06-25）
 
 启用真实 key 跑探测脚本验证数据源硬前提：
 
@@ -136,7 +209,7 @@ python scripts/probe_e2e_data_tools.py        # data_tools 工具注入 cross_va
 - MX 对部分代码（如 300750）有港股歧义，需 `.SH`/`.SZ` 后缀消歧（当前 query 仅用 6 位代码）。
 - MX snapshot 在 `get_stock_info` 长流程中间歇性失败（并发/限流），fail-open 降级到 iFinD 单源 medium。
 
-## 10. 验证（离线测试）
+### 3.10 验证（离线测试）
 
 新增模块均以离线 mock 测试，100% 覆盖，不依赖真实 key：
 
