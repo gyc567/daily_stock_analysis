@@ -76,16 +76,19 @@ class BaostockFetcher(BaseFetcher):
     name = "BaostockFetcher"
     priority = int(os.getenv("BAOSTOCK_PRIORITY", "3"))
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化 BaostockFetcher"""
         self._bs_module: Optional[Any] = None
         self._stock_name_cache: Dict[str, str] = {}
 
-    def _get_baostock(self):
+    def _get_baostock(self) -> Any:
         """
         延迟加载 baostock 模块
 
         只在首次使用时导入，避免未安装时报错
+
+        Returns:
+            baostock 模块对象（运行时 Any，避开了 stub）
         """
         if self._bs_module is None:
             import baostock as bs

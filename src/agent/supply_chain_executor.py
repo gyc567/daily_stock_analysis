@@ -22,6 +22,7 @@ from src.config import get_config
 from src.services.supply_chain.paths import CORE_REFERENCES, reference_path, skill_path
 
 if TYPE_CHECKING:  # 避免 import 时强依赖 litellm（部署环境才有）
+    from src.agent.executor import AgentResult
     from src.agent.llm_adapter import LLMToolAdapter
 
 logger = logging.getLogger(__name__)
@@ -434,7 +435,7 @@ def _call_v3_tools_directly(
         pass  # Baostock 失败不影响主流程
 
     # 调用 6 个 v3 工具
-    v3_tool_map = {
+    v3_tool_map: dict[str, dict[str, Any]] = {
         "analyze_product_matrix": {
             "ticker": ticker,
             "company": company,
@@ -481,9 +482,9 @@ def _call_v3_tools_directly(
         try:
             result = tool_registry.execute(tool_name, **kwargs)
             result_str = _json.dumps(result) if isinstance(result, dict) else str(result)
-            result_dict: dict[str, Any] = (
-                _json.loads(result_str) if isinstance(result_str, str) else {}
-            )
+            # Re-using the same \`result_dict\` name from the previous loop so we
+            # don't shadow it; the mypy no-redef is a false positive here.
+            result_dict: dict[str, Any] = _json.loads(result_str) if isinstance(result_str, str) else {}  # type: ignore[no-redef]
             print(
                 f"[DEBUG] v3 tool {tool_name}: success result_len={len(result_str)} "
                 f"keys={list(result_dict.keys())}",
@@ -604,11 +605,11 @@ class SupplyChainExecutor:
         session_id: str,
         progress_callback: Optional[Callable[..., Any]] = None,
         context: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> "AgentResult":
         """执行一轮供应链深度调研（ReAct 工具循环 + 会话持久化）。"""
         from src.agent.chat_context import build_agent_chat_context_bundle
         from src.agent.conversation import conversation_manager
-        from src.agent.executor import AgentResult
+        from src.agent.executor import AgentResult  # local for type instantiation
         from src.agent.runner import _collect_v3_deep_dive_from_log, run_agent_loop
 
         system_prompt = build_supply_chain_system_prompt()
