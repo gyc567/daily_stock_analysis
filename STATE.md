@@ -98,3 +98,18 @@ Run log: loop-run-log.md（2026-08-11 10:12 / 10:55 / 11:50 / 11:55；2026-08-11
 - False positives: 0
 - Deprioritize: 无
 - Adjustment: P2 起要把 max-files 限额提至 ≥ 15，或提前把 compass 测试拆到子目录（避免每加一个文件就触发 gate 警告）
+
+### 2026-09-04 19:25 Compass CI 修复 PR (loop engineering)
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Implementation + Verification + Cleanup |
+| Level | L2 |
+| Branch | `fix/ci-failures` |
+| Worktree | `.worktrees/ci-failures`（已清理 `.worktrees/compass-p1/` 因为 PR #41 已合） |
+| Duration | ~85 min |
+| Tokens | 估算 ~30k |
+| Result | success（PR #42 Draft 已 push；CI type-safety 全过；42 个 pre-existing 测试失败已注明） |
+| 备注 | 4 commit + 1 plan + 1 amend：formatters 合并（e1ea692）/ baostock 修复（c49374f）/ supply_chain_executor 签名（dfacece）/ compass engine pyright（f797c0e amend to fb38d49）/ P2 计划文档（3577d65）/ scheduler + formatters shim + TYPE_CHECKING（fb38d49）。本地 `.worktrees/compass-p1` worktree 与 `feat/compass-p1` 本地分支已删；`.worktrees/ci-failures` 保留到 PR #42 合并。 |
+| Finding (post-clean) | `.worktrees/` 顶层目录之前是 untracked；清理 compass-p1 后仍残留为未跟踪。运行 `git fetch --prune` 清理 dead ref。 |
+| Open | PR #42 仍是 Draft；等 maintainer 转 Ready + 合并。PR #42 包含的 42 个 backend-gate 测试失败都是 pre-existing 旧债，与本 PR 无关（已在 PR comment 注明）。 |

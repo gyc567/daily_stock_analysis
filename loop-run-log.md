@@ -214,3 +214,15 @@
 | 备注 | 按 `.claude/reviews/compass-p1-audit.md` §10 P0 清单 10 项全部修完。**mypy --strict 跨 12 个 compass 文件 0 错误**（之前 11 错）。flake8 0 / pytest 50/50 / 死代码 0。**顺手做的小改进**：`assemble()` 增加 `calculated_at` 可选参数（幂等快照）；新增 `WeeklySnapshot` TypedDict；新增 `CrossAboveBelow` Literal 让跨模块类型对齐。审计报告 §附录 A 已附。 |
 | Finding (audit Appendix A.1) | 删除 `_to_iso` 死代码；`assemble` 改直接构造子模型对象；多处类型注解补全 |
 | Adjustment | 后续 PR 在 `.github/workflows/type-safety.yml` 把 compass 模块加入 `--strict` override；runner 镜像需要装 flake8 + mypy（CI 已经装） |
+
+### 2026-09-04 19:25 Compass CI 修复收尾
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Cleanup |
+| Level | L2 |
+| Trigger | 上一轮"处理：2. 清理 worktree" |
+| Sub-agents | 0 |
+| Tokens | 估算 ~2k |
+| Result | success |
+| 备注 | 删 `.worktrees/compass-p1/`（PR #41 已合）；删本地 `feat/compass-p1` 分支；保留 `.worktrees/ci-failures`（PR #42 仍在 Draft）。`.claude/worktrees/supply-chain-forecast/` 不是我的 worktree，未动。 |
