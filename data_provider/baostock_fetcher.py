@@ -267,6 +267,12 @@ class BaostockFetcher(BaseFetcher):
                     raise
                 raise DataFetchError(f"Baostock 获取数据失败: {e}") from e
 
+    @staticmethod
+    def _strip_code_suffix(code: object) -> str:
+        """Strip the exchange suffix from a Baostock code field (e.g. 'sh.600000' -> '600000')."""
+        text = str(code)
+        return text.split(".", 1)[1] if "." in text else text
+
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         """
         标准化 Baostock 数据
@@ -298,7 +304,8 @@ class BaostockFetcher(BaseFetcher):
         # 只保留需要的列
         keep_cols = ["code"] + STANDARD_COLUMNS
         existing_cols = [col for col in keep_cols if col in df.columns]
-        df = df[existing_cols]
+        # Use .loc[:, ...] so the result stays a DataFrame even with a single column.
+        df = df.loc[:, existing_cols]
 
         return df
 
@@ -353,7 +360,7 @@ class BaostockFetcher(BaseFetcher):
 
         return None
 
-    def _map_financial_columns(df: pd.DataFrame) -> pd.DataFrame:
+    def _map_financial_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """将 Baostock 原始列名映射到项目标准字段名"""
         mapping = {
             # 盈利能力 (profit)
@@ -524,17 +531,19 @@ class BaostockFetcher(BaseFetcher):
                     if data_list:
                         df = pd.DataFrame(data_list, columns=rs.fields)
                         df["code"] = df["code"].apply(
-                            lambda x: x.split(".")[1] if "." in x else x
+                            self._strip_code_suffix
                         )
                         df = df.rename(columns={"code_name": "name"})
 
                         if not hasattr(self, "_stock_name_cache"):
                             self._stock_name_cache = {}
                         for _, row in df.iterrows():
-                            self._stock_name_cache[row["code"]] = row["name"]
+                            code_value = cast(str, row["code"])
+                            name_value = cast(str, row["name"])
+                            self._stock_name_cache[code_value] = name_value
 
                         logger.info(f"Baostock 获取股票列表成功: {len(df)} 条")
-                        return df[["code", "name"]]
+                        return df.loc[:, ["code", "name"]]
 
         except Exception as e:
             logger.warning(f"Baostock 获取股票列表失败: {e}")
