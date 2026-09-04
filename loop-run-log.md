@@ -159,3 +159,58 @@
 | Sub-agents | 0 |
 | 备注 | API key 更新后首次跑 `ocr review --commit 24e7ec4`，ocr AI 审查成功执行。发现 2 个新问题（Findings 3）：`pr-review.yml` 中 `${{ env.BASE_REF }}` 在 `run:` 块中仍是 Actions 模板展开，非真正环境变量。ocr 给出修复 diff：`git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"` + `"origin/$BASE_REF"`。已修复并 push。 |
 | Friction | `env.BASE_REF` 在 run: 块的语义易混淆：GitHub Actions 的 `env:` 设置的是环境变量，但 `${{ env.VAR }}` 在 run: 脚本中是模板展开，两者不等价。|
+
+### 2026-09-01 09:35 Compass P1 实现
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Implementation |
+| Level | L2 |
+| Branch | `feat/compass-p1`（worktree `.worktrees/compass-p1` 基于 main 032aeea） |
+| Duration | ~30 min（含环境装 flake8/pytest + 11 个测试 bug 修复 + lint 清理） |
+| Tokens | 估算 ~25k（schema 186 + engine 473 + tests 531 + 反复调试） |
+| Trigger | manual ("现在用 loop engineering 方式，来实现这个方案") |
+| Sub-agents | 0 |
+| Result | success（暂停在 commit 之前，等用户确认） |
+| 备注 | Loop Context / Triage / Plan / Verify 全程按 `LOOP_CONSTRAINTS.md` 走；P1 仅新增 13 文件，未触 denylist / require-review；icontract 在调试 Wilder EMA 切片 bug 时立即报契约违反；测试 50/50 通过；CLI 离线 smoke 输出"趋势扩张 / 周多"。**未 commit / 未 push**，按 AGENTS.md §1 硬规则需用户确认。 |
+| Friction | `_wilder_ema` seed 切片越界（period-1 vs period）；Pydantic v2 `field_validator` 拿不到 `info.data` 跨字段 → 改 `model_post_init`；L3 阈值（强趋势 RSI > 75 不应是 noisy）；`derive_l0` 需要 sample ≥ 200 才能算 EMA200；现有 `tests/test_formatters.py` 等因 env 依赖缺失集合失败（与本次无关） |
+| Adjustment | P2 起要么把 `gate.yaml` max-files 调到 ≥ 15，要么把 compass 测试拆到 `tests/compass/` 子目录避免每加一个文件触发警告；改写器必须等到 §13 items 1/2 maintainer 显式确认后再实现 |
+
+### 2026-09-01 10:35 Compass P1 代码审计
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Audit |
+| Level | L2 |
+| Branch | `feat/compass-p1` |
+| Duration | ~15 min |
+| Tokens | 估算 ~12k |
+| Trigger | manual ("对这个最新的代码进行前面的代码审计") |
+| Sub-agents | 0 |
+| Result | success |
+| 备注 | 跑了 `mypy --strict` + `flake8` + `coverage` + AST 死代码扫描 + 与 plan v2 文档一致性核对。报告保存到 `.claude/reviews/compass-p1-audit.md`（393 行）。**P0 修复清单 10 项必须 commit 前完成**（11 处 mypy strict 错误 + 1 处死代码 + 1 处 dict 字面量反模式）。总体评估 🟡 黄，三层防御骨架齐但 mypy 严格度没拉满。 |
+| Finding 1 (P0) | 11 处 mypy --strict 错误：缺类型注解 5 / dict 字面量反模式 4 / bare dict 1 / unused type:ignore 2（详见报告 §1.1） |
+| Finding 2 (P0) | `assemble()` 用 `dict` 字面量绕过 `MidtrendCompass` 子模型类型检查 |
+| Finding 3 (P1) | `_to_iso` 死代码（AST 扫描确认无引用） |
+| Finding 4 (P1) | `fetcher.fetch_daily_closes` 网络路径 0% 覆盖（fetcher.py 总覆盖 58%） |
+| Finding 5 (P1) | docstring 说 "Raises DataFetchError" 但代码 raise `ValueError`；`DataFetchError` 也未 import |
+| Finding 6 (P1) | `compose_phase` 的 icontract 只检查 l0，未锁 l1/l2/l3 |
+| Finding 7 (P2) | 与 plan v2 偏离 2 处：`derive_l0` 阈值60→200；L3 healthy 阈值放宽（已在 STATE.md 风险点列出） |
+| Friction | coverage 报告把 `src/schemas/compass.py` 当 "never imported" 是因为 `--source` 的路径匹配问题，测试实际大量 import 它 |
+| Adjustment | 后续 PR 把 `--strict mypy` 加到 `.github/workflows/type-safety.yml` 的 compass 模块 override；fetcher 测试必须 mock `DataFetcherManager`（不要真打网络） |
+
+### 2026-09-01 10:55 P0 修复 (mypy strict clean)
+
+| 字段 | 值 |
+|------|-----|
+| Loop | Manual — Fix |
+| Level | L2 |
+| Branch | `feat/compass-p1` |
+| Duration | ~12 min |
+| Tokens | 估算 ~10k |
+| Trigger | manual ("执行 P0 修复") |
+| Sub-agents | 0 |
+| Result | success |
+| 备注 | 按 `.claude/reviews/compass-p1-audit.md` §10 P0 清单 10 项全部修完。**mypy --strict 跨 12 个 compass 文件 0 错误**（之前 11 错）。flake8 0 / pytest 50/50 / 死代码 0。**顺手做的小改进**：`assemble()` 增加 `calculated_at` 可选参数（幂等快照）；新增 `WeeklySnapshot` TypedDict；新增 `CrossAboveBelow` Literal 让跨模块类型对齐。审计报告 §附录 A 已附。 |
+| Finding (audit Appendix A.1) | 删除 `_to_iso` 死代码；`assemble` 改直接构造子模型对象；多处类型注解补全 |
+| Adjustment | 后续 PR 在 `.github/workflows/type-safety.yml` 把 compass 模块加入 `--strict` override；runner 镜像需要装 flake8 + mypy（CI 已经装） |
