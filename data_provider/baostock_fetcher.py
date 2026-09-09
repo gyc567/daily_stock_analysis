@@ -38,9 +38,36 @@ from .base import (
     _is_hk_market,
 )
 import os
+from datetime import datetime, timedelta
 from typing import cast  # added by mypy_codemod
 
 logger = logging.getLogger(__name__)
+
+# --------------------------------------------------------------------------- #
+# 进程级 TTL 缓存：避免 96 次/股票 的重复 Baostock API 调用
+# key = (stock_code, start_year), val = (DataFrame, fetched_at)
+# --------------------------------------------------------------------------- #
+_FINANCIAL_CACHE: dict[tuple[str, str], tuple[pd.DataFrame, datetime]] = {}
+_CACHE_TTL_HOURS = 24
+
+
+def _get_cached_financial_data(
+    key: tuple[str, str]
+) -> Optional[pd.DataFrame]:
+    """从进程缓存中获取财务数据，未命中或过期返回 None。"""
+    cached = _FINANCIAL_CACHE.get(key)
+    if cached is None:
+        return None
+    df, fetched_at = cached
+    if datetime.now() - fetched_at > timedelta(hours=_CACHE_TTL_HOURS):
+        del _FINANCIAL_CACHE[key]
+        return None
+    return df
+
+
+def _set_cached_financial_data(key: tuple[str, str], df: pd.DataFrame) -> None:
+    """写入进程缓存（带当前时间戳）。"""
+    _FINANCIAL_CACHE[key] = (df, datetime.now())
 
 
 def _is_us_code(stock_code: str) -> bool:
@@ -433,6 +460,13 @@ class BaostockFetcher(BaseFetcher):
         if end_year is None:
             end_year = datetime.now().strftime("%Y")
 
+        # 进程级缓存查询（24h TTL）
+        cache_key = (stock_code, start_year)
+        cached_df = _get_cached_financial_data(cache_key)
+        if cached_df is not None:
+            logger.debug("Baostock 财务数据缓存命中: %s", stock_code)
+            return cached_df
+
         try:
             bs_code = self._convert_stock_code(stock_code)
         except DataFetchError:
@@ -496,6 +530,10 @@ class BaostockFetcher(BaseFetcher):
                 f"Baostock 财务数据获取成功: {stock_code}, "
                 f"期数={len(merged)}, 字段={list(merged.columns)}"
             )
+
+            # 写入进程级缓存（24h TTL）
+            _set_cached_financial_data(cache_key, merged)
+
             return merged
 
         except Exception as e:

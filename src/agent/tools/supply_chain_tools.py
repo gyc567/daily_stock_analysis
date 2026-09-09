@@ -2678,18 +2678,10 @@ def _finalize_capacity_outlook(
         CapacityChangeFactor,
         DemandSignal,
         ExpansionProjectV3,
+        VALID_DEMAND_SIGNALS,
+        VALID_CAPACITY_CHANGE_FACTORS,
     )
     from decimal import Decimal
-
-    # 合法的 Literal 取值（用于过滤 LLM 返回的未知同义词）
-    VALID_DEMAND_SIGNALS: set[str] = {
-        "下游订单饱满", "行业出货量增长", "在手订单充裕",
-        "季节性旺季", "扩产产能释放", "需求回落", "限产检修",
-    }
-    VALID_CAPACITY_CHANGE_FACTORS: set[str] = {
-        "新建产能释放", "爬坡良率提升", "季节性检修",
-        "限产政策", "设备升级改造", "外协加工",
-    }
 
     try:
         # 构建 forecasts
