@@ -2888,7 +2888,7 @@ class SystemConfigService:
         if cls._has_any_config_value(
             effective_map, ("OPENAI_API_KEYS", "OPENAI_API_KEY", "AIHUBMIX_KEY")
         ):
-            model = (effective_map.get("OPENAI_MODEL") or "gpt-5.5").strip()
+            model = (effective_map.get("OPENAI_MODEL") or "MiniMax-M3").strip()
             return model if "/" in model else f"openai/{model}"
         if cls._anspire_legacy_llm_enabled(effective_map) and cls._has_any_config_value(
             effective_map, ("ANSPIRE_API_KEYS",)
