@@ -591,7 +591,7 @@ SubsegmentStatus = Literal["growing", "stable", "declining", "transforming"]
 # §10.b 产能展望 Literal 类型
 # ============================================================
 
-DemandSignal = Literal[
+VALID_DEMAND_SIGNALS: frozenset[str] = frozenset({
     "下游订单饱满",
     "行业出货量增长",
     "在手订单充裕",
@@ -599,16 +599,19 @@ DemandSignal = Literal[
     "扩产产能释放",
     "需求回落",
     "限产检修",
-]
+})
 
-CapacityChangeFactor = Literal[
+VALID_CAPACITY_CHANGE_FACTORS: frozenset[str] = frozenset({
     "新建产能释放",
     "爬坡良率提升",
     "季节性检修",
     "限产政策",
     "设备升级改造",
     "外协加工",
-]
+})
+
+DemandSignal = Literal[tuple(VALID_DEMAND_SIGNALS)]
+CapacityChangeFactor = Literal[tuple(VALID_CAPACITY_CHANGE_FACTORS)]
 
 
 class IndustryOutlookV3(BaseModel):
