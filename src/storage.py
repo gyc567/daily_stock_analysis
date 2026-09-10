@@ -519,6 +519,9 @@ class SupplyChainReport(Base):
         DateTime, default=datetime.now, index=True
     )
 
+    # 关联分析追溯 ID（精确关联到某次分析任务，便于后续回填 report_url）
+    analysis_trace_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+
     # 文件路径
     md_path: Mapped[str] = mapped_column(Text, nullable=False)
     pdf_path: Mapped[Optional[str]] = mapped_column(Text)  # NULL = 尚未惰性生成
@@ -549,6 +552,7 @@ class SupplyChainReport(Base):
             "stock_code": self.stock_code,
             "stock_name": self.stock_name,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "analysis_trace_id": self.analysis_trace_id,
             "md_path": self.md_path,
             "pdf_path": self.pdf_path,
             "deep_dive_json": self.deep_dive_json,
@@ -1478,6 +1482,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_llm_usage_telemetry_columns()
             self._ensure_supply_chain_stock_columns()
             self._ensure_supply_chain_deep_dive_column()  # [v3 PR-C]
+            self._ensure_supply_chain_trace_id_column()  # 方案 C：Serenity 报告关联分析 query_id
             self._ensure_news_intel_source_columns()  # P3
             self._ensure_schema_migration_record()
             self._ensure_knowledge_base_fts()
@@ -1652,6 +1657,42 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             with self._engine.begin() as connection:
                 connection.exec_driver_sql(
                     f"ALTER TABLE supply_chain_reports ADD COLUMN {column} TEXT"
+                )
+        except Exception as exc:
+            logger.warning(
+                "[SupplyChainReport] best-effort ADD COLUMN %s failed: %s",
+                column,
+                exc,
+            )
+
+    def _ensure_supply_chain_trace_id_column(self) -> None:
+        """[方案 C] Add nullable analysis_trace_id to existing supply_chain_reports DBs.
+
+        新装用户走 ``Base.metadata.create_all`` 自动建列；已有用户走 best-effort ALTER。
+        列存关联分析的 query_id，用于 Serenity 报告按 (query_id, code) 精确回填 history。
+        """
+        if not self._is_sqlite_engine or self._engine is None:
+            return
+        try:
+            existing = {
+                column["name"]
+                for column in inspect(self._engine).get_columns("supply_chain_reports")
+            }
+        except Exception as exc:
+            logger.warning(
+                "[SupplyChainReport] failed to inspect analysis_trace_id column; "
+                "skipping best-effort backfill: %s",
+                exc,
+            )
+            return
+
+        column = "analysis_trace_id"
+        if column in existing:
+            return
+        try:
+            with self._engine.begin() as connection:
+                connection.exec_driver_sql(
+                    f"ALTER TABLE supply_chain_reports ADD COLUMN {column} VARCHAR(64)"
                 )
         except Exception as exc:
             logger.warning(
@@ -2473,6 +2514,63 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 
             return list(results)
 
+    def search_analysis_history(
+        self,
+        stock_code: str,
+        query_id: Optional[str] = None,
+        limit: int = 1,
+    ) -> List[AnalysisHistory]:
+        """按股票代码查询最新分析记录（用于 Serenity 报告回填）。
+
+        Args:
+            stock_code: 股票代码
+            query_id: 关联的分析 query_id；给定时只返回该次分析的记录（精确回填）
+            limit: 最多返回条数
+
+        Returns:
+            按 created_at DESC, id DESC 排列的记录列表（最多 limit 条）。
+        """
+        stmt = select(AnalysisHistory).where(AnalysisHistory.code == stock_code)
+        if query_id:
+            stmt = stmt.where(AnalysisHistory.query_id == query_id)
+        with self.get_session() as session:
+            return list(
+                session.execute(
+                    stmt.order_by(desc(AnalysisHistory.created_at), desc(AnalysisHistory.id)).limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+
+    def update_analysis_history_supply_chain(
+        self,
+        history_id: int,
+        supply_chain_json: str,
+    ) -> bool:
+        """更新 analysis_history 的 supply_chain JSON 字段（用于 Serenity 报告 URL 回填）。
+
+        Returns:
+            True 成功，False 失败。
+        """
+        def _write(session: Session) -> bool:
+            rec = session.get(AnalysisHistory, history_id)
+            if rec is None:
+                return False
+            rec.supply_chain = supply_chain_json
+            return True
+
+        try:
+            return bool(
+                self._run_write_transaction(
+                    f"update_sc_supply_chain[{history_id}]", _write
+                )
+            )
+        except Exception as exc:
+            logger.error(
+                "update_analysis_history_supply_chain failed [%d]: %s", history_id, exc
+            )
+            return False
+
     def get_latest_analysis_history_id(
         self,
         *,
@@ -3085,12 +3183,14 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         stock_code: Optional[str] = None,
         stock_name: Optional[str] = None,
         deep_dive_json: Optional[str] = None,
+        analysis_trace_id: Optional[str] = None,
     ) -> bool:
         """保存/更新一条供应链报告元数据（report_id 重复则 merge 覆盖）。失败返回 False。
 
         ``stock_code`` / ``stock_name`` 为可选单股绑定（按 docs/pdf-download-filename-plan.md
         §供应链报告边界 阶段 1），用于 PDF 文件名走单股型命名。
         ``deep_dive_json`` 为 [v3 PR-C] :class:`SupplyChainDeepDiveV3` 的 model_dump_json()。
+        ``analysis_trace_id`` 用于精确关联到某次分析任务，便于后续回填 report_url。
         """
 
         def _write(session: Session) -> bool:
@@ -3101,6 +3201,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 stock_code=stock_code,
                 stock_name=stock_name,
                 created_at=datetime.now(),
+                analysis_trace_id=analysis_trace_id,
                 md_path=md_path,
                 pdf_path=None,
                 deep_dive_json=deep_dive_json,
@@ -3172,6 +3273,28 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             return (
                 session.execute(
                     select(SupplyChainReport).where(SupplyChainReport.id == report_id)
+                )
+                .scalars()
+                .first()
+            )
+
+    def get_latest_supply_chain_report_by_stock(
+        self, stock_code: str
+    ) -> Optional[SupplyChainReport]:
+        """按股票代码查询最新的成功报告（created_at DESC）。用于 Serenity 缓存判断。
+
+        只返回 ``status == "success"`` 的报告，partial/failed 不视为可复用缓存。
+        """
+        with self.get_session() as session:
+            return (
+                session.execute(
+                    select(SupplyChainReport)
+                    .where(
+                        SupplyChainReport.stock_code == stock_code,
+                        SupplyChainReport.status == "success",
+                    )
+                    .order_by(SupplyChainReport.created_at.desc())
+                    .limit(1)
                 )
                 .scalars()
                 .first()

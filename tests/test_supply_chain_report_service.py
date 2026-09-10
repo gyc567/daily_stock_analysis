@@ -515,3 +515,32 @@ class TestClueRulesInPrompt:
         assert "线索验证" in tpl
         # 限定验证状态枚举
         assert "已确认" in tpl and "已证伪" in tpl
+
+
+# ============================================================
+# 方案 C 回归：单股代码归一化支持 A股/港股/美股
+# ============================================================
+
+
+class TestNormalizeStockCode:
+    @staticmethod
+    def _norm(raw: Any) -> Any:
+        from src.services.supply_chain_report_service import SupplyChainReportService
+
+        return SupplyChainReportService._normalize_stock_code(raw)
+
+    def test_a_share(self):
+        assert self._norm("600519") == "600519"
+        assert self._norm("SH600519") == "600519"
+
+    def test_hk_stock(self):
+        """P1：港股代码不再 fallback 主题型（stock_code 落 NULL 导致缓存永久 miss）。"""
+        assert self._norm("hk00700") == "HK00700"
+        assert self._norm("01810.HK") == "HK01810"
+
+    def test_us_stock(self):
+        assert self._norm("AAPL") == "AAPL"
+        assert self._norm("aapl") == "AAPL"
+
+    def test_non_stock_topic_returns_none(self):
+        assert self._norm("白酒行业供应链") is None

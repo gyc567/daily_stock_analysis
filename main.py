@@ -606,11 +606,16 @@ def _save_reused_market_review_report(
 
 def run_full_analysis(
     config: Config, args: argparse.Namespace, stock_codes: Optional[List[str]] = None
-):
+) -> Optional[Tuple[str, List[Tuple[str, str]]]]:
     """
     执行完整的分析流程（个股 + 大盘复盘）
 
-    这是定时任务调用的主函数
+    这是定时任务调用的主函数。
+
+    Returns:
+        成功完成个股分析时返回 ``(本轮 query_id, [(股票代码, 该股票 history 记录
+        的 query_id), ...])``；history 的 query_id 由 pipeline 按股生成，
+        供调用方精确关联后续回填。整体跳过或执行失败时返回 None。
     """
     # Import pipeline modules outside the broad try/except so that import-time
     # failures propagate to the caller instead of being silently swallowed.
@@ -725,6 +730,13 @@ def run_full_analysis(
             merge_notification=merge_notification,
             current_time=analysis_reference_time,
         )
+        # 每只股票实际落库 history 时使用的 query_id（pipeline 按股生成），
+        # 供调用方按 (query_id, code) 精确关联后续回填（如 Serenity 报告回填）
+        analyzed_history_refs = [
+            (r.code, r.query_id)
+            for r in results
+            if getattr(r, "code", None) and getattr(r, "query_id", None)
+        ]
 
         if should_use_daily_market_context and not market_context_summary:
             (
@@ -934,8 +946,11 @@ def run_full_analysis(
         except Exception as e:
             logger.warning(f"自动回测失败（已忽略）: {e}")
 
+        return query_id, analyzed_history_refs
+
     except Exception as e:
         logger.exception(f"分析流程执行失败: {e}")
+        return None
 
 
 def start_api_server(host: str, port: int, config: Config) -> None:
@@ -1335,12 +1350,118 @@ def main() -> int:
                     )
                     try:
                         import copy
+                        import threading
 
                         watchlist_args = copy.copy(args)
                         watchlist_args.no_market_review = True
-                        run_full_analysis(
+                        analysis_run = run_full_analysis(
                             runtime_config, watchlist_args, scheduled_stock_codes
                         )
+
+                        # [方案 C] 触发 Serenity 深度报告后台生成（fire-and-forget）
+                        # 每个股票的 Serenity 报告独立线程生成，互不阻塞。
+                        # trace_id 复用该股票 history 记录的 query_id（pipeline 按股生成），
+                        # 回填按 (query_id, code) 精确关联。
+                        def _spawn_serenity_for_stock(
+                            stock_code: str, query_id: str
+                        ) -> None:
+                            """后台线程：为单只股票生成 Serenity 报告并回填 history 表。"""
+                            try:
+                                from src.data.stock_index_loader import (
+                                    get_index_stock_name,
+                                )
+                                from src.services.supply_chain_report_service import (
+                                    supply_chain_report_service,
+                                )
+
+                                stock_name = (
+                                    get_index_stock_name(stock_code) or stock_code
+                                )
+                                result = supply_chain_report_service.generate_report_async(
+                                    stock_code=stock_code,
+                                    stock_name=stock_name,
+                                    trace_id=query_id,
+                                )
+                                if result.get("report_id") and result.get("status") == "success":
+                                    # 回填 history 表的 supply_chain report_url
+                                    _backfill_serenity_report_url(
+                                        stock_code, query_id, result["report_id"], result.get("md_path", "")
+                                    )
+                                    logger.info(
+                                        "[SerenityAsync] 完成: stock_code=%s report_id=%s",
+                                        stock_code,
+                                        result["report_id"],
+                                    )
+                                else:
+                                    logger.warning(
+                                        "[SerenityAsync] 生成失败: stock_code=%s error=%s",
+                                        stock_code,
+                                        result.get("error"),
+                                    )
+                            except Exception as exc:
+                                logger.exception(
+                                    "[SerenityAsync] 线程异常: stock_code=%s error=%s",
+                                    stock_code,
+                                    exc,
+                                )
+
+                        def _backfill_serenity_report_url(
+                            stock_code: str, query_id: str, report_id: str, md_path: str
+                        ) -> None:
+                            """在 history 表中回填 Serenity 报告的 report_url（按 query_id 精确关联）。"""
+                            try:
+                                from src.storage import get_db
+
+                                db = get_db()
+                                records = db.search_analysis_history(
+                                    stock_code=stock_code, query_id=query_id, limit=1
+                                )
+                                if not records:
+                                    logger.warning(
+                                        "[SerenityAsync] 回填跳过: 未找到 history 记录 stock_code=%s query_id=%s",
+                                        stock_code,
+                                        query_id,
+                                    )
+                                    return
+                                record = records[0]
+                                # supply_chain JSON 存在 history 表的 supply_chain 列（JSON 文本）
+                                import json as _json
+
+                                sc_json = record.supply_chain or "{}"
+                                try:
+                                    sc = _json.loads(sc_json)
+                                except Exception:
+                                    sc = {}
+                                sc["report_status"] = "ready"
+                                sc["report_url"] = md_path
+                                sc["report_id"] = report_id
+                                sc["report_generated_at"] = datetime.now().isoformat()
+                                db.update_analysis_history_supply_chain(
+                                    history_id=record.id, supply_chain_json=_json.dumps(sc, ensure_ascii=False)
+                                )
+                            except Exception as exc2:
+                                logger.warning(
+                                    "[SerenityAsync] 回填失败: stock_code=%s error=%s",
+                                    stock_code,
+                                    exc2,
+                                )
+
+                        if analysis_run:
+                            _, analyzed_history_refs = analysis_run
+                            threads = []
+                            for code, history_query_id in analyzed_history_refs:
+                                t = threading.Thread(
+                                    target=_spawn_serenity_for_stock,
+                                    args=(code, history_query_id),
+                                    daemon=True,
+                                )
+                                threads.append(t)
+                                t.start()
+                            logger.info(
+                                "[SerenityAsync] 已启动 %d 个后台线程（主任务不等待）",
+                                len(threads),
+                            )
+
                         task_repo.save(
                             task_name="watchlist_analysis",
                             scheduled_at=scheduled_at,

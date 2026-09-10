@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
@@ -47,6 +48,8 @@ _MAX_REPORTS = 200
 from src.md2pdf import strip_emoji_for_pdf  # noqa: E402,F401  (re-export for back-compat)
 
 _executor_instance: Optional["SupplyChainExecutor"] = None
+_executor_lock = threading.Lock()
+_report_id_lock = threading.Lock()
 
 
 class SupplyChainReportInputError(ValueError):
@@ -60,12 +63,17 @@ def get_supply_chain_report_dir() -> Path:
 
 
 def _get_executor() -> "SupplyChainExecutor":
-    """获取（缓存的）SupplyChainExecutor 单例（复用问股工具集 + 供应链打分工具）。"""
+    """获取（缓存的）SupplyChainExecutor 单例（复用问股工具集 + 供应链打分工具）。
+
+    双检加锁：并发后台生成（方案 C 多线程）时只构建一次。
+    """
     global _executor_instance
     if _executor_instance is None:
-        from src.agent.factory import build_supply_chain_executor
+        with _executor_lock:
+            if _executor_instance is None:
+                from src.agent.factory import build_supply_chain_executor
 
-        _executor_instance = build_supply_chain_executor(get_config())
+                _executor_instance = build_supply_chain_executor(get_config())
     return _executor_instance
 
 
@@ -109,12 +117,14 @@ def _resolve_unique_report_id(ts: datetime) -> str:
 
     始终带 ``_{seq}`` 后缀，与下载白名单 ``^sc_\\d{12}(_\\d+)?$`` 对齐；
     不把 topic slug 拼进 id（中文/空格进路径会增加安全成本）。
+    加锁保证并发后台生成（方案 C 多线程）时 check-then-act 不竞争。
     """
     base = f"sc_{ts:%Y%m%d%H%M}"
-    seq = 1
-    while get_db().get_supply_chain_report(f"{base}_{seq}") is not None:
-        seq += 1
-    return f"{base}_{seq}"
+    with _report_id_lock:
+        seq = 1
+        while get_db().get_supply_chain_report(f"{base}_{seq}") is not None:
+            seq += 1
+        return f"{base}_{seq}"
 
 
 class SupplyChainReportService:
@@ -230,13 +240,20 @@ class SupplyChainReportService:
             if normalize_stock_code is not None
             else str(raw_code).strip()
         )
-        if normalized and normalized.isdigit() and len(normalized) == 6:
+        if not normalized:
+            return None
+        if normalized.isdigit() and len(normalized) == 6:
             return normalized
-        if normalized:
-            logger.warning(
-                "[SupplyChainReport] stock_code %r 归一化后非 6 位 A 股，fallback 主题型",
-                raw_code,
-            )
+        # 港股（HK00700）/ 美股（AAPL）同样支持单股绑定，与项目覆盖范围一致
+        upper = normalized.upper()
+        is_hk = upper.startswith("HK") and upper[2:].isdigit() and len(upper) == 7
+        is_us = upper.isalpha() and 1 <= len(upper) <= 5
+        if is_hk or is_us:
+            return upper
+        logger.warning(
+            "[SupplyChainReport] stock_code %r 归一化后非 A股/港股/美股格式，fallback 主题型",
+            raw_code,
+        )
         return None
 
     def _collect_deep_dive_json(self, markdown: str, result: Any) -> Optional[str]:
@@ -287,6 +304,7 @@ class SupplyChainReportService:
         result: Any,
         result_error: Optional[str],
         deep_dive_json: Optional[str],
+        analysis_trace_id: Optional[str] = None,
     ) -> None:
         """[拆分] 落库 supply_chain_reports 表（含所有字段映射）。"""
         get_db().save_supply_chain_report(
@@ -303,6 +321,7 @@ class SupplyChainReportService:
             model=getattr(result, "model", None),
             error=result_error if status != "success" else None,
             deep_dive_json=deep_dive_json,
+            analysis_trace_id=analysis_trace_id,
         )
 
     # ------------------------------------------------------------------
@@ -316,6 +335,7 @@ class SupplyChainReportService:
         raw_code: Optional[str] = None,
         raw_name: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        analysis_trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """生成一份供应链报告并落盘。返回 {report_id, status, markdown, ...}。
 
@@ -324,6 +344,7 @@ class SupplyChainReportService:
         - ``raw_name``：股票中文名
         两者至少给一个时，PDF 文件名遵循 ``股票名（代码）报告类型YYYYMMDD.pdf``；
         都为空时仍走主题型命名（向后兼容历史报告）。
+        ``analysis_trace_id`` 用于精确关联到某次分析任务，便于后续回填 report_url。
         """
         topic, hint, code, name = self._resolve_generate_report_inputs(
             raw_topic, raw_hint, raw_code, raw_name
@@ -362,6 +383,7 @@ class SupplyChainReportService:
                 result=result,
                 result_error=result_error,
                 deep_dive_json=deep_dive_json,
+                analysis_trace_id=analysis_trace_id,
             )
             self._prune_and_clean_files(_MAX_REPORTS)
 
@@ -399,6 +421,55 @@ class SupplyChainReportService:
         }
 
     # ------------------------------------------------------------------
+    # 后台生成（方案 C：独立任务类型，复用 watchlist/market_review 调度框架）
+    # ------------------------------------------------------------------
+
+    def generate_report_async(
+        self,
+        stock_code: str,
+        stock_name: str,
+        trace_id: str,
+    ) -> Dict[str, Any]:
+        """后台生成 Serenity 深度报告，绑定 trace_id 用于后续回填。
+
+        直接复用前台 ``generate_report`` 的核心逻辑，以 ``stock_code`` 为 topic
+        构建 prompt，生成完整 Serenity 9 步报告并落库。
+        成功后不回填 history（由调用方 main.py 定时任务线程负责）。
+        线程安全：report_id 生成与 executor 单例初始化均已加锁，可多线程并发调用。
+        """
+        logger.info(
+            "[SerenityAsync] 开始生成: stock_code=%s trace_id=%s", stock_code, trace_id
+        )
+        try:
+            result = self.generate_report(
+                raw_topic=f"股票 {stock_code} {stock_name} 供应链深度分析",
+                raw_hint="聚焦产能展望、供应链瓶颈、竞争格局",
+                raw_code=stock_code,
+                raw_name=stock_name,
+                analysis_trace_id=trace_id,
+            )
+            if result.get("report_id"):
+                logger.info(
+                    "[SerenityAsync] 完成: stock_code=%s report_id=%s",
+                    stock_code,
+                    result["report_id"],
+                )
+            return result
+        except Exception as exc:
+            logger.exception(
+                "[SerenityAsync] 生成失败: stock_code=%s trace_id=%s error=%s",
+                stock_code,
+                trace_id,
+                exc,
+            )
+            return {
+                "report_id": None,
+                "status": "failed",
+                "error": str(exc),
+                "trace_id": trace_id,
+            }
+
+    # ------------------------------------------------------------------
     # 查询
     # ------------------------------------------------------------------
 
@@ -426,6 +497,35 @@ class SupplyChainReportService:
             )
         data["markdown"] = markdown
         return data
+
+    def get_latest_by_stock_code(
+        self, stock_code: str, max_age_days: int = 30
+    ) -> Optional[Dict[str, Any]]:
+        """按股票代码查询最新的 Serenity 报告（30天内）。
+
+        Returns:
+            报告字典（含 md_path, report_id, created_at 等）或 None。
+        用于个股分析时检查是否已有缓存报告。
+        """
+        record = get_db().get_latest_supply_chain_report_by_stock(stock_code)
+        if record is None:
+            return None
+        # 检查是否在 max_age_days 内
+        if record.created_at is None:
+            return None
+        from datetime import timedelta
+
+        age = datetime.now() - record.created_at
+        if age > timedelta(days=max_age_days):
+            logger.debug(
+                "[SerenityAsync] 报告已过期: stock_code=%s created_at=%s age=%.1fd > %dd",
+                stock_code,
+                record.created_at,
+                age.total_seconds() / 86400,
+                max_age_days,
+            )
+            return None
+        return record.to_dict()
 
     # ------------------------------------------------------------------
     # 删除
