@@ -16,6 +16,7 @@ import type { ErrorInfo, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useStockIndex } from '../../hooks/useStockIndex';
 import { useAutocomplete } from '../../hooks/useAutocomplete';
+import { preloadStockIndex } from '../../utils/stockIndexLoader';
 import { SuggestionsList } from './SuggestionsList';
 import { cn } from '../../utils/cn';
 
@@ -135,6 +136,22 @@ function StockAutocompleteInner({
   const inputRef = useRef<HTMLInputElement>(null);
   const prevValueRef = useRef(value);
   const [dropdownStyle, setDropdownStyle] = useState<{ top: number; left: number; width: string } | null>(null);
+
+  // Warm the shared index cache during idle time so first focus is instant.
+  // requestIdleCallback is unavailable in Safari; fall back to a timeout.
+  useEffect(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(() => {
+        void preloadStockIndex();
+      });
+      return () => window.cancelIdleCallback(idleId);
+    }
+
+    const timerId = window.setTimeout(() => {
+      void preloadStockIndex();
+    }, 1000);
+    return () => window.clearTimeout(timerId);
+  }, []);
 
   const updateDropdownPosition = () => {
     if (!inputRef.current) {
@@ -268,6 +285,7 @@ function StockAutocompleteInner({
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         onFocus={() => {
+          void preloadStockIndex();
           if (isOpen) {
             updateDropdownPosition();
           }

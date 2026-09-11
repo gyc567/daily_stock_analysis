@@ -18,6 +18,29 @@ export interface IndexLoadResult {
   fallback: boolean;
 }
 
+let sharedIndexPromise: Promise<IndexLoadResult> | null = null;
+
+/**
+ * Preload stock index with module-level caching.
+ *
+ * All callers within the same hour bucket share a single fetch + parse.
+ * A failed load resets the shared promise so the next call retries.
+ *
+ * @returns Shared index load result promise
+ */
+export function preloadStockIndex(): Promise<IndexLoadResult> {
+  if (!sharedIndexPromise) {
+    sharedIndexPromise = loadStockIndex().then((result) => {
+      if (!result.loaded) {
+        // Allow retry on next call
+        sharedIndexPromise = null;
+      }
+      return result;
+    });
+  }
+  return sharedIndexPromise;
+}
+
 /**
  * Load stock index
  *

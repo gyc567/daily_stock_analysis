@@ -1,4 +1,4 @@
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+import { cleanup, renderHook, waitFor, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTaskStream } from '../useTaskStream';
 
@@ -222,9 +222,63 @@ describe('useTaskStream', () => {
     expect(secondError).toHaveBeenCalledTimes(1);
     expect(eventSourceInstances[0].close).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(2000);
 
     expect(eventSourceInstances).toHaveLength(2);
     expect(getTaskStreamUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it('backs off exponentially, caps at 30s, and stops after 10 consecutive failures', async () => {
+    vi.resetModules();
+    const { useTaskStream: freshUseTaskStream } = await import('../useTaskStream');
+    vi.useFakeTimers();
+    const onError = vi.fn();
+
+    const { unmount } = renderHook(() => freshUseTaskStream({ enabled: true, onError }));
+    await vi.runOnlyPendingTimersAsync();
+    expect(eventSourceInstances).toHaveLength(1);
+
+    const expectedDelays = [2000, 4000, 8000, 16000, 32000, 30000, 30000, 30000, 30000, 30000];
+    for (let attempt = 0; attempt < expectedDelays.length; attempt++) {
+      eventSourceInstance.onerror?.(new Event('error'));
+      await vi.advanceTimersByTimeAsync(expectedDelays[attempt]);
+      expect(eventSourceInstances).toHaveLength(attempt + 2);
+    }
+
+    // 11th failure exceeds the auto-reconnect limit: no further connections.
+    const instancesBefore = eventSourceInstances.length;
+    eventSourceInstance.onerror?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(eventSourceInstances).toHaveLength(instancesBefore);
+    // 11 error events (10 retries + 1 final attempt) + 1 "given up" notification
+    expect(onError).toHaveBeenCalledTimes(12);
+
+    unmount();
+  });
+
+  it('resets the backoff counter after a manual reconnect', async () => {
+    vi.resetModules();
+    const { useTaskStream: freshUseTaskStream } = await import('../useTaskStream');
+    vi.useFakeTimers();
+
+    const { result, unmount } = renderHook(() => freshUseTaskStream({ enabled: true }));
+    await vi.runOnlyPendingTimersAsync();
+    expect(eventSourceInstances).toHaveLength(1);
+
+    // First failure reconnects after the 2s base delay.
+    eventSourceInstance.onerror?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(eventSourceInstances).toHaveLength(2);
+
+    // Manual reconnect resets the counter: next failure uses 2s again, not 4s.
+    act(() => result.current.reconnect());
+    expect(eventSourceInstances).toHaveLength(3);
+
+    eventSourceInstance.onerror?.(new Event('error'));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(eventSourceInstances).toHaveLength(4);
+
+    unmount();
   });
 });

@@ -169,7 +169,11 @@ curl -X POST "http://localhost:8000/api/v1/schedule/trigger?task=watchlist"
 
 # 手动触发一次大盘复盘
 curl -X POST "http://localhost:8000/api/v1/schedule/trigger?task=market_review"
+```
 
+> 触发接口返回 `202 Accepted` + `task_id`：任务进入后台任务队列异步执行，HTTP 请求不会等待分析完成。进度可通过 `GET /api/v1/schedule/status`、`GET /api/v1/schedule/logs` 或前端 SSE 进度流观察；任务正在执行时重复触发返回 `409`。
+
+```bash
 # 查看调度日志
 curl "http://localhost:8000/api/v1/schedule/logs?page=1&page_size=10"
 ```

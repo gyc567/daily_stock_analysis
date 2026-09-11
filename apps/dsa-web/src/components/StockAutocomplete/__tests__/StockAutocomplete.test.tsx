@@ -42,6 +42,12 @@ vi.mock('../../../hooks/useAutocomplete', () => ({
   useAutocomplete: () => autocompleteHookImpl(),
 }));
 
+vi.mock('../../../utils/stockIndexLoader', () => ({
+  preloadStockIndex: vi.fn(() =>
+    Promise.resolve({ data: [], loaded: true, fallback: false }),
+  ),
+}));
+
 const mockIndex: StockIndexItem[] = [
   {
     canonicalCode: "600519.SH",

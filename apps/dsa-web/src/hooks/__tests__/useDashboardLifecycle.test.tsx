@@ -76,6 +76,43 @@ describe('useDashboardLifecycle', () => {
     expect(refreshActiveTasks).toHaveBeenCalledTimes(3);
   });
 
+  it('skips interval refresh while the tab is hidden', () => {
+    const loadInitialHistory = vi.fn().mockResolvedValue(undefined);
+    const refreshHistory = vi.fn().mockResolvedValue(undefined);
+    const refreshActiveTasks = vi.fn().mockResolvedValue(undefined);
+
+    renderHook(() =>
+      useDashboardLifecycle({
+        loadInitialHistory,
+        refreshHistory,
+        refreshActiveTasks,
+        syncTaskCreated: vi.fn(),
+        syncTaskUpdated: vi.fn(),
+        syncTaskFailed: vi.fn(),
+        removeTask: vi.fn(),
+        ...defaultMocks,
+      }),
+    );
+
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      value: true,
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(90_000);
+    });
+
+    expect(refreshHistory).not.toHaveBeenCalled();
+    expect(defaultMocks.refreshStockBar).not.toHaveBeenCalled();
+    expect(refreshActiveTasks).toHaveBeenCalledTimes(1); // initial load only
+
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      value: false,
+    });
+  });
+
   it('cleans pending task removal timers on unmount', () => {
     const removeTask = vi.fn();
 

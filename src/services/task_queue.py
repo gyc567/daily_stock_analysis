@@ -38,6 +38,62 @@ from src.utils.analysis_metadata import SELECTION_SOURCES
 logger = logging.getLogger(__name__)
 
 
+# ============================================================
+# 有界长任务线程池
+# ============================================================
+#
+# 长时间运行（数分钟级）的同步任务专用执行池，与 anyio 默认线程池隔离，
+# 避免长任务挤爆默认池拖垮普通 API。池满时 try_submit_long_task 立即返回
+# None，由调用方决定快速 429 / SSE error 事件。
+
+_LONG_TASK_MAX_WORKERS = 8
+_long_task_executor: Optional[ThreadPoolExecutor] = None
+_long_task_executor_lock = threading.Lock()
+_long_task_semaphore = threading.BoundedSemaphore(_LONG_TASK_MAX_WORKERS)
+
+
+def _get_long_task_executor() -> ThreadPoolExecutor:
+    """懒加载长任务线程池（模块级单例）。"""
+    global _long_task_executor
+    if _long_task_executor is None:
+        with _long_task_executor_lock:
+            if _long_task_executor is None:
+                _long_task_executor = ThreadPoolExecutor(
+                    max_workers=_LONG_TASK_MAX_WORKERS,
+                    thread_name_prefix="dsa-long-task",
+                )
+    return _long_task_executor
+
+
+def try_submit_long_task(
+    fn: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Optional[Future[Any]]:
+    """尝试把长任务提交到专用有界线程池。
+
+    Semaphore 非阻塞获取：拿不到许可（池满）立即返回 None；
+    提交成功后在 future 完成回调里归还许可。
+
+    Returns:
+        Future（提交成功）或 None（池满，调用方应快速拒绝）。
+    """
+    if not _long_task_semaphore.acquire(blocking=False):
+        logger.warning(
+            "[LongTask] 长任务线程池已饱和 (%s/%s)，拒绝新提交",
+            _LONG_TASK_MAX_WORKERS,
+            _LONG_TASK_MAX_WORKERS,
+        )
+        return None
+    executor = _get_long_task_executor()
+    try:
+        future = executor.submit(fn, *args, **kwargs)
+    except Exception:
+        _long_task_semaphore.release()
+        raise
+    future.add_done_callback(lambda _f: _long_task_semaphore.release())
+    logger.debug("[LongTask] 长任务已提交到专用线程池")
+    return future
+
+
 def _dedupe_stock_code_key(stock_code: str) -> str:
     """
     Build the internal duplicate-detection key for a stock code.

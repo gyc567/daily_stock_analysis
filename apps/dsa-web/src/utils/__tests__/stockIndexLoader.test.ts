@@ -189,6 +189,46 @@ describe('stockIndexLoader', () => {
     });
   });
 
+  describe('preloadStockIndex - Shared preloading', () => {
+    test('shares one fetch across concurrent and repeated calls', async () => {
+      vi.resetModules();
+      const { preloadStockIndex: freshPreload } = await import('../stockIndexLoader');
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockIndexData,
+      } as unknown as Response);
+
+      const [first, second] = await Promise.all([freshPreload(), freshPreload()]);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(first.data).toEqual(mockIndexData);
+      expect(second.data).toEqual(mockIndexData);
+
+      const third = await freshPreload();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(third.data).toEqual(mockIndexData);
+    });
+
+    test('resets the shared promise after failure so the next call retries', async () => {
+      vi.resetModules();
+      const { preloadStockIndex: freshPreload } = await import('../stockIndexLoader');
+
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+      const failed = await freshPreload();
+      expect(failed.loaded).toBe(false);
+      expect(failed.fallback).toBe(true);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockIndexData,
+      } as unknown as Response);
+      const retried = await freshPreload();
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(retried.loaded).toBe(true);
+      expect(retried.data).toEqual(mockIndexData);
+    });
+  });
+
   describe('compressIndex - Compress index', () => {
     test('converts object format to tuple format', () => {
       const compressed = compressIndex(mockIndexData);

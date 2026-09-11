@@ -37,6 +37,7 @@ from src.services.policy_minesweeper_service import (
 )
 from src.services.report_filename import format_stock_report_pdf_filename
 from src.services.stock_code_utils import normalize_code
+from src.services.task_queue import try_submit_long_task
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,18 @@ async def generate_stream(request: PolicyMinesweeperRequest) -> StreamingRespons
     async def event_generator():
         import time
 
-        fut = loop.run_in_executor(None, run_sync)
+        fut_sync = try_submit_long_task(run_sync)
+        if fut_sync is None:
+            yield (
+                "data: "
+                + json.dumps(
+                    {"type": "error", "message": "长任务线程池已满，请稍后重试"},
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
+            return
+        fut = asyncio.wrap_future(fut_sync)
         last_event_time = time.time()
         try:
             while True:

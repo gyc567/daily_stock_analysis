@@ -69,23 +69,70 @@ class ScheduleTriggerEndpointTestCase(unittest.TestCase):
 
     @patch("src.core.scheduled_task_lock.acquire_task_lock")
     @patch("src.core.scheduled_task_lock.release_task_lock")
-    @patch("api.v1.endpoints.schedule.ScheduledTaskLogRepository")
-    @patch("api.v1.endpoints.schedule._run_watchlist_task")
-    def test_trigger_watchlist_success(
-        self, mock_run, MockRepo, mock_release, mock_acquire
+    @patch("api.v1.endpoints.schedule.get_task_queue")
+    def test_trigger_watchlist_returns_202_with_task_id(
+        self, mock_get_queue, mock_release, mock_acquire
     ):
         mock_acquire.return_value = MagicMock()
-        mock_repo = MagicMock()
-        MockRepo.return_value = mock_repo
+        mock_task = MagicMock()
+        mock_task.task_id = "abc123"
+        mock_task.trace_id = "abc123"
+        mock_get_queue.return_value.submit_background_task.return_value = mock_task
 
         resp = self.client.post(
             "/api/v1/schedule/trigger",
             json={"task": "watchlist"},
         )
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 202)
         body = resp.json()
         self.assertEqual(body["task"], "watchlist")
-        mock_run.assert_called_once()
+        self.assertEqual(body["task_id"], "abc123")
+        self.assertEqual(body["status"], "accepted")
+        mock_get_queue.return_value.submit_background_task.assert_called_once()
+        # The lock stays held by the background task; released on submit failure only.
+        mock_release.assert_not_called()
+
+    @patch("src.core.market_review_lock.try_acquire_market_review_lock")
+    @patch("src.core.market_review_lock.release_market_review_lock")
+    @patch("api.v1.endpoints.schedule.get_task_queue")
+    def test_trigger_market_review_returns_202(
+        self, mock_get_queue, mock_release, mock_acquire
+    ):
+        mock_acquire.return_value = MagicMock()
+        mock_task = MagicMock()
+        mock_task.task_id = "def456"
+        mock_task.trace_id = "def456"
+        mock_get_queue.return_value.submit_background_task.return_value = mock_task
+
+        resp = self.client.post(
+            "/api/v1/schedule/trigger",
+            json={"task": "market_review"},
+        )
+        self.assertEqual(resp.status_code, 202)
+        body = resp.json()
+        self.assertEqual(body["task"], "market_review")
+        self.assertEqual(body["task_id"], "def456")
+        mock_release.assert_not_called()
+
+    @patch("src.core.scheduled_task_lock.acquire_task_lock")
+    @patch("src.core.scheduled_task_lock.release_task_lock")
+    @patch("api.v1.endpoints.schedule.get_task_queue")
+    def test_trigger_submit_failure_releases_lock(
+        self, mock_get_queue, mock_release, mock_acquire
+    ):
+        mock_acquire.return_value = MagicMock()
+        mock_get_queue.return_value.submit_background_task.side_effect = RuntimeError(
+            "queue full"
+        )
+
+        client = TestClient(
+            self.client.app, raise_server_exceptions=False
+        )
+        resp = client.post(
+            "/api/v1/schedule/trigger",
+            json={"task": "watchlist"},
+        )
+        self.assertEqual(resp.status_code, 500)
         mock_release.assert_called_once()
 
     def test_trigger_invalid_task(self):
@@ -103,6 +150,51 @@ class ScheduleTriggerEndpointTestCase(unittest.TestCase):
             json={"task": "watchlist"},
         )
         self.assertEqual(resp.status_code, 409)
+
+    @patch("src.core.market_review_lock.try_acquire_market_review_lock")
+    def test_trigger_duplicate_market_review(self, mock_acquire):
+        mock_acquire.return_value = None
+        resp = self.client.post(
+            "/api/v1/schedule/trigger",
+            json={"task": "market_review"},
+        )
+        self.assertEqual(resp.status_code, 409)
+
+    @patch("api.v1.endpoints.schedule._run_watchlist_task")
+    @patch("api.v1.endpoints.schedule.ScheduledTaskLogRepository")
+    @patch("src.core.scheduled_task_lock.release_task_lock")
+    def test_watchlist_background_wrapper_writes_task_log(
+        self, mock_release, MockRepo, mock_run
+    ):
+        from api.v1.endpoints.schedule import _run_watchlist_background
+
+        mock_repo = MagicMock()
+        MockRepo.return_value = mock_repo
+
+        _run_watchlist_background(MagicMock(), MagicMock())
+
+        statuses = [c.kwargs["status"] for c in mock_repo.save.call_args_list]
+        self.assertEqual(statuses, ["running", "success"])
+        mock_run.assert_called_once()
+        mock_release.assert_called_once()
+
+    @patch("api.v1.endpoints.schedule._run_watchlist_task")
+    @patch("api.v1.endpoints.schedule.ScheduledTaskLogRepository")
+    @patch("src.core.scheduled_task_lock.release_task_lock")
+    def test_watchlist_background_wrapper_logs_failure(
+        self, mock_release, MockRepo, mock_run
+    ):
+        from api.v1.endpoints.schedule import _run_watchlist_background
+
+        mock_run.side_effect = RuntimeError("boom")
+        mock_repo = MagicMock()
+        MockRepo.return_value = mock_repo
+
+        _run_watchlist_background(MagicMock(), MagicMock())
+
+        statuses = [c.kwargs["status"] for c in mock_repo.save.call_args_list]
+        self.assertEqual(statuses, ["running", "failed"])
+        mock_release.assert_called_once()
 
 
 class ScheduleLogsEndpointTestCase(unittest.TestCase):

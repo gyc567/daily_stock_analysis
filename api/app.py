@@ -31,6 +31,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.types import Scope
 
 logger = logging.getLogger(__name__)
 
@@ -148,9 +150,29 @@ from src.services.stock_index_remote_service import (
 
 
 _STOCK_INDEX_FILENAME = "stocks.index.json"
+# The web client fetches the index with an hour-bucket cache-buster
+# (`?_t=<Date.now()/3600000>`), so aligning max-age to one hour lets
+# repeat loads within the same hour reuse the CDN/browser cache entry.
 _STOCK_INDEX_HEADERS = {
-    "Cache-Control": "no-cache",
+    "Cache-Control": "public, max-age=3600",
 }
+
+
+class _AssetsStaticFiles(StaticFiles):
+    """StaticFiles for `/assets/*` (vite content-hashed bundles).
+
+    Every file under this mount carries a content hash in its name, so it
+    can be cached immutably; index.html keeps its existing no-store logic
+    and is served by a different route.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable"
+            )
+        return response
 
 
 def _bundled_stock_index_path() -> Path:
@@ -271,6 +293,12 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Compress responses >= 1KB. starlette's GZipMiddleware already exempts
+    # `text/event-stream` (DEFAULT_EXCLUDED_CONTENT_TYPES), so SSE progress
+    # streams pass through uncompressed and are not buffered by the gzip
+    # responder.
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     add_auth_middleware(app)
 
@@ -402,7 +430,9 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
         # static file simply does not exist on disk.
         assets_dir = static_dir / "assets"
 
-        assets_static_files = StaticFiles(directory=str(assets_dir), check_dir=False)
+        assets_static_files = _AssetsStaticFiles(
+            directory=str(assets_dir), check_dir=False
+        )
         assets_root = assets_dir.resolve()
 
         @app.api_route(
