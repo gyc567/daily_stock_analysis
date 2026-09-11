@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Schedule API response schemas."""
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
@@ -21,3 +21,26 @@ class ScheduleTriggerAccepted(BaseModel):
         description="本次后台任务的诊断 trace ID",
     )
     triggered_at: str = Field(..., description="触发时间（ISO 格式）")
+
+
+class ScheduleTriggerRequest(BaseModel):
+    task: str = Field(..., description="Task name: watchlist or market_review")
+
+
+class ScheduleStatusResponse(BaseModel):
+    recent_logs: list[Dict[str, Any]]
+    next_runs: Dict[str, Optional[str]]
+    health: Dict[str, Any]
+
+
+class ScheduleTriggerResponse(BaseModel):
+    message: str
+    task: str
+    triggered_at: str
+
+
+class ScheduleLogsResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    logs: list[Dict[str, Any]]

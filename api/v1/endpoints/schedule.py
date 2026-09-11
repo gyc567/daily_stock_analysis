@@ -8,13 +8,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from api.deps import get_config_dep
 from api.v1.errors import api_error
 from api.v1.schemas.common import ErrorResponse
-from api.v1.schemas.schedule import ScheduleTriggerAccepted
+from api.v1.schemas.schedule import (
+    ScheduleLogsResponse,
+    ScheduleStatusResponse,
+    ScheduleTriggerAccepted,
+    ScheduleTriggerRequest,
+)
 from src.config import Config
 from src.repositories.scheduled_task_log_repo import ScheduledTaskLogRepository
 from src.services.task_queue import get_task_queue
@@ -30,23 +35,6 @@ class ScheduleStatusResponse(BaseModel):
     recent_logs: list[Dict[str, Any]]
     next_runs: Dict[str, Optional[str]]
     health: Dict[str, Any]
-
-
-class ScheduleTriggerRequest(BaseModel):
-    task: str = Field(..., description="Task name: watchlist or market_review")
-
-
-class ScheduleTriggerResponse(BaseModel):
-    message: str
-    task: str
-    triggered_at: str
-
-
-class ScheduleLogsResponse(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    logs: list[Dict[str, Any]]
 
 
 @router.get(
@@ -113,10 +101,23 @@ def get_schedule_status(
     "/schedule/logs or the SSE progress endpoints.",
 )
 def trigger_task(
-    request: ScheduleTriggerRequest,
+    request: Optional[ScheduleTriggerRequest] = Body(None),
+    task_query: Optional[str] = Query(
+        None, alias="task", description="任务名：watchlist 或 market_review"
+    ),
     config: Config = Depends(get_config_dep),
 ) -> ScheduleTriggerAccepted:
-    if request.task not in _VALID_TASKS:
+    # 兼容两种调用形式：query param（历史 curl 用法，docs 原有示例）或 JSON body
+    task_name = (request.task if request else None) or task_query
+    if task_name is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "validation_error",
+                "message": "Missing required parameter: task (query or body)",
+            },
+        )
+    if task_name not in _VALID_TASKS:
         raise HTTPException(
             status_code=400,
             detail={
@@ -127,7 +128,7 @@ def trigger_task(
 
     task_id = uuid.uuid4().hex
 
-    if request.task == "watchlist":
+    if task_name == "watchlist":
         from src.core.scheduled_task_lock import (
             acquire_task_lock,
             release_task_lock,
@@ -139,7 +140,7 @@ def trigger_task(
         )
         if lock_token is None:
             raise api_error(
-                409, "duplicate_task", f"Task '{request.task}' is already running."
+                409, "duplicate_task", f"Task '{task_name}' is already running."
             )
         try:
             task = get_task_queue().submit_background_task(
@@ -163,7 +164,7 @@ def trigger_task(
             raise api_error(
                 409,
                 "duplicate_task",
-                f"Task '{request.task}' is already running.",
+                f"Task '{task_name}' is already running.",
             )
         try:
             task = get_task_queue().submit_background_task(
@@ -185,8 +186,8 @@ def trigger_task(
 
     return ScheduleTriggerAccepted(
         status="accepted",
-        message=f"Task '{request.task}' submitted for background execution.",
-        task=request.task,
+        message=f"Task '{task_name}' submitted for background execution.",
+        task=task_name,
         task_id=task.task_id,
         trace_id=trace_id,
         triggered_at=datetime.now().isoformat(),
