@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AppPage, Badge, Button, Card, EmptyState, Loading, PageHeader } from '../components/common';
+import { AppPage, Badge, Button, Card, Collapsible, EmptyState, Loading, PageHeader } from '../components/common';
 import { ReportMarkdownBody } from '../components/report/ReportMarkdownBody';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
@@ -172,6 +172,203 @@ const POSITION_HINT_TEXT: Record<string, Record<Lang, string>> = {
   full: { zh: '仓位上限内', en: 'Within position cap' },
 };
 
+// ----- Principle explainer (白话为主 + 关键技术参数括注; mirrors plan §4/§13.8) -----
+
+interface PrincipleBlock {
+  heading?: Record<Lang, string>;
+  text?: Record<Lang, string>;
+  items?: Record<Lang, string>[];
+}
+
+interface PrincipleSection {
+  id: string;
+  title: Record<Lang, string>;
+  blocks: PrincipleBlock[];
+}
+
+const PRINCIPLE_SECTIONS: PrincipleSection[] = [
+  {
+    id: 'what',
+    title: { zh: '这是什么：两个问题与一条边界', en: 'What it is: two questions, one boundary' },
+    blocks: [
+      {
+        text: {
+          zh: '趋势罗盘用「周线过滤 + 日线三层结构」回答两个中期问题：这轮趋势还在不在？仓位该有多重？日线噪音（盘中波动、单日涨跌）被过滤掉，只留下周线到月级别的判断。',
+          en: 'The compass answers two midterm questions with a weekly filter plus three daily layers: is this trend still alive, and how heavy should the position be? Daily noise (intraday swings, single-day moves) is filtered out, leaving week-to-month judgements only.',
+        },
+      },
+      {
+        text: {
+          zh: '边界：本模块不做无约束的短期价格预测。择时信号是「条件触发的交易计划」（触发价 + 失效价 + 条件说明），跌破失效价计划立即作废——它是纪律工具，不是水晶球。',
+          en: 'Boundary: this module makes no unconstrained short-term price predictions. Timing signals are condition-triggered trade plans (trigger + invalidation price + conditions); once the invalidation price trades the plan is void — a discipline tool, not a crystal ball.',
+        },
+      },
+      {
+        heading: { zh: '用到的技术参数', en: 'Technical parameters' },
+        items: [
+          {
+            zh: '日线均线簇 EMA20 / EMA50 / EMA100 / EMA200；动量指标 RSI(14)',
+            en: 'Daily EMA cluster EMA20 / EMA50 / EMA100 / EMA200; momentum RSI(14)',
+          },
+          {
+            zh: '周线 EMA50 / EMA200（多头与仓位的总闸）',
+            en: 'Weekly EMA50 / EMA200 (the master gate for trend and position size)',
+          },
+          {
+            zh: '数据为前复权日线，默认窗口约 5 年（1200 个交易日）',
+            en: 'Adjusted (qfq) daily bars, default window ~5 years (1200 trading days)',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'layers',
+    title: { zh: '四层结构：各管一段时间', en: 'Four layers, each with its own time window' },
+    blocks: [
+      {
+        text: {
+          zh: '四层各管一段时间、互相独立——一层变差只影响它自己那部分结论。',
+          en: 'Each layer covers its own time window and is independent — deterioration in one only affects its own part of the verdict.',
+        },
+      },
+      {
+        items: [
+          {
+            zh: 'L0 周线过滤（最硬的一道闸）：价格站在 200 周线之上且 50 周线向上，才允许在仓位上限内买入；价格压在 200 周线下 = 周线空头，默认禁止新建买入。仓位上限三档：允许重仓波段 / 半仓上限 / 禁止买入。周 K 样本不足（<60 根）时本层退出决策。',
+            en: 'L0 Weekly filter (the hardest gate): buying is allowed only above the 200-week EMA with the 50-week EMA rising, and only within the position cap; below the 200-week EMA is weekly bear — fresh buys blocked by default. Three cap levels: full / half / none. With fewer than 60 weekly bars this layer steps out of the decision.',
+          },
+          {
+            zh: 'L1 年线（半年-一年）：牛熊大背景。年线为空整体偏防守；样本不足时「不信任趋势扩张」，直接否决买入。',
+            en: 'L1 Annual (6-12 months): the bull/bear backdrop. Annual bear is defensive overall; with insufficient samples it distrusts trend expansion and blocks buys outright.',
+          },
+          {
+            zh: 'L2 主趋势段（1-3 个月）：趋势是否还活着。alive=仍在；resting=回踩休整（是回踩不是反转，故休整段禁止恐慌卖出）；broken=结构破坏（若年线同为空头且收盘确认，允许离场）。',
+            en: 'L2 Segment (1-3 months): whether the trend is still alive. alive=yes; resting=a pullback (not a reversal, so panic sells are blocked); broken=structure break (exit allowed when the annual layer is also bearish and the close confirms).',
+          },
+          {
+            zh: 'L3 节奏（2-6 周）：管加速度不管方向。healthy=健康；cooling=降温；exhausted=失配（动能先弱，不追买，卖出也降级）；noisy=数据嘈杂。',
+            en: 'L3 Rhythm (2-6 weeks): governs acceleration, not direction. healthy / cooling / exhausted (momentum fades first — no chasing, sells downgraded too) / noisy.',
+          },
+        ],
+      },
+      {
+        text: {
+          zh: '阶段合成：四层状态合成五个阶段（扩张 / 持有 / 疲惫 / 收敛 / 切换），决定你看多远：执行窗 1 周、节奏窗 2 周、主趋势窗 1 个月。收敛与切换阶段方向未明，所有买入一律降级为观望。',
+          en: 'Phase synthesis: the four layers compose into five phases (expanding / holding / tiring / coiling / transitioning), which set the horizon: 1-week execution, 2-week rhythm, 1-month segment window. In coiling and transitioning phases direction is unclear — every buy is downgraded to watch.',
+        },
+      },
+    ],
+  },
+  {
+    id: 'rewrite',
+    title: { zh: '动作改写：为什么不直接信「建议买入」', en: 'Action rewrite: why a draft is not the final call' },
+    blocks: [
+      {
+        text: {
+          zh: '原则：初稿动作（例如模型给出的建议）只是「建议」，必须逐条通过硬约束链。约束只能否决或降级，永远不能把「观望」升级成「买入」。每触发一条，改写面板就显示一行中文解释，最终结论以链条末端为准。',
+          en: 'Principle: a draft action (e.g. a model suggestion) is only a suggestion and must pass the hard-constraint chain rule by rule. Constraints can only veto or downgrade — they can never upgrade "watch" into "buy". Each fired rule shows one explained line in the rewrite panel; the chain end is the final call.',
+        },
+      },
+      {
+        heading: { zh: '三个实例', en: 'Three examples' },
+        items: [
+          {
+            zh: '否决链：初稿「买入」+ 周线空头 → 否决为观望；若年线、趋势段同为空头 → 链条继续，默认改为「卖出」。600519 真实行情就是这种形态。',
+            en: 'Veto chain: draft "buy" + weekly bear → vetoed to watch; if the annual layer and segment are also bearish → the chain continues and defaults to "sell". 600519 in live data is exactly this shape.',
+          },
+          {
+            zh: '保护性否决：初稿「卖出」+ 多头趋势段只是休整 → 否决（回踩不是反转，不割在坑里）。',
+            en: 'Protective veto: draft "sell" while a bull segment is merely resting → vetoed (a pullback is not a reversal; do not sell into the hole).',
+          },
+          {
+            zh: '放行例外：周线空头下出现超卖抄底信号，买入可被放行为逆势博弈仓——但仅解除周线这一条否决，阶段/样本等其余约束照常生效。',
+            en: 'Pass exception: under weekly bear an oversold bottom-fishing signal can pass as a counter-trend sleeve — but only the weekly veto is lifted; phase/sample constraints still apply.',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'timing',
+    title: { zh: '择时信号：条件触发的交易计划', en: 'Timing signals: condition-triggered trade plans' },
+    blocks: [
+      {
+        text: {
+          zh: '三种信号共用同一个形态：触发价（计划生效参考）、失效价（跌破即作废）、有效期（按阶段 5-20 个交易日）、仓位提示。它们只在收盘确认的 K 线上出现，盘中不出信号。',
+          en: 'All three signals share one form: trigger price (plan activation reference), invalidation price (void once traded), validity (5-20 trading days by phase), and a position hint. They appear only on confirmed closing bars — never intraday.',
+        },
+      },
+      {
+        items: [
+          {
+            zh: '顺势回踩入场：上涨趋势中回踩 EMA20（盘中触及 ±1%）且 RSI 回到 40-55 的复位区、收盘收复 EMA20、短期斜率向上 → 触发。失效价 = 回踩低点下方 1%。',
+            en: 'Pullback entry: in an uptrend, price dips into the EMA20 zone (within ±1%) with RSI reset to the 40-55 band, then closes back above the EMA20 with a positive short-term slope → triggered. Invalidation = 1% below the pullback low.',
+          },
+          {
+            zh: '超卖抄底：RSI 跌破 30 + 底背离（价格新低而 RSI 低点抬高）+ 止跌阳线。周线空头下也出信号，但仓位提示固定「轻仓」——逆势博弈仓，与趋势仓位分开管理；硬止损按失效价，另设 5 个交易日时间止损，不反弹即离场。',
+            en: 'Bottom fishing: RSI below 30 + bullish divergence (price new low while the RSI low rises) + a stabilizing up close. It also fires under weekly bear, but the position hint is fixed at "light" — a counter-trend sleeve managed apart from trend positions; hard stop at the invalidation price plus a 5-trading-day time stop, exit if no rebound.',
+          },
+          {
+            zh: '高位逃顶：超买衰竭（RSI>75 且斜率转负）/ 顶背离（价格新高而 RSI 不新高）/ 跌破 EMA20 且斜率转负 → 触发。失效价 = 前高上方 1%：若价格再创新高，说明判断错了，计划作废。全多头健康结构下不逃顶。',
+            en: 'Top escape: overbought exhaustion (RSI>75 with the slope turning negative) / bearish divergence (price new high, RSI not) / losing the EMA20 with a negative slope → triggered. Invalidation = 1% above the prior high: a new high means the call was wrong and the plan is void. No escape signals inside a healthy full-bull stack.',
+          },
+        ],
+      },
+      {
+        text: {
+          zh: '纪律：跌破失效价立即作废，不补仓、不扛单。',
+          en: 'Discipline: the plan is void the moment the invalidation price trades — no averaging down, no holding through stops.',
+        },
+      },
+    ],
+  },
+  {
+    id: 'discipline',
+    title: { zh: '失效条件与数据纪律', en: 'Invalidation & data discipline' },
+    blocks: [
+      {
+        items: [
+          {
+            zh: '整卡作废：任一失效条件触发（周线转空、趋势段破坏、节奏持续失配），本卡结论立即作废，等下一根收盘确认再评估。',
+            en: 'Whole-card invalidation: if any invalidation condition fires (weekly turns bear, segment breaks, rhythm stays exhausted), this card is void immediately — re-evaluate only after the next confirmed close.',
+          },
+          {
+            zh: '盘中只展示、不出信号：未收盘的 K 线可能反转（T+1 无纠错权），所有买入类信号都要求收盘确认。',
+            en: 'Intraday is display-only: an unclosed bar can still reverse (no correction right under T+1); every buy-side signal requires a confirmed close.',
+          },
+          {
+            zh: '样本不足宁缺毋滥：哪层样本不够，哪层标记「样本不足」并退出决策——缺数据比错数据好。',
+            en: 'When samples are insufficient the layer is marked "insufficient sample" and steps out — missing data beats wrong data.',
+          },
+          {
+            zh: '各模块独立：缠论、波浪等其他模块不读罗盘，结论冲突时以各自免责声明为准。',
+            en: 'Modules are independent: Chan theory, Elliott wave and others do not read the compass; when conclusions conflict, each module\'s own disclaimer governs.',
+          },
+        ],
+      },
+    ],
+  },
+];
+
+// 全量硬约束表（§4.5.2，14 条），原则 + 实例之外的速查区。
+const CONSTRAINT_TABLE: { no: string; condition: Record<Lang, string>; action: Record<Lang, string>; note: Record<Lang, string> }[] = [
+  { no: '1', condition: { zh: '数据缺失或停滞', en: 'Data missing or stale' }, action: { zh: '观望', en: 'Watch' }, note: { zh: '行情不可用，按最保守处理', en: 'Unusable data falls back to the most conservative call' } },
+  { no: '2', condition: { zh: '盘中 K 线未收盘确认', en: 'Intraday bar unconfirmed' }, action: { zh: '买入 → 观望', en: 'Buy → Watch' }, note: { zh: 'T+1 下盘中买入没有纠错权', en: 'No correction right for intraday buys under T+1' } },
+  { no: '3', condition: { zh: '周线空头', en: 'Weekly bear' }, action: { zh: '买入 → 观望', en: 'Buy → Watch' }, note: { zh: '价格在 200 周线下；超卖抄底信号除外（逆势博弈仓放行）', en: 'Below the 200-week EMA; except bottom-fishing signals (counter-trend sleeve)' } },
+  { no: '4', condition: { zh: '周线转换期', en: 'Weekly transition' }, action: { zh: '不改写动作', en: 'No rewrite' }, note: { zh: '方向未定，仅降级置信度', en: 'Direction unclear; confidence downgraded only' } },
+  { no: '5', condition: { zh: '年线样本不足', en: 'Annual sample too small' }, action: { zh: '买入 → 观望', en: 'Buy → Watch' }, note: { zh: '样本不够，不信任趋势扩张', en: 'Insufficient samples to trust trend expansion' } },
+  { no: '6', condition: { zh: '收敛 / 切换阶段', en: 'Coiling / transitioning phase' }, action: { zh: '买入 → 观望', en: 'Buy → Watch' }, note: { zh: '方向未明，不追买', en: 'Direction unclear; no chasing' } },
+  { no: '7', condition: { zh: '趋势疲惫', en: 'Trend tiring' }, action: { zh: '买入 → 观望', en: 'Buy → Watch' }, note: { zh: '上涨动能先弱，不追买', en: 'Momentum fades first; no chasing' } },
+  { no: '8', condition: { zh: '趋势段休整', en: 'Segment resting' }, action: { zh: '卖出 → 观望', en: 'Sell → Watch' }, note: { zh: '休整是回踩而非反转', en: 'A pullback is not a reversal' } },
+  { no: '9', condition: { zh: '空头结构破坏（年线空 + 段破坏 + 收盘确认）', en: 'Bearish break (annual bear + segment broken + confirmed close)' }, action: { zh: '观望/买入 → 卖出', en: 'Watch/Buy → Sell' }, note: { zh: '允许离场', en: 'Exit allowed' } },
+  { no: '10', condition: { zh: '多头段内破坏', en: 'Break inside a bull segment' }, action: { zh: '卖出 → 观望', en: 'Sell → Watch' }, note: { zh: '属回调而非反转，禁止恐慌卖出', en: 'A pullback, not a reversal; panic sells blocked' } },
+  { no: '11', condition: { zh: '年线 + 趋势段双空头', en: 'Annual + segment double bear' }, action: { zh: '观望 → 卖出', en: 'Watch → Sell' }, note: { zh: '双重空头默认卖出；节奏失配时降回观望', en: 'Default sell; downgraded back to watch when rhythm is exhausted' } },
+  { no: '12', condition: { zh: '全多头健康结构', en: 'Healthy full-bull stack' }, action: { zh: '卖出 → 观望', en: 'Sell → Watch' }, note: { zh: '屏蔽与趋势冲突的卖出', en: 'Trend-fighting sells blocked' } },
+  { no: '13', condition: { zh: '大盘环境护栏', en: 'Market-context guardrail' }, action: { zh: '仅记录', en: 'Audit note' }, note: { zh: '大盘不佳时的软化提示，不改变罗盘结论', en: 'Softening note; does not change the compass verdict' } },
+  { no: '14', condition: { zh: '交易时段护栏', en: 'Phase guardrail' }, note: { zh: '当前时段不支持该动作的压制提示', en: 'Suppression note when the session does not support the action' }, action: { zh: '仅记录', en: 'Audit note' } },
+];
+
 const LAYER_HEADINGS: { key: 'weekly' | 'annual' | 'segment' | 'rhythm'; zh: string; en: string }[] = [
   { key: 'weekly', zh: 'L0 周线过滤', en: 'L0 Weekly filter' },
   { key: 'annual', zh: 'L1 年线（半年-一年）', en: 'L1 Annual filter' },
@@ -283,6 +480,69 @@ export default function TrendCompassPage() {
           </div>
         </div>
       </Card>
+
+      <div className="mt-4">
+        <h2 className="text-base font-semibold text-foreground">
+          {lang === 'en' ? 'How the compass works' : '罗盘原理说明'}
+        </h2>
+        <p className="mt-1 text-xs text-secondary-text">
+          {lang === 'en'
+            ? 'Methodology in plain language: what each layer does, how the rewrite chain works, and what timing signals really mean.'
+            : '白话版方法论：每层在干什么、改写链怎么工作、择时信号到底意味着什么。'}
+        </p>
+        {PRINCIPLE_SECTIONS.map((section) => (
+          <Collapsible key={section.id} title={section.title[lang]} className="mt-2">
+            <div className="space-y-3 text-sm">
+              {section.blocks.map((block, idx) => (
+                <div key={idx}>
+                  {block.heading ? (
+                    <p className="mb-1 font-medium text-foreground">{block.heading[lang]}</p>
+                  ) : null}
+                  {block.text ? (
+                    <p className="text-secondary-text">{block.text[lang]}</p>
+                  ) : null}
+                  {block.items ? (
+                    <ul className="list-disc space-y-1.5 pl-5 text-secondary-text">
+                      {block.items.map((item, j) => (
+                        <li key={j}>{item[lang]}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ))}
+              {section.id === 'rewrite' ? (
+                <Collapsible
+                  title={lang === 'en' ? 'Full hard-constraint table (14 rules)' : '全部 14 条硬约束速查表'}
+                  className="mt-1"
+                >
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border text-left text-secondary-text">
+                          <th className="py-1 pr-2 font-medium">#</th>
+                          <th className="py-1 pr-2 font-medium">{lang === 'en' ? 'When' : '触发条件'}</th>
+                          <th className="py-1 pr-2 font-medium">{lang === 'en' ? 'Action' : '动作'}</th>
+                          <th className="py-1 font-medium">{lang === 'en' ? 'Why' : '说明'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {CONSTRAINT_TABLE.map((row) => (
+                          <tr key={row.no} className="border-b border-border/40 align-top">
+                            <td className="py-1.5 pr-2 text-secondary-text">{row.no}</td>
+                            <td className="py-1.5 pr-2 text-foreground">{row.condition[lang]}</td>
+                            <td className="py-1.5 pr-2 text-foreground">{row.action[lang]}</td>
+                            <td className="py-1.5 text-secondary-text">{row.note[lang]}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Collapsible>
+              ) : null}
+            </div>
+          </Collapsible>
+        ))}
+      </div>
 
       {loading ? <Loading className="mt-8" /> : null}
 
