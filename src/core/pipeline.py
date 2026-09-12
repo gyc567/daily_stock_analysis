@@ -96,6 +96,9 @@ logger = logging.getLogger(__name__)
 _SINGLE_STOCK_NOTIFY_LOCK_INIT_GUARD = threading.Lock()
 _DAILY_MARKET_CONTEXT_SERVICE_LOCK_INIT_GUARD = threading.Lock()
 
+# 罗盘只作用于个股/ETF；大盘复盘代码（MARKET）走 §13.3 的部分复用路径，P3 处理。
+_COMPASS_EXCLUDED_CODES = {"MARKET"}
+
 
 class StockAnalysisPipeline:
     """
@@ -122,6 +125,7 @@ class StockAnalysisPipeline:
         portfolio_context: Optional[Dict[str, Any]] = None,
         daily_market_context_enabled: Optional[bool] = None,
         daily_market_context_allow_generate: bool = True,
+        compass_snapshot_write: bool = False,
     ):
         """
         初始化调度器
@@ -155,6 +159,9 @@ class StockAnalysisPipeline:
             else bool(daily_market_context_enabled)
         )
         self.daily_market_context_allow_generate = daily_market_context_allow_generate
+        # §13.7: 罗盘快照仅 cron（定时/批量）路径落盘 context_snapshot；
+        # Web/API 手动分析构造 pipeline 时不开启（默认 False）。
+        self.compass_snapshot_write = compass_snapshot_write
 
         # 初始化各模块
         self.db = get_db()
@@ -772,6 +779,12 @@ class StockAnalysisPipeline:
                         code,
                         market_context_adjustments,
                     )
+                self._apply_midterm_compass(
+                    result,
+                    code,
+                    prior_softened=bool(market_context_adjustments),
+                    prior_suppressed=bool(adjustments),
+                )
                 if isinstance(fundamental_context, dict):
                     result.fundamental_context = fundamental_context
                 result.market_phase_summary = market_phase_summary
@@ -802,6 +815,7 @@ class StockAnalysisPipeline:
                         chip_data=chip_data,
                         analysis_context_pack_overview=analysis_context_pack_overview,
                         market_phase_summary=market_phase_summary,
+                        midtrend_compass=getattr(result, "midtrend_compass", None),
                     )
                     result.diagnostic_context_snapshot = context_snapshot
                     saved_history_id = self.db.save_analysis_history(
@@ -1435,6 +1449,12 @@ class StockAnalysisPipeline:
                         code,
                         market_context_adjustments,
                     )
+                self._apply_midterm_compass(
+                    result,
+                    code,
+                    prior_softened=bool(market_context_adjustments),
+                    prior_suppressed=bool(adjustments),
+                )
                 if isinstance(fundamental_context, dict):
                     result.fundamental_context = fundamental_context
                 result.market_phase_summary = market_phase_summary
@@ -1505,6 +1525,7 @@ class StockAnalysisPipeline:
                         chip_data=chip_data,
                         analysis_context_pack_overview=analysis_context_pack_overview,
                         market_phase_summary=market_phase_summary,
+                        midtrend_compass=getattr(result, "midtrend_compass", None),
                     )
                     result.diagnostic_context_snapshot = agent_context_snapshot
                     agent_context_snapshot["stock_name"] = resolved_stock_name
@@ -2442,6 +2463,104 @@ class StockAnalysisPipeline:
             df = pd.concat([df, new_df], ignore_index=True)
         return df
 
+    def _apply_midterm_compass(
+        self,
+        result: AnalysisResult,
+        code: str,
+        *,
+        prior_softened: bool,
+        prior_suppressed: bool,
+    ) -> None:
+        """P2 PR-B4: midterm compass rewriter, placed after the daily-market-context
+        guardrail in the guardrail chain (plan §4.5.1).
+
+        Fetches daily closes, computes L0/L1/L2/L3 + phase, rewrites the draft
+        action per §4.5.2, and writes the most conservative result back to
+        ``result``. Degradation (plan §3): any fetch/compute failure logs a
+        warning and passes through unchanged. The evaluation snapshot lands on
+        ``result.midtrend_compass`` and is persisted only on cron paths
+        (§13.7, gated by ``self.compass_snapshot_write``).
+        """
+        if not getattr(self.config, "compass_enabled", False):
+            return
+        if result is None or code.upper() in _COMPASS_EXCLUDED_CODES:
+            return
+        try:
+            from src.services.compass import engine as compass_engine
+            from src.services.compass import fetcher as compass_fetcher
+            from src.services.compass.action_mapper import map_compass_action
+            from src.services.compass.rewriter import (
+                CompassState,
+                infer_bar_status,
+                rewrite,
+                to_compass_draft,
+            )
+
+            daily, weekly, _source = compass_fetcher.fetch_for_compass(
+                self.fetcher_manager, code
+            )
+            if daily is None or len(daily) < 30:
+                logger.warning(
+                    "[midtrend_compass] insufficient daily bars for %s; skipped", code
+                )
+                return
+            output = compass_engine.compute(daily, weekly)
+            last_bar_date = daily.index[-1].date()
+            bar_status = infer_bar_status(last_bar_date)
+            draft = to_compass_draft(
+                getattr(result, "action", None) or getattr(result, "operation_advice", None)
+            )
+            rewrite_result = rewrite(
+                draft,
+                CompassState(
+                    weekly=output.l0,
+                    annual=output.l1,
+                    segment=output.l2,
+                    rhythm=output.l3,
+                    phase=output.phase,
+                    bar_status=bar_status,
+                ),
+                prior_softened=prior_softened,
+                prior_suppressed=prior_suppressed,
+            )
+            changed = rewrite_result.final_action != draft or bool(
+                rewrite_result.reason_codes
+            )
+            if changed:
+                mapped = map_compass_action(rewrite_result.final_action)
+                result.decision_type = mapped.decision_type
+                result.action = mapped.action
+                result.operation_advice = mapped.operation_advice
+                conclusion = getattr(result, "investment_conclusion", None)
+                if isinstance(conclusion, dict):
+                    conclusion["action"] = mapped.investment_action
+            result.midtrend_compass = {
+                "compass_version": "1.0",
+                "code": code,
+                "as_of_trade_date": last_bar_date.isoformat(),
+                "weekly": output.l0,
+                "annual": output.l1,
+                "segment": output.l2,
+                "rhythm": output.l3,
+                "phase": output.phase,
+                "bar_status": bar_status,
+                "initial_action": draft,
+                "final_action": rewrite_result.final_action,
+                "action_reason_codes": list(rewrite_result.reason_codes),
+            }
+            if changed:
+                logger.info(
+                    "[midtrend_compass] %s: %s -> %s (%s)",
+                    code,
+                    draft,
+                    rewrite_result.final_action,
+                    rewrite_result.reason_codes,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[midtrend_compass] skipped for %s: %s", code, exc, exc_info=True
+            )
+
     def _build_context_snapshot(
         self,
         enhanced_context: Dict[str, Any],
@@ -2451,6 +2570,7 @@ class StockAnalysisPipeline:
         news_result_count: Optional[int] = None,
         analysis_context_pack_overview: Optional[Dict[str, Any]] = None,
         market_phase_summary: Optional[Dict[str, Any]] = None,
+        midtrend_compass: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         构建分析上下文快照
@@ -2469,6 +2589,9 @@ class StockAnalysisPipeline:
             snapshot["analysis_context_pack_overview"] = analysis_context_pack_overview
         if market_phase_summary is not None:
             snapshot[MARKET_PHASE_SUMMARY_KEY] = market_phase_summary
+        # §13.7：罗盘快照仅 cron（定时/批量）路径落盘，由 compass_snapshot_write 控制。
+        if midtrend_compass is not None and self.compass_snapshot_write:
+            snapshot["midtrend_compass"] = midtrend_compass
         diagnostic_snapshot = current_diagnostic_snapshot()
         if diagnostic_snapshot is not None:
             snapshot["diagnostics"] = diagnostic_snapshot

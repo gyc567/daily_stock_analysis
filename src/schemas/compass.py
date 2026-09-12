@@ -60,6 +60,11 @@ ActionReasonCode = Literal[
     "l1_l2_l3_healthy_buy_allowed",
     "market_guardrail_softened",
     "phase_guardrail_suppressed",
+    "weekly_bear_bottom_fishing_pass",
+    "bottom_fishing_time_stop",
+    "top_escape_exhaustion",
+    "top_escape_divergence",
+    "top_escape_ema_loss",
 ]
 
 # Horizons (derived from phase, never user-overridable)
@@ -67,6 +72,11 @@ ObserveHorizon = Literal["1w", "2w", "1m"]
 
 # Position ceiling (derived from L0 weekly filter)
 PositionFilter = Literal["full", "half", "none"]
+
+# L4 timing signals (daily level, gated by L0-L3; plan §13.8)
+TimingSignalType = Literal["pullback_entry", "bottom_fishing", "top_escape"]
+TimingSignalStatus = Literal["armed", "triggered"]
+PositionHint = Literal["light", "medium", "full"]
 
 
 # ----- ----- ----- ----- ----- ----- ----- ----- ----- ----- ----- ----- -----
@@ -131,6 +141,26 @@ class VsPrevious(_StrictBase):
     l0_change: Literal["up", "down", "flat"]
 
 
+class TimingSignal(_StrictBase):
+    """L4 daily-level timing plan: condition-triggered, never a price prediction.
+
+    ``trigger_price``/``invalidation_price`` form the actionable plan; the
+    signal is void the moment the invalidation price trades. ``countertrend``
+    marks signals that bypass the L0 position cap under their own (stricter)
+    position discipline — see plan §13.8.
+    """
+
+    type: TimingSignalType
+    status: TimingSignalStatus
+    countertrend: bool = False
+    reason_codes: list[ActionReasonCode] = Field(default_factory=list, max_length=6)
+    trigger_price: Optional[float] = None
+    invalidation_price: Optional[float] = None
+    position_hint: PositionHint = "light"
+    horizon_days: Annotated[int, Field(ge=1, le=60)] = 5
+    as_of_bar_date: date
+
+
 class MidtrendCompass(_StrictBase):
     """The frozen v1 contract. Versioned; breaking change => bump to 1.1+."""
 
@@ -158,9 +188,12 @@ class MidtrendCompass(_StrictBase):
     observe_horizon: ObserveHorizon
     position_filter: PositionFilter
 
-    # P1 only: rewriter is P2. The struct keeps the field but stays neutral.
+    # Rewriter output (neutral by default; endpoints may inject via model_copy).
     action_bias: CompassAction = "watch"
     action_reason: list[ActionReasonCode] = Field(default_factory=list, max_length=10)
+
+    # L4 daily timing signals (empty when disabled or nothing qualifies).
+    timing: list[TimingSignal] = Field(default_factory=list, max_length=3)
 
     vs_previous: Optional[VsPrevious] = None
     risks: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
@@ -168,7 +201,7 @@ class MidtrendCompass(_StrictBase):
         max_length=20,
     )
     disclaimer: Annotated[str, Field(max_length=500)] = (
-        "本模块不预测短期价格；分批与执行窗不在本模块范围。"
+        "本模块不提供无约束的短期价格预测；择时信号为条件触发的交易计划（触发价+失效价），受趋势结构门控。"
     )
 
     @field_validator("calculated_at")

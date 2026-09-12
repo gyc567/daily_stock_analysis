@@ -1,0 +1,50 @@
+# Midterm Trend Compass Strategy / 中期趋势罗盘
+
+name: midtrend_compass
+display_name: 中期趋势罗盘
+description: 基于周线 EMA200 过滤层与日线 EMA20/50/100/200 + RSI(14) 三层结构的中期趋势过滤器，输出 buy/watch/sell 三档动作改写（plan v2 §4.5.2 硬约束表）。
+category: trend
+core_rules: [1, 2, 3]
+required_tools:
+  - get_daily_history
+aliases: [趋势罗盘, 中期罗盘, 罗盘]
+# §13.4 已冻结：默认关，用户在策略设置中自行开启。
+default_active: false
+default_router: false
+default_priority: 20
+market_regimes: [trending_up, ranging]
+
+instructions: |
+  **中期趋势罗盘（Midterm Trend Compass）**
+
+  适用场景：
+  - 千万级波段资金的中期趋势过滤（数周至数月持仓周期）。
+  - 判断"这轮趋势还在不在、仓位该有多重"，不预测短期价格。
+
+  分析框架：
+
+  1. **周线过滤层（L0）**
+     - 价与 EMA50 同时位于周线 EMA200 上方 → `weekly_bull`，允许日线做重波段。
+     - 价与 EMA50 同时位于周线 EMA200 下方 → `weekly_bear`，禁止系统买入。
+     - 其余 → `weekly_transition`，仅降级 confidence，不封顶终态（§13.1 分级决策）。
+
+  2. **日线三层（主罗盘）**
+     - L1（半年-一年）：annual_bull / annual_bear / annual_transition / annual_disabled。
+     - L2（1-3 个月大仓位核心）：alive / resting / flattening / broken。
+     - L3（2-6 周节奏）：healthy / cooling / exhausted / noisy。
+
+  3. **阶段合成**
+     - 按 plan §4.3 优先级短路求值：trend_expanding / trend_holding /
+       trend_tiring / coiling / transitioning。
+
+  4. **动作改写（§4.5.2 硬约束表）**
+     - L1 空头 + L2 alive → 默认 sell；L3 exhausted 降级为 watch（§13.2）。
+     - L2 resting 禁止把休整当反转（sell → watch）。
+     - L2 broken + L1 偏空 + 收盘 → 允许离场（watch/buy → sell）。
+     - 扩张/持有阶段不自动升级 buy；收口/切换阶段 buy 降级 watch。
+     - 盘中（intraday_unconfirmed）一律降级 buy。
+
+  评分调整建议：
+  - weekly_bull + L1/L2/L3 全多头：`sentiment_score +10`
+  - weekly_bear 且初稿 buy：强制 `watch`（reason: weekly_bear_buy_blocked）
+  - L2 broken + L1 bear：`operation_advice` 改写为卖出参考（reason: l2_broken_bear_allow_sell）

@@ -55,11 +55,18 @@ def ensure_litellm_stub() -> None:
     sys.modules["litellm.types"] = litellm_types_stub
     sys.modules["litellm.types.utils"] = litellm_types_utils_stub
 
+    # src.analyzer imports ``from litellm.router import Router``; the submodule
+    # must exist in sys.modules or the package-style import fails.
+    litellm_router_stub = types.ModuleType("litellm.router")
+    litellm_router_stub.Router = _DummyRouter
+    sys.modules["litellm.router"] = litellm_router_stub
+    litellm_stub.router = litellm_router_stub
+
 
 def remove_litellm_stub() -> None:
     """Remove this stub so tests that need real LiteLLM types can import them."""
     if not getattr(sys.modules.get("litellm"), "__dsa_test_stub__", False):
         return
 
-    for module_name in ("litellm.types.utils", "litellm.types", "litellm"):
+    for module_name in ("litellm.router", "litellm.types.utils", "litellm.types", "litellm"):
         sys.modules.pop(module_name, None)

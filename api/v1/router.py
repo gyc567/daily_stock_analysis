@@ -19,6 +19,7 @@ from api.v1.endpoints import (
     auth,
     backtest,
     chanlun,
+    compass,
     decision_signals,
     health,
     history,
@@ -85,6 +86,8 @@ router.include_router(
 )
 
 router.include_router(chanlun.router, prefix="/chanlun", tags=["Chanlun"])
+
+router.include_router(compass.router, prefix="/compass", tags=["Compass"])
 
 router.include_router(alphasift.router, prefix="/alphasift", tags=["AlphaSift"])
 

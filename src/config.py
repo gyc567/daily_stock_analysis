@@ -1059,6 +1059,12 @@ class Config:
     # 是否保存分析上下文快照（用于历史回溯）
     save_context_snapshot: bool = True
 
+    # === 中期趋势罗盘配置 ===
+    # 趋势罗盘改写器总开关（§13.4：默认关，开启后挂入个股分析 guardrail 链）
+    compass_enabled: bool = False
+    # L4 日线择时信号总开关（§13.8：默认关，开启后罗盘页展示入场/抄底/逃顶信号）
+    compass_timing_enabled: bool = False
+
     # === 回测配置 ===
     backtest_enabled: bool = True
     backtest_eval_window_days: int = 10
@@ -2075,6 +2081,9 @@ class Config:
                 minimum=0.0,
             ),
             save_context_snapshot=os.getenv("SAVE_CONTEXT_SNAPSHOT", "true").lower()
+            == "true",
+            compass_enabled=os.getenv("COMPASS_ENABLED", "false").lower() == "true",
+            compass_timing_enabled=os.getenv("COMPASS_TIMING_ENABLED", "false").lower()
             == "true",
             backtest_enabled=os.getenv("BACKTEST_ENABLED", "true").lower() == "true",
             backtest_eval_window_days=parse_env_int(

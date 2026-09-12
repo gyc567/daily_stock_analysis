@@ -7,6 +7,11 @@ P1 strategy: weekly closes are derived from daily via ``W-FRI`` resample rather
 than introducing a new data source. This keeps ``data_provider/`` untouched
 (per ``LOOP_CONSTRAINTS.md`` denylist) and still satisfies the "≥ 60 weekly
 bars" rule from the plan: 60 weekly bars ≈ 1.2 years of daily data.
+
+The default window is 1200 trading days (~5 years) so the derived weekly
+series reaches the ≥ 200 weekly bars required by ``engine.derive_l0`` to seed
+the weekly EMA200; 600 days only yields ~170 weekly bars and permanently
+disables the L0 filter.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ def fetch_daily_closes(
     manager: DataFetcherManager,
     code: str,
     *,
-    days: int = 600,
+    days: int = 1200,
     end_date: Optional[str] = None,
 ) -> Tuple[pd.Series, str]:
     """Fetch qfq daily closes via the existing DataFetcherManager.
@@ -87,11 +92,48 @@ def derive_weekly_closes(daily_closes: pd.Series) -> pd.Series:
     lambda manager: manager is not None,
     "manager must be a DataFetcherManager instance",
 )
+def fetch_daily_ohlcv(
+    manager: DataFetcherManager,
+    code: str,
+    *,
+    days: int = 1200,
+    end_date: Optional[str] = None,
+) -> Tuple[pd.DataFrame, str]:
+    """Fetch qfq daily OHLCV (L4 timing input). Same window policy as
+    ``fetch_daily_closes``; columns: open/high/low/close/volume indexed by
+    ascending DatetimeIndex, deduplicated."""
+    if end_date is None:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+    start_dt = datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=days * 2)
+    start_date = start_dt.strftime("%Y-%m-%d")
+
+    df, source = manager.get_daily_data(
+        stock_code=code, start_date=start_date, end_date=end_date, days=days,
+    )
+    required = {"open", "high", "low", "close"}
+    if df is None or df.empty or not required.issubset(df.columns):
+        raise ValueError(f"daily OHLCV data for {code} missing required columns (source={source})")
+
+    ohlcv = (
+        df.set_index(pd.to_datetime(df["date"]))
+        .sort_index()
+        .loc[lambda frame: ~frame.index.duplicated(keep="last")]
+    )
+    for col in ("open", "high", "low", "close", "volume"):
+        if col in ohlcv.columns:
+            ohlcv[col] = ohlcv[col].astype(float)
+    return ohlcv, source
+
+
+@icontract.require(
+    lambda manager: manager is not None,
+    "manager must be a DataFetcherManager instance",
+)
 def fetch_for_compass(
     manager: DataFetcherManager,
     code: str,
     *,
-    days: int = 600,
+    days: int = 1200,
     end_date: Optional[str] = None,
 ) -> Tuple[pd.Series, pd.Series, str]:
     """Convenience: fetch daily + derive weekly in one call."""

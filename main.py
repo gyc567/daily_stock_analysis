@@ -695,6 +695,8 @@ def run_full_analysis(
             save_context_snapshot=save_context_snapshot,
             daily_market_context_enabled=should_use_daily_market_context,
             daily_market_context_allow_generate=should_use_daily_market_context,
+            # §13.7：罗盘快照仅 cron/批量（run_full_analysis）路径落盘
+            compass_snapshot_write=True,
         )
         if should_use_daily_market_context:
             # Prompt-side context can reuse historical summaries, while full-merge
