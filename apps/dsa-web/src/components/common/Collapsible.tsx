@@ -7,6 +7,9 @@ interface CollapsibleProps {
   defaultOpen?: boolean;
   icon?: React.ReactNode;
   className?: string;
+  /** Expanded height ceiling in px (inline style; Tailwind cannot see dynamic
+   * class names). Raise it for content taller than the 2000px default. */
+  maxHeightPx?: number;
 }
 
 /**
@@ -18,6 +21,7 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
   defaultOpen = false,
   icon,
   className = '',
+  maxHeightPx = 2000,
 }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
@@ -49,7 +53,8 @@ export const Collapsible: React.FC<CollapsibleProps> = ({
       </button>
 
       <div
-        className={cn('overflow-hidden transition-all duration-300 ease-in-out', isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0')}
+        className={cn('overflow-hidden transition-all duration-300 ease-in-out', isOpen ? 'opacity-100' : 'opacity-0')}
+        style={{ maxHeight: isOpen ? maxHeightPx : 0 }}
       >
         <div className="border-t border-subtle px-4 pb-4 pt-2">
           {children}

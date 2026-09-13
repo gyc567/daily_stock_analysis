@@ -481,18 +481,34 @@ export default function TrendCompassPage() {
         </div>
       </Card>
 
-      <div className="mt-4">
-        <h2 className="text-base font-semibold text-foreground">
-          {lang === 'en' ? 'How the compass works' : '罗盘原理说明'}
-        </h2>
-        <p className="mt-1 text-xs text-secondary-text">
+      <Collapsible
+        title={lang === 'en' ? 'How the compass works (principles)' : '罗盘原理说明'}
+        maxHeightPx={8000}
+        className="mt-4"
+      >
+        <p className="text-xs text-secondary-text">
           {lang === 'en'
             ? 'Methodology in plain language: what each layer does, how the rewrite chain works, and what timing signals really mean.'
             : '白话版方法论：每层在干什么、改写链怎么工作、择时信号到底意味着什么。'}
         </p>
-        {PRINCIPLE_SECTIONS.map((section) => (
-          <Collapsible key={section.id} title={section.title[lang]} className="mt-2">
-            <div className="space-y-3 text-sm">
+        {/* 框内迷你目录：单框长文的站内导航（锚点跳转） */}
+        <nav className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          {PRINCIPLE_SECTIONS.map((section) => (
+            <a
+              key={section.id}
+              href={`#principle-${section.id}`}
+              className="text-[hsl(var(--primary))] hover:underline"
+            >
+              {section.title[lang]}
+            </a>
+          ))}
+        </nav>
+        {PRINCIPLE_SECTIONS.map((section, sIdx) => (
+          <div key={section.id} className={sIdx > 0 ? 'mt-4 border-t border-border/40 pt-3' : 'mt-3'}>
+            <h3 id={`principle-${section.id}`} className="scroll-mt-4 text-sm font-semibold text-foreground">
+              {section.title[lang]}
+            </h3>
+            <div className="mt-2 space-y-2 text-sm">
               {section.blocks.map((block, idx) => (
                 <div key={idx}>
                   {block.heading ? (
@@ -510,39 +526,37 @@ export default function TrendCompassPage() {
                   ) : null}
                 </div>
               ))}
-              {section.id === 'rewrite' ? (
-                <Collapsible
-                  title={lang === 'en' ? 'Full hard-constraint table (14 rules)' : '全部 14 条硬约束速查表'}
-                  className="mt-1"
-                >
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-border text-left text-secondary-text">
-                          <th className="py-1 pr-2 font-medium">#</th>
-                          <th className="py-1 pr-2 font-medium">{lang === 'en' ? 'When' : '触发条件'}</th>
-                          <th className="py-1 pr-2 font-medium">{lang === 'en' ? 'Action' : '动作'}</th>
-                          <th className="py-1 font-medium">{lang === 'en' ? 'Why' : '说明'}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {CONSTRAINT_TABLE.map((row) => (
-                          <tr key={row.no} className="border-b border-border/40 align-top">
-                            <td className="py-1.5 pr-2 text-secondary-text">{row.no}</td>
-                            <td className="py-1.5 pr-2 text-foreground">{row.condition[lang]}</td>
-                            <td className="py-1.5 pr-2 text-foreground">{row.action[lang]}</td>
-                            <td className="py-1.5 text-secondary-text">{row.note[lang]}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Collapsible>
-              ) : null}
             </div>
-          </Collapsible>
+            {section.id === 'rewrite' ? (
+              <div className="mt-3 overflow-x-auto">
+                <p className="mb-1 text-xs font-medium text-foreground">
+                  {lang === 'en' ? 'Full hard-constraint table (14 rules)' : '全部 14 条硬约束速查表'}
+                </p>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border text-left text-secondary-text">
+                      <th className="py-1 pr-2 font-medium">#</th>
+                      <th className="py-1 pr-2 font-medium">{lang === 'en' ? 'When' : '触发条件'}</th>
+                      <th className="py-1 pr-2 font-medium">{lang === 'en' ? 'Action' : '动作'}</th>
+                      <th className="py-1 font-medium">{lang === 'en' ? 'Why' : '说明'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {CONSTRAINT_TABLE.map((row) => (
+                      <tr key={row.no} className="border-b border-border/40 align-top">
+                        <td className="py-1.5 pr-2 text-secondary-text">{row.no}</td>
+                        <td className="py-1.5 pr-2 text-foreground">{row.condition[lang]}</td>
+                        <td className="py-1.5 pr-2 text-foreground">{row.action[lang]}</td>
+                        <td className="py-1.5 text-secondary-text">{row.note[lang]}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
         ))}
-      </div>
+      </Collapsible>
 
       {loading ? <Loading className="mt-8" /> : null}
 
