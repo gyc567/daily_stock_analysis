@@ -335,8 +335,8 @@ def _call_v3_tools_directly(
     tool_registry: Any,
     ticker: str,
     company: str,
-    tool_calls_log: list[dict],
-) -> dict[str, Any]:
+    tool_calls_log: list[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
     """[v3 post-processing] 直接调用 v3 工具，确保结构化数据被收集。
 
     在 ReAct 循环结束后，如果 LLM 没有调用 v3 工具（LLM 直接生成了报告内容

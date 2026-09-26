@@ -325,7 +325,7 @@ class BaostockFetcher(BaseFetcher):
         # 只保留需要的列
         keep_cols = ["code"] + STANDARD_COLUMNS
         existing_cols = [col for col in keep_cols if col in df.columns]
-        df = df[existing_cols]
+        df = df.loc[:, existing_cols]  # type: ignore[assignment]
 
         return df
 
@@ -380,8 +380,9 @@ class BaostockFetcher(BaseFetcher):
 
         return None
 
+    @staticmethod
     def _map_financial_columns(df: pd.DataFrame) -> pd.DataFrame:
-        """将 Baostock 原始列名映射到项目标准字段名"""
+        """将 Baostock 原始列名映射到项目标准字段名（无 self 状态依赖）"""
         mapping = {
             # 盈利能力 (profit)
             "gpMargin":      "gross_margin_pct",
@@ -569,10 +570,10 @@ class BaostockFetcher(BaseFetcher):
                         if not hasattr(self, "_stock_name_cache"):
                             self._stock_name_cache = {}
                         for _, row in df.iterrows():
-                            self._stock_name_cache[row["code"]] = row["name"]
+                            self._stock_name_cache[str(row["code"])] = str(row["name"])
 
                         logger.info(f"Baostock 获取股票列表成功: {len(df)} 条")
-                        return df[["code", "name"]]
+                        return df.loc[:, ["code", "name"]]  # type: ignore[return-value]
 
         except Exception as e:
             logger.warning(f"Baostock 获取股票列表失败: {e}")
