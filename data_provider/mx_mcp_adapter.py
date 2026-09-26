@@ -254,11 +254,21 @@ def _parse_mx_mcp_response(
 
     输入：``content[0].text``（JSON 字符串，含 ``endpoint / request / response / success_hint / error_hint``）。
     解析失败/无匹配值 → None。
+
+    解析路径走完仍空（响应不是任何已知 shape：MCP data/list/JSON/Markdown），
+    会打一条 WARN，便于运维在生产发现 shape 漂移或 server 异常。
     """
     if not raw_text:
         return None
     pairs = _extract_key_value_pairs(json.loads(raw_text) if raw_text.strip().startswith(("{", "[")) else raw_text)
     if not pairs:
+        # 高信噪比预警：响应不是 MCP / JSON / Markdown 任何已知 shape。
+        # 这是上游协议变更或 server 异常的强信号，而不是单字段缺失。
+        logger.warning(
+            "[mx_mcp] parse: response was not in any known shape (MCP/JSON/Markdown); "
+            "first 80 chars: %s",
+            (raw_text[:80] + "...") if len(raw_text) > 80 else raw_text,
+        )
         return None
     value, _col = _pick_value(pairs, keywords)
     if value is None:
@@ -277,16 +287,18 @@ def _parse_mx_mcp_response(
 
 
 class MxMcpFetcher:
-    """Choice MCP（妙想 MCP）async 客户端（单例）。
+    """Choice MCP（妙想 MCP）async 客户端。
 
     Per-call ``asyncio.run()`` 同步包装 ``_async_fetch``（仿 iFinD Phase 1
     范式：避开 daemon-thread 共享 session 的 receive-loop 问题；实测 1-2s
     握手 + 并发 4 锚点 4-6s 总耗时）。
 
     fail-open 行为：无 endpoint/api_key / 协程异常 / 超时 → 返回 None。
-    """
 
-    _instance: Optional["MxMcpFetcher"] = None
+    构造由 :func:`src.agent.tools.cross_validation_helpers._build_sources`
+    在每次 reset / 配置变更时新生成实例；不维护进程级单例（避免 key 跨
+    实例泄漏 + 测试实例串扰）。
+    """
 
     def __init__(
         self,
@@ -308,13 +320,6 @@ class MxMcpFetcher:
     @property
     def available(self) -> bool:
         return bool(self._endpoint and self._api_key)
-
-    @classmethod
-    def get_instance(cls) -> "MxMcpFetcher":
-        """进程级单例。"""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
 
     def fetch(
         self, code: str, field: str, period: Optional[str] = None
@@ -389,7 +394,8 @@ class MxMcpSource:
     """Choice MCP 数据源适配器（实现 :class:`SourceAdapter`）。
 
     依赖注入 fetcher：测试注入同步假 fetcher 覆盖全部映射逻辑；
-    真实 :class:`MxMcpFetcher` 通过 ``MxMcpFetcher.get_instance()`` 注入。
+    真实 :class:`MxMcpFetcher` 由 :mod:`src.agent.tools.cross_validation_helpers`
+    直接 ``MxMcpFetcher(endpoint=, api_key=, ...)`` 构造并注入。
     """
 
     name = "mx_mcp"

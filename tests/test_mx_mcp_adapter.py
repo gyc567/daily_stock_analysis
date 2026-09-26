@@ -4,10 +4,10 @@
 覆盖：
 - ``_pick_value``：关键词模糊匹配取值。
 - ``_parse_markdown_first_row``：Markdown 表首行数据抽取。
-- ``_extract_key_value_pairs``：JSON 嵌套 dict / list / 字符串 三种形态。
-- ``_parse_mx_mcp_response``：合法 JSON / Markdown 退化 / 无匹配值。
+- ``_extract_key_value_pairs``：JSON 嵌套 dict / list / 字符串 / 真实 MCP shape 四种形态。
+- ``_parse_mx_mcp_response``：合法 JSON / Markdown 退化 / 无匹配值 / 未知 shape WARN。
 - ``MxMcpSource``（SourceAdapter 实现，依赖注入 fetcher，fail-open 矩阵）。
-- ``MxMcpFetcher``（available False → fetch None、单例、凭据脱敏）。
+- ``MxMcpFetcher``（available False → fetch None、凭据脱敏）。
 - 凭据安全测试：logger 不打印 API key 任何片段。
 """
 
@@ -16,14 +16,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
 import unittest
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from data_provider.cross_source_validator import AnchorReading  # noqa: E402
-from data_provider.mx_mcp_adapter import (  # noqa: E402
+from data_provider.cross_source_validator import AnchorReading
+from data_provider.mx_mcp_adapter import (
     MxMcpFetcher,
     MxMcpSource,
     _extract_key_value_pairs,
@@ -324,6 +321,34 @@ class TestParseMxMcpResponse(unittest.TestCase):
         self.assertEqual(reading.value, 8.623e10)  # 862.3 亿元
         self.assertEqual(reading.period, "2024年报")
 
+    def test_unknown_shape_logs_warning(self):
+        """响应不是 MCP/JSON/Markdown 任何已知 shape → WARN 一次，让运维发现 shape 漂移。"""
+        captured: List[str] = []
+
+        class _CaptureHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                captured.append(self.format(record))
+
+        handler = _CaptureHandler(level=logging.WARNING)
+        handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+        logger_obj = logging.getLogger("data_provider.mx_mcp_adapter")
+        logger_obj.addHandler(handler)
+        logger_obj.setLevel(logging.WARNING)
+        try:
+            reading = _parse_mx_mcp_response(
+                "totally opaque response with no extractable shape",
+                keywords=["最新价"],
+                field="current_price",
+                period=None,
+            )
+            self.assertIsNone(reading)
+            warnings = [m for m in captured if "parse" in m and "shape" in m]
+            self.assertGreaterEqual(
+                len(warnings), 1, f"expected a WARN about unknown shape, got: {captured}"
+            )
+        finally:
+            logger_obj.removeHandler(handler)
+
 
 # ------------------------------------------------------------------
 # MxMcpSource 单测（注入 _FakeFetcher）
@@ -385,23 +410,21 @@ class TestMxMcpSource(unittest.TestCase):
 
 
 # ------------------------------------------------------------------
-# MxMcpFetcher 单测（覆盖 available / 单例 / 凭据脱敏）
+# MxMcpFetcher 单测（覆盖 available / 凭据脱敏）
 # ------------------------------------------------------------------
 
 
 class TestMxMcpFetcherAvailable(unittest.TestCase):
-    """available / 单例 / 凭据不在日志中出现。"""
+    """available / 凭据不在日志中出现。"""
 
     SECRET_KEY = "this_is_a_super_secret_key_DO_NOT_LEAK"
 
     def setUp(self) -> None:
-        # 清空单例 + 清空环境变量，保证测试隔离
-        MxMcpFetcher._instance = None
+        # 清空环境变量，保证测试隔离
         for k in ("MX_MCP_API_KEY", "MX_MCP_ENDPOINT", "MX_MCP_TIMEOUT_SECONDS"):
             os.environ.pop(k, None)
 
     def tearDown(self) -> None:
-        MxMcpFetcher._instance = None
         for k in ("MX_MCP_API_KEY", "MX_MCP_ENDPOINT", "MX_MCP_TIMEOUT_SECONDS"):
             os.environ.pop(k, None)
 
@@ -422,11 +445,6 @@ class TestMxMcpFetcherAvailable(unittest.TestCase):
     def test_fetch_when_unavailable_returns_none(self):
         fetcher = MxMcpFetcher(endpoint="", api_key="")
         self.assertIsNone(fetcher.fetch("600519", "current_price"))
-
-    def test_singleton(self):
-        a = MxMcpFetcher.get_instance()
-        b = MxMcpFetcher.get_instance()
-        self.assertIs(a, b)
 
     def test_logger_does_not_emit_api_key(self):
         """凭据安全：logger 不打印 API key 任何片段。"""
