@@ -12,8 +12,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.config import get_config
+from src.services.task_queue import try_submit_long_task
 
 logger = logging.getLogger(__name__)
+
+_BUSY_MESSAGE = "长任务线程池已满，请稍后重试"
 
 router = APIRouter()
 SESSION_PREFIX = "chanlun"
@@ -94,7 +97,15 @@ async def chanlun_chat_stream(request: ChanlunChatRequest):
             )
 
     async def event_generator():
-        fut = loop.run_in_executor(None, run_sync)
+        fut_sync = try_submit_long_task(run_sync)
+        if fut_sync is None:
+            yield (
+                "data: "
+                + json.dumps({"type": "error", "message": _BUSY_MESSAGE})
+                + "\n\n"
+            )
+            return
+        fut = asyncio.wrap_future(fut_sync)
         try:
             while True:
                 try:

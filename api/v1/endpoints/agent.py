@@ -15,6 +15,9 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from src.config import get_config
 from src.services.agent_model_service import list_agent_model_deployments
+from src.services.task_queue import try_submit_long_task
+
+_LONG_TASK_BUSY_MESSAGE = "长任务线程池已满，请稍后重试"
 
 # Tool name -> Chinese display name mapping
 TOOL_DISPLAY_NAMES: Dict[str, str] = {
@@ -176,14 +179,16 @@ async def agent_chat(request: ChatRequest):
         if skills is not None:
             ctx["skills"] = skills
 
-        # Offload the blocking call to a thread to avoid blocking the event loop.
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: executor.chat(
+        # Offload the blocking call to the bounded long-task pool.
+        def run_sync():
+            return executor.chat(
                 message=request.message, session_id=session_id, context=ctx
-            ),
-        )
+            )
+
+        fut_sync = try_submit_long_task(run_sync)
+        if fut_sync is None:
+            raise HTTPException(status_code=429, detail=_LONG_TASK_BUSY_MESSAGE)
+        result = await asyncio.wrap_future(fut_sync)
 
         return ChatResponse(
             success=result.success,
@@ -192,6 +197,8 @@ async def agent_chat(request: ChatRequest):
             error=result.error,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Agent chat API failed: {e}")
         logger.exception("Agent chat error details:")
@@ -266,15 +273,17 @@ class SendChatRequest(BaseModel):
 async def send_chat_to_notification(request: SendChatRequest):
     """
     Send chat session content to configured notification channels.
-    Uses run_in_executor to avoid blocking the event loop.
+    Uses the bounded long-task pool to avoid blocking the event loop.
     """
     from src.notification import NotificationService
 
-    loop = asyncio.get_running_loop()
-    success = await loop.run_in_executor(
-        None,
-        lambda: NotificationService().send(request.content),
-    )
+    def run_sync():
+        return NotificationService().send(request.content)
+
+    fut_sync = try_submit_long_task(run_sync)
+    if fut_sync is None:
+        raise HTTPException(status_code=429, detail=_LONG_TASK_BUSY_MESSAGE)
+    success = await asyncio.wrap_future(fut_sync)
     if not success:
         return {
             "success": False,
@@ -453,8 +462,19 @@ async def agent_chat_stream(request: ChatRequest):
             )
 
     async def event_generator():
-        # Start executor in a thread so we don't block the event loop
-        fut = loop.run_in_executor(None, run_sync)
+        # Start executor in the bounded long-task pool so we don't block the event loop
+        fut_sync = try_submit_long_task(run_sync)
+        if fut_sync is None:
+            yield (
+                "data: "
+                + json.dumps(
+                    {"type": "error", "message": _LONG_TASK_BUSY_MESSAGE},
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
+            return
+        fut = asyncio.wrap_future(fut_sync)
         try:
             while True:
                 try:

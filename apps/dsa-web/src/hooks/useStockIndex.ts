@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from 'react';
 import type { StockIndexItem } from '../types/stockIndex';
-import { loadStockIndex } from '../utils/stockIndexLoader';
+import { preloadStockIndex } from '../utils/stockIndexLoader';
 import type { IndexLoadResult } from '../utils/stockIndexLoader';
 
 export interface UseStockIndexResult {
@@ -40,7 +40,7 @@ export function useStockIndex(): UseStockIndexResult {
       setLoading(true);
       setError(null);
 
-      const result: IndexLoadResult = await loadStockIndex();
+      const result: IndexLoadResult = await preloadStockIndex();
 
       if (mounted) {
         setIndex(result.data);

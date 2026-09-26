@@ -25,6 +25,10 @@ def integrate_research_framework(
     它从分析结果和上下文中提取数据，调用 ResearchScoringService，
     并将结果注入到 AnalysisResult 的五段式长线投研字段。
 
+    Serenity 深度报告采用缓存复用模式：
+    - 先查 supply_chain_reports 缓存（30天内的 success 报告），命中则在
+      产业链实数据上叠加 report_url 等报告字段，不重新生成
+
     Args:
         result: 主分析产生的 AnalysisResult
         context: 分析上下文（包含技术指标、基本面数据等）
@@ -93,11 +97,69 @@ def _build_supply_chain_from_analysis(
 ) -> Dict[str, Any]:
     """从分析结果构建产业链解读数据
 
+    Serenity 深度报告采用缓存复用模式：
+    - 先查 supply_chain_reports 缓存（30天内的 success 报告），命中则在
+      产业链实数据上叠加 report_url 等报告字段，不重新生成
+
     使用 SupplyChainDataService 获取数据：
     - 知识库: 常见股票的供应链信息
     - LLM推断: 从基本面分析文本中提取
-    - Serenity: 瓶颈评分卡 (可选，需 enable_serenity=True)
     """
+    # ---- Serenity 缓存检查（方案 C）----
+    cached_report = _get_cached_serenity_report(result.code)
+    if cached_report is not None:
+        logger.info(
+            "[ResearchFramework] Serenity 缓存命中: stock_code=%s report_id=%s created_at=%s",
+            result.code,
+            cached_report.get("id"),
+            cached_report.get("created_at"),
+        )
+        supply_chain_data = _build_supply_chain_base(result, context, raw_data)
+        sources = list(supply_chain_data.get("data_sources") or [])
+        if "serenity" not in sources:
+            sources.append("serenity")
+        supply_chain_data["data_sources"] = sources
+        supply_chain_data["report_status"] = "ready"
+        supply_chain_data["report_url"] = cached_report.get("md_path") or ""
+        supply_chain_data["report_id"] = cached_report.get("id")
+        supply_chain_data["report_generated_at"] = cached_report.get("created_at") or ""
+        return supply_chain_data
+
+    supply_chain_data = _build_supply_chain_base(result, context, raw_data)
+
+    if result.fundamental_analysis and len(result.fundamental_analysis) > 50:
+        has_placeholders = _has_supply_chain_placeholders(supply_chain_data)
+        if has_placeholders:
+            llm_enriched = _enrich_supply_chain_with_llm(
+                result.code, result.name, result.fundamental_analysis, supply_chain_data
+            )
+            if llm_enriched:
+                supply_chain_data = llm_enriched
+
+    return supply_chain_data
+
+
+def _get_cached_serenity_report(stock_code: str) -> Optional[Dict[str, Any]]:
+    """查询 supply_chain_reports 缓存（30天内的 success 报告），命中返回报告字典，否则 None。"""
+    try:
+        from src.services.supply_chain_report_service import supply_chain_report_service
+
+        return supply_chain_report_service.get_latest_by_stock_code(stock_code)
+    except Exception as e:
+        logger.debug(
+            "[ResearchFramework] Serenity 缓存查询失败: stock_code=%s error=%s",
+            stock_code,
+            e,
+        )
+        return None
+
+
+def _build_supply_chain_base(
+    result: AnalysisResult,
+    context: Dict[str, Any],
+    raw_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """原有 _build_supply_chain_from_analysis 的核心逻辑（不含 Serenity 缓存检查）。"""
     try:
         from src.services.supply_chain_data_service import SupplyChainDataService
 
@@ -146,7 +208,7 @@ def _build_supply_chain_from_analysis(
     except Exception as e:
         logger.warning(f"[ResearchFramework] Supply chain fetch failed: {e}")
 
-    supply_chain_data = {
+    return {
         "company_position": _extract_company_position(result),
         "upstream": _extract_upstream_from_analysis(result),
         "downstream": _extract_downstream_from_analysis(result),
@@ -155,15 +217,6 @@ def _build_supply_chain_from_analysis(
         "industry_drivers": _extract_industry_drivers(result, context),
         "chain_map": _build_chain_map_from_context(context),
     }
-
-    if result.fundamental_analysis and len(result.fundamental_analysis) > 50:
-        has_placeholders = _has_supply_chain_placeholders(supply_chain_data)
-        if has_placeholders:
-            llm_enriched = _enrich_supply_chain_with_llm(
-                result.code, result.name, result.fundamental_analysis, supply_chain_data
-            )
-            if llm_enriched:
-                supply_chain_data = llm_enriched
 
     return supply_chain_data
 

@@ -224,7 +224,7 @@ def _resolve_vision_model() -> str:
         elif cfg.anthropic_api_keys:
             model = f"anthropic/{cfg.anthropic_model or 'claude-sonnet-4-6'}"
         elif cfg.openai_api_keys:
-            model = f"openai/{cfg.openai_model or 'gpt-5.5'}"
+            model = f"openai/{cfg.openai_model or 'MiniMax-M3'}"
         else:
             return ""
     return model

@@ -44,6 +44,7 @@ from src.services.report_filename import (
 
 # 复用旧 supply_chain 端点的工具中文显示名（供应链共享问股工具集 + 专属打分工具）
 from api.v1.endpoints.supply_chain import SUPPLY_CHAIN_TOOL_DISPLAY_NAMES
+from src.services.task_queue import try_submit_long_task
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +189,18 @@ async def generate_stream(request: SupplyChainGenerateRequest) -> StreamingRespo
     async def event_generator():
         import time
 
-        fut = loop.run_in_executor(None, run_sync)
+        fut_sync = try_submit_long_task(run_sync)
+        if fut_sync is None:
+            yield (
+                "data: "
+                + json.dumps(
+                    {"type": "error", "message": "长任务线程池已满，请稍后重试"},
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
+            return
+        fut = asyncio.wrap_future(fut_sync)
         last_event_time = time.time()
         try:
             while True:

@@ -327,12 +327,12 @@ sudo systemctl start dsa-scheduler
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/v1/schedule/status` | 返回最近执行记录、下次执行时间、任务健康状态 |
-| POST | `/api/v1/schedule/trigger` | 手动触发一次指定任务（watchlist/market_review） |
+| POST | `/api/v1/schedule/trigger` | 手动触发一次指定任务（watchlist/market_review），202 异步执行 |
 | GET | `/api/v1/schedule/logs` | 返回最近调度日志（分页） |
 
 接口约束：
 - 复用现有 API 认证依赖；`ADMIN_AUTH_ENABLED=true` 时必须要求管理员会话。
-- `POST /api/v1/schedule/trigger` 只接受 `watchlist` / `market_review`，返回现有异步任务语义或调度日志 id；重复运行时返回明确 `409 duplicate_task`。
+- `POST /api/v1/schedule/trigger` 只接受 `watchlist` / `market_review`，提交到后台任务队列后立即返回 `202 Accepted` + `task_id`（不再在 HTTP 线程内同步跑完整分析）；执行过程写入调度日志（running/success/failed），进度经 `/api/v1/schedule/status`、`/api/v1/schedule/logs` 或 SSE 观察；重复运行时返回明确 `409 duplicate_task`。
 - 手动触发默认不受交易日检查限制；如后续要支持检查，必须显式请求字段控制，避免和现有 `POST /api/v1/analysis/market-review` 人工触发语义冲突。
 - `/schedule/logs` 默认分页、限制最大 page size，并只返回脱敏摘要。
 

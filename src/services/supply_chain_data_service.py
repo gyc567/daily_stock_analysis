@@ -505,7 +505,8 @@ class SupplyChainDataService:
         if not fundamental_analysis or len(fundamental_analysis) < 30:
             return {}
 
-        # 清除代理设置
+        # 清除代理设置（保存原值，finally 恢复）
+        _saved_env: dict[str, str | None] = {}
         for key in [
             "HTTP_PROXY",
             "HTTPS_PROXY",
@@ -514,7 +515,7 @@ class SupplyChainDataService:
             "ALL_PROXY",
             "all_proxy",
         ]:
-            os.environ.pop(key, None)
+            _saved_env[key] = os.environ.pop(key, None)
 
         prompt = f"""从以下基本面分析文本中提取供应链信息：
 
@@ -574,6 +575,11 @@ class SupplyChainDataService:
         except Exception as e:
             logger.warning(f"[SupplyChainDataService] LLM fetch failed: {e}")
             return {}
+        finally:
+            # 恢复被清除的代理环境变量
+            for key, val in _saved_env.items():
+                if val is not None:
+                    os.environ[key] = val
 
     def _normalize_llm_output(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """标准化 LLM 输出"""

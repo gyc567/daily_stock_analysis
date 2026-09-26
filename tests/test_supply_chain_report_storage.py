@@ -206,3 +206,115 @@ class TestErrorBranches:
         monkeypatch.setattr(db, "_run_write_transaction", _boom)
         assert db.prune_supply_chain_reports(0) == []  # 早返，不进事务
         assert db.prune_supply_chain_reports(10) == []  # 进入事务路径再抛
+
+
+# ============================================================
+# 方案 C 回归（Serenity 异步生成 + 缓存复用审计修复）
+# ============================================================
+
+
+class TestPlanCAuditFixes:
+    def test_get_latest_by_stock_ignores_partial(self, db):
+        """partial/failed 报告不视为可复用缓存（P2：缓存查询须过滤 status）。"""
+        _save_sample(
+            db,
+            report_id="sc_202606271530_1",
+            stock_code="600519",
+            status="partial",
+            md_path="/tmp/partial.md",
+        )
+        _save_sample(
+            db,
+            report_id="sc_202606271531_1",
+            stock_code="600519",
+            status="success",
+            md_path="/tmp/ok.md",
+        )
+        rec = db.get_latest_supply_chain_report_by_stock("600519")
+        assert rec is not None
+        assert rec.id == "sc_202606271531_1"
+
+    def test_get_latest_by_stock_all_non_success_returns_none(self, db):
+        _save_sample(db, stock_code="600519", status="failed")
+        assert db.get_latest_supply_chain_report_by_stock("600519") is None
+
+    def test_trace_id_saved_and_returned(self, db):
+        assert _save_sample(db, stock_code="600519", analysis_trace_id="qid123") is True
+        rec = db.get_supply_chain_report("sc_202606271530_1")
+        assert rec is not None
+        assert rec.analysis_trace_id == "qid123"
+        assert rec.to_dict()["analysis_trace_id"] == "qid123"
+
+    def test_trace_id_column_ensure_on_legacy_db(self, tmp_path):
+        """P0：存量数据库（无 analysis_trace_id 列）初始化后应 best-effort ALTER 补列。"""
+        from sqlalchemy import create_engine
+
+        from src.storage import Base
+
+        db_url = f"sqlite:///{tmp_path / 'legacy.db'}"
+        # 先建全量 schema，再 DROP 新列及其索引，模拟"升级前"的存量库
+        engine = create_engine(db_url)
+        Base.metadata.create_all(engine)
+        with engine.begin() as connection:
+            stale_indexes = connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name='supply_chain_reports' AND sql LIKE '%analysis_trace_id%'"
+            ).fetchall()
+            for (index_name,) in stale_indexes:
+                connection.exec_driver_sql(f'DROP INDEX "{index_name}"')
+            connection.exec_driver_sql(
+                "ALTER TABLE supply_chain_reports DROP COLUMN analysis_trace_id"
+            )
+        engine.dispose()
+
+        DatabaseManager.reset_instance()
+        try:
+            inst = DatabaseManager(db_url=db_url)
+            ok = inst.save_supply_chain_report(
+                report_id="sc_202606271530_1",
+                topic="t",
+                research_hint=None,
+                md_path="/tmp/x.md",
+                status="success",
+                total_steps=1,
+                total_tokens=1,
+                provider="test",
+                model="test",
+                error=None,
+                analysis_trace_id="qid1",
+            )
+            assert ok is True
+            rec = inst.get_supply_chain_report("sc_202606271530_1")
+            assert rec is not None
+            assert rec.analysis_trace_id == "qid1"
+        finally:
+            DatabaseManager.reset_instance()
+
+    @staticmethod
+    def _add_history(db: DatabaseManager, code: str, query_id: str) -> None:
+        from src.storage import AnalysisHistory
+
+        with db.get_session() as session:
+            session.add(AnalysisHistory(code=code, query_id=query_id, name="测试"))
+            session.commit()
+
+    def test_search_analysis_history_by_query_id(self, db):
+        """P1：回填按 (query_id, code) 精确关联，而不是"该代码最新一条"。"""
+        self._add_history(db, "600519", "qid_a")
+        self._add_history(db, "600519", "qid_b")
+        recs = db.search_analysis_history("600519", query_id="qid_b")
+        assert len(recs) == 1
+        assert recs[0].query_id == "qid_b"
+        # 不带 query_id 时仍返回最新一条
+        assert db.search_analysis_history("600519")[0].query_id in {"qid_a", "qid_b"}
+
+    def test_update_supply_chain_missing_record_returns_false(self, db):
+        """P2：记录不存在时必须返回 False（不能无条件 True）。"""
+        assert db.update_analysis_history_supply_chain(999999, "{}") is False
+
+    def test_update_supply_chain_roundtrip(self, db):
+        self._add_history(db, "600519", "qid_a")
+        record = db.search_analysis_history("600519")[0]
+        payload = '{"report_status": "ready"}'
+        assert db.update_analysis_history_supply_chain(record.id, payload) is True
+        assert db.search_analysis_history("600519")[0].supply_chain == payload

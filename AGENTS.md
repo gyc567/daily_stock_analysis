@@ -135,6 +135,7 @@ python scripts/check_ai_assets.py
   - `apps/dsa-web/`：Web 前端
   - `apps/dsa-desktop/`：Electron 桌面端
   - `.github/workflows/`：CI、发布、每日任务
+  - 定时任务运维参考 `docs/scheduled-watchlist-user-guide.md`
 - 核心职责：
   - `src/core/`：主流程编排
   - `src/services/`：业务服务层
@@ -160,6 +161,29 @@ python main.py --dry-run
 python main.py --stocks 600519,hk00700,AAPL
 python main.py --market-review
 python main.py --schedule
+
+### 定时任务（自选股 & 大盘复盘）
+
+定时任务运维参考 `docs/scheduled-watchlist-user-guide.md`。
+
+```bash
+# 启动调度模式（进程内调度器）
+python main.py --schedule
+
+# 调度器状态查询（API）
+curl http://localhost:8000/api/v1/schedule/status
+
+# 手动触发自选股分析
+curl -X POST "http://localhost:8000/api/v1/schedule/trigger?task=watchlist"
+
+# 手动触发大盘复盘
+curl -X POST "http://localhost:8000/api/v1/schedule/trigger?task=market_review"
+
+# 查看调度日志
+curl "http://localhost:8000/api/v1/schedule/logs?page=1&page_size=10"
+```
+
+> 代码更新后**必须重启**调度进程（`sudo systemctl restart dsa-scheduler`）；`.env` 配置变更则由调度器热加载自动生效，无需重启。
 python main.py --serve
 python main.py --serve-only
 uvicorn server:app --reload --host 0.0.0.0 --port 8000

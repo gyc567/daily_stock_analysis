@@ -93,8 +93,12 @@ type TaskStreamSubscriber = {
 let sharedEventSource: EventSource | null = null;
 let sharedReconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 let sharedConnected = false;
+let sharedReconnectAttempts = 0;
 let nextSubscriberId = 1;
 const subscribers = new Map<number, TaskStreamSubscriber>();
+
+const MAX_AUTO_RECONNECT_ATTEMPTS = 10;
+const MAX_RECONNECT_DELAY_MS = 30_000;
 
 // Convert snake_case payloads into camelCase TaskInfo objects.
 const toTaskInfo = (data: Record<string, unknown>): TaskInfo => {
@@ -173,10 +177,20 @@ const scheduleSharedReconnect = () => {
     return;
   }
   const reconnectDelay = Math.min(...reconnectDelays);
+  sharedReconnectAttempts += 1;
+  if (sharedReconnectAttempts > MAX_AUTO_RECONNECT_ATTEMPTS) {
+    console.error('[useTaskStream] SSE auto-reconnect limit reached, giving up.');
+    forEachSubscriber((callbacks) => callbacks.onError?.(new Event('error')));
+    return;
+  }
+  const backoffDelay = Math.min(
+    reconnectDelay * 2 ** (sharedReconnectAttempts - 1),
+    MAX_RECONNECT_DELAY_MS,
+  );
   sharedReconnectTimeout = setTimeout(() => {
     sharedReconnectTimeout = null;
     connectSharedStream();
-  }, reconnectDelay);
+  }, backoffDelay);
 };
 
 function connectSharedStream() {
@@ -194,6 +208,7 @@ function connectSharedStream() {
   sharedEventSource = eventSource;
 
   eventSource.addEventListener('connected', () => {
+    sharedReconnectAttempts = 0;
     notifyConnectionState(true);
     forEachSubscriber((callbacks) => callbacks.onConnected?.());
   });
@@ -254,6 +269,7 @@ function connectSharedStream() {
 }
 
 const reconnectSharedStream = () => {
+  sharedReconnectAttempts = 0;
   closeSharedConnection();
   connectSharedStream();
 };
@@ -272,7 +288,7 @@ export function useTaskStream(options: UseTaskStreamOptions = {}): UseTaskStream
     onConnected,
     onError,
     autoReconnect = true,
-    reconnectDelay = 3000,
+    reconnectDelay = 2000,
     enabled = true,
   } = options;
 

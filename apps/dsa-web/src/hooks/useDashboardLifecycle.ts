@@ -50,6 +50,9 @@ export function useDashboardLifecycle({
     }
 
     const intervalId = window.setInterval(() => {
+      if (document.hidden) {
+        return;
+      }
       void refreshHistory(true);
       void refreshStockBar();
       void refreshMarketReviewHistory?.(true);

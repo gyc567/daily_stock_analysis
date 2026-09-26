@@ -4,6 +4,8 @@
 > P1 状态：✅ PR #41 已合入 main（commit `0de1246`），含 schema / engine / i18n / fetcher / render / CLI / 50 测试
 > P2 入口：本文档
 > 依赖：plan v2 §13 待确认项（8 条）需要 maintainer 显式确认或调整后才能动 rewriter
+> §13 状态（2026-09-11）：第 1-7 条已由 maintainer 冻结（1=分级 / 2=采纳 / 3=部分复用 / 4=默认关 / 5=命名定稿 / 6=仅 zh/en / 7=仅 cron 写），PR-B2 / PR-B4 / PR-B5 前置已解除；第 8 条（backtest 时间点）待定，不阻塞 P2
+> P2 实施状态（2026-09-11）：PR-B1 ✅ / PR-B2 ✅ / PR-B4 ✅ / PR-B5 ✅ 已落地（本地待 push）；PR-B3 未做，维持 P1 的 W-FRI resample 周线兜底（计划允许降级）；大盘复盘「观察三档」部分复用（§13.3）归 P3
 
 ---
 

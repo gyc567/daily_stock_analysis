@@ -1091,7 +1091,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "examples": [
             "OPENAI_API_KEY=sk-xxxx",
             "OPENAI_BASE_URL=https://api.example.com/v1",
-            "LITELLM_MODEL=openai/gpt-5.5",
+            "LITELLM_MODEL=openai/MiniMax-M3",
         ],
         "docs": [
             {
@@ -1158,7 +1158,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "is_sensitive": False,
         "is_required": False,
         "is_editable": True,
-        "default_value": "gpt-5.5",
+        "default_value": "MiniMax-M3",
         "options": [],
         "validation": {},
         "display_order": 60,
@@ -3138,6 +3138,58 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         ],
         "warning_codes": [],
     },
+    "COMPASS_TIMING_ENABLED": {
+        "title": "Compass L4 Timing Signals Enabled",
+        "description": "Enable daily-level L4 timing signals (pullback entry / bottom fishing / top escape) on the midterm trend compass page. Signals are condition-triggered trade plans (trigger + invalidation price), gated by trend structure. See docs/midterm-trend-compass-plan.md §13.8.",
+        "category": "system",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "false",
+        "options": [],
+        "validation": {},
+        "display_order": 49,
+        "help_key": "settings.system.market_review",
+        "examples": [
+            "COMPASS_TIMING_ENABLED=true",
+            "COMPASS_TIMING_ENABLED=false",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：环境变量完整列表",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#环境变量完整列表",
+            },
+        ],
+        "warning_codes": [],
+    },
+    "COMPASS_ENABLED": {
+        "title": "Midterm Trend Compass Enabled",
+        "description": "Enable the midterm trend compass rewriter in the stock-analysis guardrail chain (weekly/daily trend filter that can rewrite buy/watch/sell). See docs/midterm-trend-compass-plan.md.",
+        "category": "system",
+        "data_type": "boolean",
+        "ui_control": "switch",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "false",
+        "options": [],
+        "validation": {},
+        "display_order": 48,
+        "help_key": "settings.system.market_review",
+        "examples": [
+            "COMPASS_ENABLED=true",
+            "COMPASS_ENABLED=false",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：环境变量完整列表",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#环境变量完整列表",
+            },
+        ],
+        "warning_codes": [],
+    },
     "DAILY_MARKET_CONTEXT_ENABLED": {
         "title": "Daily Market Context Enabled",
         "description": "Inject daily market context into stock-analysis prompts and apply conservative decision guardrails.",
@@ -4227,8 +4279,8 @@ _FIELD_HELP_METADATA: Dict[str, Dict[str, Any]] = {
     "OPENAI_MODEL": {
         "help_key": "settings.ai_model.legacy_provider_params",
         "examples": [
-            "OPENAI_MODEL=gpt-5.5",
-            "LITELLM_MODEL=openai/gpt-5.5",
+            "OPENAI_MODEL=MiniMax-M3",
+            "LITELLM_MODEL=openai/MiniMax-M3",
         ],
         "docs": _DOC_LLM_CONFIG,
         "warning_codes": ["legacy_provider_setting"],
@@ -4236,8 +4288,8 @@ _FIELD_HELP_METADATA: Dict[str, Dict[str, Any]] = {
     "OPENAI_VISION_MODEL": {
         "help_key": "settings.ai_model.legacy_provider_params",
         "examples": [
-            "OPENAI_VISION_MODEL=gpt-5.5",
-            "VISION_MODEL=openai/gpt-5.5",
+            "OPENAI_VISION_MODEL=MiniMax-M3",
+            "VISION_MODEL=openai/MiniMax-M3",
         ],
         "docs": _DOC_LLM_CONFIG,
         "warning_codes": ["legacy_provider_setting"],

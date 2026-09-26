@@ -2083,6 +2083,7 @@ class AnalysisResult:
     market_phase_summary: Optional[Dict[str, Any]] = None  # 大盘/市场阶段摘要
     analysis_context_pack_overview: Optional[Dict[str, Any]] = None  # 上下文包概览
     diagnostic_context_snapshot: Optional[Dict[str, Any]] = None  # 诊断上下文快照
+    midtrend_compass: Optional[Dict[str, Any]] = None  # 中期趋势罗盘评估结果（P2；仅 cron 落盘 context_snapshot）
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

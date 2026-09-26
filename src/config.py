@@ -750,6 +750,14 @@ class Config:
     deep_research_cross_validate: bool = False  # 深度投研锚点双源验证开关
     mx_call_budget: int = 50  # 单次报告 MX 调用上限（控配额）
 
+    # === 东财 Choice MCP（妙想 MCP；opt-in，默认关；https://mxapi.eastmoney.com/mxds/mcp）===
+    # 作为 fundamental 数据第三 cross-validation 源（与 MX + iFinD 并列）；
+    # 默认关 → 零回归；启用需同时配 MX_MCP_API_KEY。
+    enable_mx_mcp: bool = False  # ENABLE_MX_MCP（总开关，默认关）
+    mx_mcp_endpoint: Optional[str] = None  # MX_MCP_ENDPOINT（默认官方 streamable-http）
+    mx_mcp_api_key: Optional[str] = None  # MX_MCP_API_KEY（运行时注入，禁止入库）
+    mx_mcp_timeout_seconds: float = 30.0  # MX_MCP_TIMEOUT_SECONDS
+
     # === AlphaSift optional stock screening integration ===
     alphasift_enabled: bool = False
     alphasift_install_spec: str = DEFAULT_ALPHASIFT_INSTALL_SPEC
@@ -809,7 +817,7 @@ class Config:
     # OpenAI 兼容 API（备选，当 Gemini/Anthropic 不可用时使用）
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None  # 如: https://api.openai.com/v1
-    openai_model: str = "gpt-5.5"  # OpenAI 兼容模型名称
+    openai_model: str = "MiniMax-M3"  # OpenAI 兼容模型名称
     openai_vision_model: Optional[str] = None  # Deprecated: use VISION_MODEL instead
     openai_temperature: float = 0.7  # OpenAI 温度参数（0.0-2.0，默认0.7）
 
@@ -1058,6 +1066,12 @@ class Config:
 
     # 是否保存分析上下文快照（用于历史回溯）
     save_context_snapshot: bool = True
+
+    # === 中期趋势罗盘配置 ===
+    # 趋势罗盘改写器总开关（§13.4：默认关，开启后挂入个股分析 guardrail 链）
+    compass_enabled: bool = False
+    # L4 日线择时信号总开关（§13.8：默认关，开启后罗盘页展示入场/抄底/逃顶信号）
+    compass_timing_enabled: bool = False
 
     # === 回测配置 ===
     backtest_enabled: bool = True
@@ -1439,7 +1453,7 @@ class Config:
                 _anspire_llm_model_env or _openai_model_env or ANSPIRE_LLM_MODEL_DEFAULT
             )
         else:
-            _openai_model_name = _openai_model_env or "gpt-5.5"
+            _openai_model_name = _openai_model_env or "MiniMax-M3"
         if not litellm_model:
             _gemini_model_name = os.getenv(
                 "GEMINI_MODEL", "gemini-3.1-pro-preview"
@@ -1699,6 +1713,25 @@ class Config:
                 os.getenv("DEEP_RESEARCH_CROSS_VALIDATE"), default=False
             ),
             mx_call_budget=int(os.getenv("MX_CALL_BUDGET") or "50"),
+            enable_mx_mcp=parse_env_bool(
+                os.getenv("ENABLE_MX_MCP"), default=False
+            ),
+            # 区分 None（未设置 → 默认）与 ""（显式空串 → 透传，由 MxMcpFetcher 判定 available=False）。
+            # 与 MxMcpFetcher.__init__ 的 None/"" 契约对齐，避免「空串回落默认」的隐式耦合。
+            mx_mcp_endpoint=(
+                os.getenv("MX_MCP_ENDPOINT")
+                if os.getenv("MX_MCP_ENDPOINT") is not None
+                else "https://mxapi.eastmoney.com/mxds/mcp"
+            ),
+            mx_mcp_api_key=os.getenv("MX_MCP_API_KEY"),
+            # 用 parse_env_float 而非裸 float()：非法输入（"foo"）会 warn + fallback，不阻塞进程启动
+            mx_mcp_timeout_seconds=parse_env_float(
+                os.getenv("MX_MCP_TIMEOUT_SECONDS"),
+                default=30.0,
+                field_name="MX_MCP_TIMEOUT_SECONDS",
+                minimum=1.0,
+                maximum=300.0,
+            ),
             stock_index_remote_update_enabled=parse_env_bool(
                 os.getenv("STOCK_INDEX_REMOTE_UPDATE_ENABLED"),
                 default=True,
@@ -2075,6 +2108,9 @@ class Config:
                 minimum=0.0,
             ),
             save_context_snapshot=os.getenv("SAVE_CONTEXT_SNAPSHOT", "true").lower()
+            == "true",
+            compass_enabled=os.getenv("COMPASS_ENABLED", "false").lower() == "true",
+            compass_timing_enabled=os.getenv("COMPASS_TIMING_ENABLED", "false").lower()
             == "true",
             backtest_enabled=os.getenv("BACKTEST_ENABLED", "true").lower() == "true",
             backtest_eval_window_days=parse_env_int(

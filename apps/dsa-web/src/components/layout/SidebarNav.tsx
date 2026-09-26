@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Award, Activity, BarChart3, Bell, BookOpen, BriefcaseBusiness, FileText, Gauge, Home, LogOut, MessageSquareQuote, Network, Search, Settings2, ShieldAlert, TrendingUp } from 'lucide-react';
+import { Award, Activity, BarChart3, Bell, BookOpen, BriefcaseBusiness, Compass, FileText, Gauge, Home, LogOut, MessageSquareQuote, Network, Search, Settings2, ShieldAlert, TrendingUp } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { ALPHASIFT_CONFIG_CHANGED_EVENT, SYSTEM_CONFIG_CHANGED_EVENT, alphasiftApi } from '../../api/alphasift';
 import { useAuth } from '../../contexts/AuthContext';
@@ -29,6 +29,7 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'home', labelKey: 'layout.nav.home', to: '/', icon: Home, exact: true },
+  { key: 'trend-compass', labelKey: 'layout.nav.trendCompass', to: '/trend-compass', icon: Compass },
   { key: 'deep-research', labelKey: 'layout.nav.deepResearch', to: '/deep-research', icon: FileText },
   { key: 'policy-minesweeper', labelKey: 'layout.nav.policyMinesweeper', to: '/policy-minesweeper', icon: ShieldAlert },
   { key: 'knowledge-base', labelKey: 'layout.nav.knowledgeBase', to: '/knowledge-base', icon: BookOpen },
