@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
+from icontract import ensure, require
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +364,31 @@ def _median(values: List[float]) -> Optional[float]:
     return (vals[mid - 1] + vals[mid]) / 2
 
 
+@require(lambda sector_name: isinstance(sector_name, str),
+         "sector_name must be a string")
+@ensure(
+    lambda result: (
+        isinstance(result, dict)
+        and "sector_found" in result
+        and "gaps" in result
+    ),
+    "prosperity pillar must return dict with sector_found/gaps keys",
+)
+@ensure(
+    lambda result: (
+        result.get("rank_of") is None
+        or result.get("total_boards") is None
+        or 1 <= result["rank_of"] <= result["total_boards"]
+    ),
+    "rank_of must be in [1, total_boards] when both are set",
+)
+@ensure(
+    lambda result: all(
+        result.get(dim) is None or 0.0 <= result[dim] <= 100.0
+        for dim in ("momentum", "activity", "capital", "breadth")
+    ),
+    "prosperity dims must be None or in [0, 100]",
+)
 def _prosperity_pillar(sector_name: str) -> Dict[str, Any]:
     """东财行业板块全表 → 目标板块行 + 四维景气评分（0-100）。
 
@@ -528,12 +554,40 @@ def _num(v: Any) -> Optional[float]:
 _PROSPERITY_DIMS = ("momentum", "activity", "capital", "breadth")
 
 
+def _PROSPERITY_DIMS_OK(p: Any) -> bool:
+    """icontract 安全的 precondition 检查（避免 p 非 dict 时 p.get() 炸）。"""
+    if not isinstance(p, dict):
+        return False
+    for d in _PROSPERITY_DIMS:
+        v = p.get(d)
+        if v is not None and not isinstance(v, (int, float)):
+            return False
+    return True
+
+
+@require(lambda p: _PROSPERITY_DIMS_OK(p),
+         "p must be dict and dims must be None or numeric")
+@ensure(
+    lambda result: result is None or 0.0 <= result <= 100.0,
+    "result must be None or in [0, 100]",
+)
 def _prosperity_score(p: Dict[str, Any]) -> Optional[float]:
     vals = [p.get(d) for d in _PROSPERITY_DIMS]
     vals = [v for v in vals if isinstance(v, (int, float))]
     return round(sum(vals) / len(vals), 2) if vals else None
 
 
+@require(
+    lambda sector_score: sector_score is None or 0.0 <= sector_score <= 100.0,
+    "sector_score must be None or in [0, 100]",
+)
+@ensure(
+    lambda result: (
+        isinstance(result, tuple) and len(result) == 2
+        and all(isinstance(x, str) and x for x in result)
+    ),
+    "verdict must be (non-empty band, non-empty beta_meaning)",
+)
 def _verdict(sector_score: Optional[float]) -> Tuple[str, str]:
     """（分档标签, 对个股的 β 含义）。标尺：50 逆风 / 65 中性 / 75 顺风。"""
     if sector_score is None:
@@ -547,6 +601,27 @@ def _verdict(sector_score: Optional[float]) -> Tuple[str, str]:
     return "逆风", "板块β为负贡献，仓位打折、买点从严"
 
 
+@require(lambda code: isinstance(code, str) and len(code) == 6 and code.isdigit(),
+         "code must be a 6-digit string")
+@ensure(
+    lambda result: (
+        isinstance(result, dict)
+        and {"identification", "policy", "base_rate", "prosperity",
+             "weights", "gaps", "sector_score", "band"}.issubset(result.keys())
+    ),
+    "compose_analysis must return the documented dict contract",
+)
+@ensure(
+    lambda result: abs(sum(result["weights"].values()) - 1.0) < 1e-6,
+    "weights must sum to 1.0",
+)
+@ensure(
+    lambda result: (
+        result["sector_score"] is None
+        or 0.0 <= result["sector_score"] <= 100.0
+    ),
+    "sector_score must be None or in [0, 100]",
+)
 def compose_analysis(code: str, name: str) -> Dict[str, Any]:
     """编排：识别 → 三支柱 → 综合分。缺数据记缺口不编造。
 
