@@ -182,3 +182,71 @@ class TestRenderReport:
     def test_invalid_code_raises(self):
         with pytest.raises(ValueError):
             svc.generate_report("ABC")
+
+
+class TestAkWithRetry:
+    """_ak_with_retry：瞬时网络重试助手。"""
+
+    def test_success_first_try(self):
+        calls = []
+
+        def ok():
+            calls.append(1)
+            return "ok"
+
+        assert svc._ak_with_retry(ok) == "ok"
+        assert len(calls) == 1
+
+    def test_retries_then_succeeds(self):
+        """第一次失败，第二次成功：应调用 2 次并返回第二次的结果。"""
+        attempts = {"n": 0}
+
+        def flaky():
+            attempts["n"] += 1
+            if attempts["n"] < 2:
+                raise ConnectionError("transient")
+            return "good"
+
+        t0 = __import__("time").time()
+        result = svc._ak_with_retry(flaky, retries=1, delay=0.05)
+        elapsed = __import__("time").time() - t0
+        assert result == "good"
+        assert attempts["n"] == 2
+        assert elapsed >= 0.05  # 退避生效
+
+    def test_exhausted_retries_raises_last_exc(self):
+        attempts = {"n": 0}
+
+        def always_fail():
+            attempts["n"] += 1
+            raise ConnectionError(f"fail-{attempts['n']}")
+
+        with __import__("pytest").raises(ConnectionError) as ei:
+            svc._ak_with_retry(always_fail, retries=2, delay=0.01)
+        # 重试 3 次都失败，抛出最后一次的异常
+        assert attempts["n"] == 3
+        assert "fail-3" in str(ei.value)
+
+    def test_passes_args_and_kwargs(self):
+        captured = {}
+
+        def echo(*a, **kw):
+            captured["args"] = a
+            captured["kwargs"] = kw
+            return "ok"
+
+        svc._ak_with_retry(echo, "x", 1, retries=0, key="val")
+        assert captured["args"] == ("x", 1)
+        assert captured["kwargs"] == {"key": "val"}
+
+    def test_non_network_error_not_retried_too_much(self):
+        """ValueError 应该被原样传递，重试 1 次后仍失败则抛出。"""
+        attempts = {"n": 0}
+
+        def boom():
+            attempts["n"] += 1
+            raise ValueError("bad arg")
+
+        with __import__("pytest").raises(ValueError):
+            svc._ak_with_retry(boom, retries=1, delay=0.01)
+        assert attempts["n"] == 2  # retries=1 -> 最多 2 次调用

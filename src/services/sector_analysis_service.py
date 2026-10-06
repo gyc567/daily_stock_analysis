@@ -16,9 +16,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,27 @@ _W_PROSPERITY = 0.40
 # 政策倾向三档分（对齐 F2 sector_dim 口径）
 _POLICY_SCORE = {"supportive": 66.0, "neutral": 50.0, "restrictive": 34.0}
 _POLICY_LABEL = {"supportive": "支持", "neutral": "中性", "restrictive": "限制", None: "未知"}
+
+
+def _ak_with_retry(call: Callable[..., Any], *args: Any,
+                   retries: int = 1, delay: float = 0.5,
+                   **kwargs: Any) -> Any:
+    """akshare 接口包一层瞬时网络重试：默认 1 次重试 + 0.5s 退避。
+
+    场景：东财 push2 接口在网络波动时常抛 ``RemoteDisconnected`` /
+    ``Max retries exceeded``，多一次重试即可恢复，避免直接 fallback 丢精度。
+    非网络错误（如参数错）会原样抛出，不浪费时间。
+    """
+    last_exc: Optional[BaseException] = None
+    for i in range(retries + 1):
+        try:
+            return call(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - 保留原 except 兼容
+            last_exc = exc
+            if i < retries:
+                time.sleep(delay)
+    assert last_exc is not None  # 至少跑了一次循环
+    raise last_exc
 
 
 def get_report_dir() -> Path:
@@ -202,7 +226,7 @@ def _identify_sector(code: str) -> Dict[str, Any]:
     try:
         import akshare as ak
 
-        df = ak.stock_individual_info_em(symbol=code)
+        df = _ak_with_retry(ak.stock_individual_info_em, symbol=code)
         if df is not None and not df.empty:
             kv = dict(zip(df["item"], df["value"]))
             out["industry_em"] = str(kv.get("行业") or "").strip()
@@ -360,7 +384,7 @@ def _prosperity_pillar(sector_name: str) -> Dict[str, Any]:
     try:
         import akshare as ak
 
-        df = ak.stock_board_industry_name_em()
+        df = _ak_with_retry(ak.stock_board_industry_name_em)
         table_kind = "em"
     except Exception as exc:  # noqa: BLE001
         out["gaps"].append(f"板块景气：东财板块表查询失败 {str(exc)[:50]}，尝试新浪")
@@ -432,7 +456,7 @@ def _prosperity_pillar(sector_name: str) -> Dict[str, Any]:
     # 动量：涨跌幅全表排名分位（前 10% = 100 分）
     change_col = col_map["change"]
     if change_col in df.columns:
-        df[change_col] = __import__("pandas").to_numeric(df[change_col], errors="coerce")
+        df[change_col] = pd.to_numeric(df[change_col], errors="coerce")
         valid = df[change_col].dropna()
         target = out["row"]["change_pct"]
         if target is not None and len(valid) > 1:
