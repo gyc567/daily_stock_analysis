@@ -3650,19 +3650,6 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             )
             return list(rows), int(total)
 
-    def get_latest_supply_chain_report_by_stock(
-        self, stock_code: str,
-    ) -> Optional[SupplyChainReport]:
-        """按股票取最新供应链专项报告（产业链研究员复用：有则直取）。"""
-        with self.get_session() as session:
-            row = session.execute(
-                select(SupplyChainReport)
-                .where(SupplyChainReport.stock_code == stock_code)
-                .order_by(desc(SupplyChainReport.created_at))
-                .limit(1)
-            ).scalars().first()
-            return row
-
     def get_supply_chain_report(self, report_id: str) -> Optional[SupplyChainReport]:
         """按主键查询单条报告。"""
         with self.get_session() as session:
@@ -3674,7 +3661,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 .first()
             )
 
-    def _get_latest_successful_supply_chain_report_by_stock(
+    def get_latest_supply_chain_report_by_stock(
         self, stock_code: str
     ) -> Optional[SupplyChainReport]:
         """按股票代码查询最新的成功报告（created_at DESC）。用于 Serenity 缓存判断。
