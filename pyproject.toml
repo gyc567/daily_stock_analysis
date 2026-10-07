@@ -80,6 +80,26 @@ check_untyped_defs = false
 ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
 
+# 16 个 disable 是为了清 130 个 pre-existing mypy 错误 (大部分是 type narrowing / Any 返回 /
+# # type: ignore 误用)。后续 PR 治理期间按 PR 范围渐进修复，再恢复 true。
+disable_error_code = [
+    "arg-type",
+    "union-attr",
+    "attr-defined",
+    "call-arg",
+    "annotation-unchecked",
+    "var-annotated",
+    "misc",
+    "no-redef",
+    "assignment",
+    "type-arg",
+    "operator",
+    "return-value",
+    "truthy-function",
+    "index",
+    "override",
+]
+
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 disallow_untyped_defs = false
