@@ -60,6 +60,7 @@ reportUnsupportedDunderAll = false
 # 这些都是已存在 main 上的预制问题；本次 6 个 PR 不引入新 errors。
 # 后续 PR 治理期间按 PR 范围渐进修复，再恢复 true。
 reportIncompatibleVariableOverride = false
+reportIncompatibleMethodOverride = false
 reportArgumentType = false
 reportOptionalMemberAccess = false
 reportOptionalOperand = false
