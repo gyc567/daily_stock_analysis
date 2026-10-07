@@ -3324,9 +3324,6 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         except Exception as exc:  # noqa: BLE001
             logger.warning("[Storage] list_score_journal failed: %s", exc)
             return []
-        except Exception as exc:
-            logger.error("prune_deep_research_reports failed: %s", exc)
-            return []
 
     # ==================================================================
     # 政策与公告双维度排雷（PolicyMinesweeper）CRUD
@@ -3677,7 +3674,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 .first()
             )
 
-    def get_latest_supply_chain_report_by_stock(
+    def _get_latest_successful_supply_chain_report_by_stock(
         self, stock_code: str
     ) -> Optional[SupplyChainReport]:
         """按股票代码查询最新的成功报告（created_at DESC）。用于 Serenity 缓存判断。
